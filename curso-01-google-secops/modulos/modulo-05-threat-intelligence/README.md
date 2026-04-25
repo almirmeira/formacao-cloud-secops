@@ -27,7 +27,21 @@ Ao concluir este módulo, você será capaz de:
 ### 5.1 Tipos de Threat Intelligence
 
 A Threat Intelligence (TI) pode ser classificada em quatro tipos, cada um com um público-alvo
-e horizonte temporal diferente:
+e horizonte temporal diferente.
+
+Para contextualizar: sem Threat Intelligence, o Google SecOps é um sistema de detecção que
+analisa APENAS o que acontece dentro do ambiente do Banco Meridian. Com TI integrada, o sistema
+passa a ter conhecimento sobre o que está acontecendo FORA do banco — quais grupos APT estão
+ativos, quais campanhas estão em andamento, quais IPs são usados para C2 por grupos que atacam
+o setor financeiro brasileiro. Essa inteligência externa é o que permite ao SOC ser proativo
+em vez de apenas reativo.
+
+Um exemplo concreto do valor da TI para o Banco Meridian: se o FS-ISAC (Financial Services
+ISAC) publicar um alerta sobre uma campanha ativa de phishing contra bancos brasileiros usando
+um domínio específico como C2, o Google SecOps pode automaticamente verificar se algum host
+do banco já tentou se conectar a esse domínio — antes de qualquer analista humano saber da
+campanha. Essa é a diferença entre TI como "relatório para ler" e TI como "dado operacional
+integrado ao SIEM".
 
 ```
 PIRÂMIDE DOS TIPOS DE THREAT INTELLIGENCE
@@ -74,6 +88,19 @@ PIRÂMIDE DOS TIPOS DE THREAT INTELLIGENCE
 O **Mandiant Threat Intelligence** está integrado nativamente ao Google SecOps desde a
 aquisição da Mandiant pelo Google em 2022. Isso significa que os dados de TI da Mandiant
 estão disponíveis sem configuração adicional para tenants com a licença adequada.
+
+Essa integração nativa é um diferencial significativo em relação a outros SIEMs, onde você
+precisaria assinar um feed de TI separado, configurar uma API key, criar regras de correlação
+com os IOCs e manter essa integração funcionando. No Google SecOps, tudo isso é automático:
+quando um IOC da Mandiant corresponde a um evento ingerido, o alerta é gerado sem nenhuma
+configuração adicional do SOC.
+
+> **Por que isso importa para o Banco Meridian:** O setor financeiro brasileiro é alvo frequente
+> de grupos APT como o FIN7, APT34 e grupos regionais como o Prilex (especializado em fraudes
+> com maquininhas de cartão). A Mandiant rastreia ativamente esses grupos e mantém feeds de
+> IOCs atualizados com a infraestrutura usada em campanhas recentes. Com a integração nativa,
+> o SOC do Banco Meridian recebe automaticamente alertas quando qualquer host interno tenta
+> se comunicar com essa infraestrutura — mesmo que a campanha tenha começado horas antes.
 
 #### 5.2.1 Applied Threat Intelligence (ATI)
 
@@ -196,6 +223,19 @@ Campos retornados:
 ---
 
 ### 5.4 Feeds STIX/TAXII: Configuração e Consumo
+
+Para o Banco Meridian, os feeds externos mais relevantes são os especializados no setor
+financeiro brasileiro: o FS-ISAC (Financial Services Information Sharing and Analysis Center),
+o CERT.BR (que mantém feeds de IOCs de ataques contra infraestrutura crítica brasileira) e
+grupos de compartilhamento coordenados pela FEBRABAN. Esses feeds regionais e setoriais
+frequentemente contêm IOCs que não estão nos feeds globais, pois são específicos de campanhas
+contra o setor bancário brasileiro — phishing focado no M365, fraudes com PIX e ransomware
+direcionado a instituições financeiras.
+
+> **💡 Dica do instrutor:** Feeds de TI são mais úteis quando são ESPECÍFICOS para o seu
+> setor e região. Um feed genérico com 500.000 IOCs vai gerar muitos falsos positivos e
+> sobrecarregar o SIEM com correlações inúteis. Priorize feeds do FS-ISAC e CERT.BR antes
+> de adicionar feeds comerciais genéricos.
 
 **STIX** (Structured Threat Information eXpression) é o formato padrão para compartilhar
 informações de ameaças. **TAXII** (Trusted Automated eXchange of Intelligence Information)

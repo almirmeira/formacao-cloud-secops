@@ -27,7 +27,19 @@ Ao concluir este módulo, você será capaz de:
 ### 4.1 Metodologia de Threat Hunting
 
 Threat hunting não é esperar alertas dispararem. É uma atividade **proativa** de busca por
-ameaças que ainda não foram detectadas pelos controles automatizados. Existem três abordagens:
+ameaças que ainda não foram detectadas pelos controles automatizados. Existem três abordagens.
+
+Antes de estudar as metodologias, é importante entender quando o threat hunting é necessário.
+As regras YARA-L (Módulo 03) detectam o que você JÁ SABE que é ruim — padrões conhecidos,
+técnicas documentadas, thresholds calibrados. O threat hunting encontra o que você ainda NÃO
+SABE que está no seu ambiente.
+
+No Banco Meridian, o cenário do Lab 03 é um exemplo perfeito: o Cobalt Strike Beacon no host
+WRK-RODRIGO-011 ficou ativo por 5 dias sem disparar nenhuma regra YARA-L — porque o processo
+(`svchost.exe`) estava na watchlist de processos legítimos. Foi o UEBA que levantou o sinal
+de anomalia, e foi o threat hunting que confirmou o comprometimento. Esse ciclo — regras
+falhando → UEBA sinaliza → hunter investiga — é o modelo de maturidade de SOC que o banco
+está construindo.
 
 ```
 METODOLOGIAS DE THREAT HUNTING
@@ -131,6 +143,17 @@ CICLO COMPLETO DO THREAT HUNTING
 
 O UDM Search é a ferramenta principal de threat hunting no Google SecOps. Dominar sua
 sintaxe avançada é essencial para investigações eficazes.
+
+Enquanto o Módulo 01 apresentou o UDM Search com queries simples de busca por campo e valor,
+o threat hunting real exige uma dimensão a mais: **agregação e pivoting**. Você não vai apenas
+buscar "me mostre os eventos de login do IP X" — você vai perguntar "me mostre os 10 IPs que
+mais geraram eventos de login falhado nas últimas 24 horas" ou "me mostre todos os hosts que
+o usuário Y acessou nos últimos 7 dias". Essa capacidade de explorar dados em várias dimensões
+é o que transforma o UDM Search de um motor de busca em uma ferramenta de investigação.
+
+No cenário do Lab 03, foi exatamente essa sintaxe avançada (aggregation + group_by) que
+revelou que o host WRK-RODRIGO-011 tinha 1.847 conexões para um único IP externo — um padrão
+que nunca seria visível em uma busca simples por evento individual.
 
 #### 4.2.1 Operadores Básicos
 
@@ -333,6 +356,15 @@ Filtros disponíveis:
 O **UEBA** (User and Entity Behavior Analytics) do Google SecOps cria um **baseline de
 comportamento** para cada usuário e dispositivo, usando modelos de machine learning.
 Desvios significativos da baseline geram sinais de anomalia.
+
+Para entender a importância do UEBA no contexto do Banco Meridian, pense no seguinte cenário:
+Rodrigo Andrade, analista de conformidade, sempre trabalha de segunda a sexta, das 9h às 18h,
+acessando basicamente SharePoint e o sistema GRC. Se na sexta-feira às 23h um host com o
+login de Rodrigo começar a fazer 1.847 conexões HTTPS para um IP na Moldova, nenhuma regra
+YARA-L baseada em um único evento vai detectar isso — cada conexão individualmente é legítima
+(HTTPS para porta 443). Mas o UEBA detecta o PADRÃO: volume de conexões 50x acima do normal,
+horário fora da baseline, destino geográfico incomum. É esse salto de "eventos individuais"
+para "comportamento anômalo" que torna o UEBA indispensável para um SOC maduro.
 
 #### 4.5.1 Como o UEBA Aprende o Baseline
 

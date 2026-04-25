@@ -7,9 +7,102 @@
 
 ---
 
-## Contexto
+## Seção 1 — Contexto Situacional
 
-Você precisa habilitar o Amazon GuardDuty em todas as contas do Banco Meridian com delegated administration para a Audit Account, e depois analisar 5 findings simulados que representam ameaças reais. Para cada finding, você vai identificar o risco, investigar usando o Detective e CloudTrail, e propor a resposta correta.
+O Banco Meridian passou por um incidente de segurança no mês anterior: um atacante obteve credenciais de um desenvolvedor via phishing e usou essas credenciais para fazer chamadas de API em `us-east-1`. O GuardDuty estava habilitado apenas na região `sa-east-1` da conta Production — em `us-east-1`, havia zero cobertura de detecção. O finding de `InstanceCredentialExfiltration` só foi gerado depois que o atacante já havia feito download de três buckets S3.
+
+O CISO emitiu diretriz urgente: cobertura total do GuardDuty em todas as contas e regiões, com a Audit Account como ponto centralizado de análise. Qualquer nova conta adicionada à organização deve ter GuardDuty habilitado automaticamente, sem intervenção manual.
+
+---
+
+## Seção 2 — Situação Inicial
+
+É quarta-feira, 16 de abril de 2026, 08h00. Você abre o console da Audit Account e verifica o estado de cobertura do GuardDuty:
+
+```
+GUARDDUTY — BANCO MERIDIAN (Estado Atual — 16/04/2026)
+────────────────────────────────────────────────────────────────────
+ Conta: Meridian-Mgmt (111111111111)   → GuardDuty: DESABILITADO
+ Conta: Meridian-Audit (222222222222)  → GuardDuty: DESABILITADO
+ Conta: Meridian-Logs (333333333333)   → GuardDuty: DESABILITADO
+ Conta: Meridian-Prod (444444444444)   → GuardDuty: HABILITADO (sa-east-1 apenas)
+
+ Delegated Admin:       Não configurado
+ Auto-enable:           DESABILITADO
+ S3 Protection:         DESABILITADO (na conta Production)
+ Malware Protection:    DESABILITADO
+ EKS Audit Logs:        DESABILITADO
+────────────────────────────────────────────────────────────────────
+ Cobertura org.:   25%  (1 de 4 contas — apenas 1 região)
+ Findings ativos:   3   (só na Production, sa-east-1)
+ Últimas 24h:       0 alertas HIGH
+────────────────────────────────────────────────────────────────────
+```
+
+Mariana chega às 08h15 com o relatório do incidente anterior em mãos:
+
+> "Olha aqui o timeline do ataque de março. O atacante usou credenciais do Lucas — desenvolvedor — para fazer chamadas à API em `us-east-1`. O GuardDuty estava ativo apenas em `sa-east-1` na Production. Em `us-east-1`, zero detecção. Ele operou por 2 horas sem nenhum alerta, fez download de três buckets S3, e saiu. Só descobrimos quando o Lucas reportou o comportamento estranho na sua conta."
+
+Carlos envia mensagem no Slack às 08h22:
+
+> "Se o GuardDuty tivesse habilitado o S3 Protection na época, o finding `Discovery:S3/AnomalousBehavior` teria aparecido nos primeiros 10 minutos. Mas como estava desabilitado, o único finding que apareceu foi de `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` — e só depois que os dados já haviam sido exfiltrados."
+
+Você abre o ticket **SECOPS-2055 — Implementar GuardDuty organization-wide com cobertura total** e começa.
+
+---
+
+## Seção 3 — Problema Identificado
+
+**09h00 — Mapeamento técnico do gap de cobertura:**
+
+O problema se desdobra em cinco dimensões:
+
+1. **Gap de conta:** 3 das 4 contas sem GuardDuty — ataques nessas contas são invisíveis ao time de segurança
+2. **Gap de região:** a conta Production cobre apenas `sa-east-1` — ataques em `us-east-1` e `us-east-2` não geram findings
+3. **Gap de feature:** S3 Protection e Malware Protection desabilitados — as técnicas mais usadas pelo atacante do incidente de março não são detectadas
+4. **Ausência de centralização:** sem delegated admin na Audit Account, cada conta tem seu próprio painel — o time de segurança precisa fazer login em cada conta individualmente para ver os findings
+5. **Sem auto-enable:** cada nova conta adicionada à organização nasce sem GuardDuty — requer ação manual que frequentemente é esquecida
+
+**Mapeamento MITRE ATT&CK:**
+- **T1078.004** (Valid Accounts: Cloud Accounts) — atacante usou credenciais comprometidas
+- **T1619** (Cloud Storage Object Discovery) — mapeamento de buckets S3
+- **T1537** (Transfer Data to Cloud Account) — exfiltração via download de S3
+
+Sem GuardDuty com S3 Protection, **nenhuma dessas três técnicas geraria alerta automático**.
+
+---
+
+## Seção 4 — Roteiro de Atividades
+
+**Objetivo geral:** Habilitar GuardDuty com cobertura organizacional completa, configurar a Audit Account (222222222222) como delegated administrator, ativar todas as features de proteção, e demonstrar análise de findings simulados.
+
+**Atividades deste laboratório:**
+
+1. Habilitar GuardDuty na Management Account e configurar delegated admin
+2. Na Audit Account: configurar auto-enable com todas as features para novas contas
+3. Adicionar as contas membro ao GuardDuty organizacional
+4. Gerar sample findings para análise
+5. Analisar e classificar os 5 findings com resposta correta para cada
+6. Criar suppression rule para scanner de vulnerabilidades autorizado (Qualys)
+7. Configurar EventBridge para notificação automática de findings HIGH
+
+---
+
+## Seção 5 — Proposição do Desafio
+
+Carlos vai simular um ataque às 11h: ele executará um comando que gera um finding do tipo `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` na conta Production. Você precisa:
+
+1. Identificar o finding em menos de 2 minutos após a geração
+2. Extrair: usuário IAM afetado, IP externo de destino, país de origem, e número de eventos
+3. Descrever a resposta correta em ordem: quais credenciais revogar, quais ações de contenção executar
+
+**Critério de aprovação:** Encontrar e documentar o finding completo, e demonstrar o comando correto de revogação de credenciais com o arquivo de revogação de sessão (via `put-role-policy` com `Deny` em `sts:*` condicionado ao tempo de emissão).
+
+---
+
+## Contexto Técnico
+
+O Amazon GuardDuty é o serviço de detecção de ameaças inteligente da AWS. Ele analisa automaticamente as fontes de dados da sua conta — CloudTrail, VPC Flow Logs, DNS Logs, e logs adicionais de S3, EKS, RDS e Lambda — para identificar atividade maliciosa ou não autorizada, sem exigir agentes ou infraestrutura adicional.
 
 ---
 
@@ -465,17 +558,187 @@ print("Script de análise pronto — executar com detector_id real")
 
 ---
 
-## Gabarito — Respostas Corretas para os 5 Findings
+## Seção 8 — Gabarito Completo com Raciocínio
 
-| Finding | Tipo | Severidade | Resposta Correta | Urgência |
+### Configuração do Delegated Admin — Resposta Correta
+
+**Comandos corretos (em sequência):**
+```bash
+# 1. Na Management Account — habilitar GuardDuty e delegar admin
+aws guardduty enable-organization-admin-account \
+  --admin-account-id 222222222222 \
+  --region sa-east-1
+
+# 2. Na Audit Account — configurar auto-enable
+DETECTOR_AUDIT=$(aws guardduty list-detectors --query 'DetectorIds[0]' --output text)
+aws guardduty update-organization-configuration \
+  --detector-id $DETECTOR_AUDIT \
+  --auto-enable ALL \
+  --features '[
+    {"Name": "S3_DATA_EVENTS", "AutoEnable": "ALL"},
+    {"Name": "EKS_AUDIT_LOGS", "AutoEnable": "ALL"},
+    {"Name": "MALWARE_PROTECTION", "AutoEnable": "ALL"},
+    {"Name": "RDS_LOGIN_EVENTS", "AutoEnable": "ALL"},
+    {"Name": "LAMBDA_NETWORK_LOGS", "AutoEnable": "ALL"},
+    {"Name": "RUNTIME_MONITORING", "AutoEnable": "ALL"}
+  ]'
+```
+
+**Por que esta é a resposta correta:** A ordem importa: primeiro habilitar o delegated admin (passo 1) antes de configurar o auto-enable (passo 2). Tentar configurar `update-organization-configuration` antes de `enable-organization-admin-account` resulta em erro de autorização. O valor `"AutoEnable": "ALL"` garante que TODAS as contas (existentes e futuras) recebam a feature — `NEW` habilitaria apenas para contas futuras.
+
+**Erros comuns:**
+- Usar `"AutoEnable": "NEW"` em vez de `"ALL"`: contas existentes não seriam cobertas — precisaria adicionar manualmente
+- Esquecer de repetir o `enable-organization-admin-account` para cada região onde GuardDuty deve operar
+
+---
+
+### Finding 1 — CryptoCurrency:EC2/BitcoinTool.B — Resposta Correta
+
+**Análise do finding:**
+```bash
+aws guardduty get-findings \
+  --detector-id $DETECTOR_AUDIT \
+  --finding-ids $CRYPTO_FINDING_ID \
+  --query 'Findings[0].{
+    Tipo:Type,
+    Severidade:Severity,
+    Instancia:Resource.InstanceDetails.InstanceId,
+    IP_Pool_Mineracao:Service.Action.NetworkConnectionAction.RemoteIpDetails.IpAddressV4,
+    Dominio:Service.Action.DnsRequestAction.Domain,
+    EventCount:Service.Count
+  }'
+```
+
+**Por que esta é a resposta correta:** Para cryptomining, os campos críticos são o `InstanceId` (o que isolar), o `IpAddressV4` ou `Domain` do pool de mineração (confirma o TTP), e o `Count` (quantas conexões ocorreram — indica duração do comprometimento).
+
+**Output esperado com anotações:**
+```json
+{
+  "Tipo": "CryptoCurrency:EC2/BitcoinTool.B",
+  "Severidade": 7.5,                           // HIGH — resposta imediata
+  "Instancia": "i-0a1b2c3d4e5f67890",          // Isolar este recurso
+  "IP_Pool_Mineracao": "198.51.100.45",         // IP de pool de mineração conhecido
+  "Dominio": "pool.hashfort.com",               // Domínio de mining pool
+  "EventCount": 342                             // 342 conexões — comprometimento antigo
+}
+```
+
+**Sequência de resposta obrigatória (ordem importa):**
+```bash
+# 1. ISOLAR — antes de qualquer análise (impede exfiltração adicional)
+aws ec2 create-security-group \
+  --group-name "QUARENTENA-$(date +%Y%m%d)" \
+  --description "Quarentena IR - sem ingress nem egress"
+QUARENTENA_SG_ID=$(aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=QUARENTENA-$(date +%Y%m%d)" \
+  --query 'SecurityGroups[0].GroupId' --output text)
+
+aws ec2 modify-instance-attribute \
+  --instance-id i-0a1b2c3d4e5f67890 \
+  --groups $QUARENTENA_SG_ID
+
+# 2. PRESERVAR EVIDÊNCIAS — antes de terminar a instância
+aws ec2 describe-instances --instance-ids i-0a1b2c3d4e5f67890 \
+  --query 'Reservations[0].Instances[0].BlockDeviceMappings[].Ebs.VolumeId'
+aws ec2 create-snapshot \
+  --volume-id vol-0abc123 \
+  --description "FORENSE-cryptomining-$(date +%Y%m%d)"
+
+# 3. INVESTIGAR VETOR — via CloudTrail Lake
+# O que aconteceu ANTES do finding? Quem instalou o software de mining?
+```
+
+**Erros comuns:**
+- Terminar a instância sem criar snapshot primeiro — perda de evidências forenses
+- Só revogar SG sem verificar se há acesso via Session Manager ainda ativo
+
+---
+
+### Finding 2 — UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS — Resposta Correta
+
+**Por que esta é a resposta correta:** As credenciais de instância EC2 (geradas via Instance Metadata Service - IMDS) foram usadas em um IP fora da AWS. Isso indica que alguém copiou as credenciais temporárias da instância e está usando-as externamente — provavelmente após acesso ao IMDS via SSRF ou código malicioso na instância.
+
+**Sequência de resposta:**
+```bash
+# 1. REVOGAR CREDENCIAIS DA SESSION — política de Deny por tempo de emissão
+# Impede imediatamente qualquer uso de credenciais temporárias emitidas antes de agora
+cat > /tmp/revoke-session.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RevokeOldSessions",
+      "Effect": "Deny",
+      "Action": ["*"],
+      "Resource": ["*"],
+      "Condition": {
+        "DateLessThan": {
+          "aws:TokenIssueTime": "2026-04-16T11:00:00Z"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name "ec2-prod-worker" \
+  --policy-name "RevokeAllOldSessions" \
+  --policy-document file:///tmp/revoke-session.json
+
+# 2. ISOLAR A INSTÂNCIA (fonte das credenciais vazadas)
+aws ec2 modify-instance-attribute \
+  --instance-id i-0a1b2c3d4e5f67890 \
+  --groups $QUARENTENA_SG_ID
+
+# 3. INVESTIGAR VIA CLOUDTRAIL — quais ações foram executadas com a credencial
+```
+
+**Erros comuns:**
+- Revogar apenas a role sem a política de Deny por `TokenIssueTime`: credenciais temporárias já emitidas continuam válidas até o timeout natural (até 12 horas)
+- Investigar antes de revogar: cada minuto de delay é oportunidade para mais dano
+
+---
+
+### Suppression Rule — Resposta Correta
+
+**Configuração correta:**
+```bash
+aws guardduty create-filter \
+  --detector-id $DETECTOR_AUDIT \
+  --name "AuthorizedVulnerabilityScanner-Qualys" \
+  --description "Suprimir port probes do scanner Qualys autorizado (IP: 203.0.113.50)" \
+  --action ARCHIVE \
+  --rank 1 \
+  --finding-criteria '{
+    "Criterion": {
+      "type": {"Equals": ["Recon:EC2/PortProbeUnprotectedPort"]},
+      "service.action.portProbeAction.portProbeDetails.remoteIpDetails.ipAddressV4": {
+        "Equals": ["203.0.113.50"]
+      }
+    }
+  }'
+```
+
+**Por que esta é a resposta correta:** A suppression rule deve ser ESPECÍFICA — `type` E `IP de origem`. Uma suppression pelo tipo genérico (`Recon:EC2/PortProbeUnprotectedPort`) sem filtro de IP suprimiria TODOS os port probes, incluindo ataques reais. A combinação de tipo + IP garante que apenas os scans do Qualys sejam suprimidos.
+
+**Variações aceitáveis:** O `rank 1` define prioridade (1 = maior prioridade). Para múltiplas regras, regras mais específicas devem ter rank menor (maior prioridade). A `action ARCHIVE` é equivalente a "suppressed" — findings são arquivados automaticamente sem gerar alerta.
+
+---
+
+### Resumo de Respostas por Finding
+
+| Finding | Tipo | Severidade | Sequência de Resposta | SLA |
 |---|---|---|---|---|
-| 1 — Cryptomining | `CryptoCurrency:EC2/BitcoinTool.B` | HIGH | Isolar EC2, snapshot forense, análise de vetor inicial, terminate | IMEDIATA (minutos) |
-| 2 — Cred Exfiltration | `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` | HIGH | Revogar credenciais, deny policy, CloudTrail investigation | IMEDIATA (minutos) |
-| 3 — S3 Exfiltration | `Exfiltration:S3/AnomalousBehavior` | HIGH | Bloquear acesso S3, identificar dados expostos, notificar DPO | IMEDIATA (horas) |
-| 4 — Port Probe | `Recon:EC2/PortProbeUnprotectedPort` | LOW | Verificar SGs; criar suppression se scanner autorizado | SEMANAL |
-| 5 — Malware EC2 | `Malware:EC2/MaliciousFile` | HIGH | Isolar EC2 (snapshot já feito pelo GuardDuty), analisar hash do arquivo | IMEDIATA (minutos) |
+| 1 — Cryptomining | `CryptoCurrency:EC2/BitcoinTool.B` | HIGH (7.5) | Isolar SG → Snapshot → Investigate → Terminate | < 15 min |
+| 2 — Cred Exfilt. | `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` | HIGH (8.0) | Revoke Session (DateLessThan) → Isolar instância → CloudTrail investigation | < 5 min |
+| 3 — S3 Exfilt. | `Exfiltration:S3/AnomalousBehavior` | HIGH (7.0) | Block principal → S3 Data Events investigation → Notificar DPO | < 30 min |
+| 4 — Port Probe | `Recon:EC2/PortProbeUnprotectedPort` | LOW (2.0) | Verificar IP → Se autorizado: suppression rule | 24-72h |
+| 5 — Malware EC2 | `Malware:EC2/MaliciousFile` | HIGH (8.0) | Isolar SG → Análise do hash (GuardDuty Malware Protection já fez snapshot) → Remediar | < 15 min |
 
 **Critérios de Aprovação:**
-- Seções 1-5 concluídas com findings analisados corretamente: APROVADO
-- Suppression rule criada com critérios específicos: APROVADO
-- EventBridge rule configurada e SNS ativo: APROVADO
+- GuardDuty habilitado em todas as 4 contas com delegated admin na Audit Account: OBRIGATÓRIO
+- Auto-enable configurado com `AutoEnable: ALL`: OBRIGATÓRIO
+- Suppression rule com filtro por tipo E IP específico: OBRIGATÓRIO
+- EventBridge rule ativa com threshold de severidade >= 7.0: OBRIGATÓRIO
+- Análise correta dos 5 findings com resposta na sequência certa: 5 pontos (1 por finding)

@@ -84,6 +84,10 @@ aws sts get-caller-identity
 
 ### Passo 1: Instalar Prowler v4
 
+**O que este passo faz:** Instala o Prowler v4, a principal ferramenta CSPM open-source do mercado. O Prowler é um scanner de postura de segurança que verifica mais de 400 controles em serviços AWS (IAM, S3, EC2, RDS, CloudTrail, GuardDuty e outros) e mapeia automaticamente os findings para frameworks de compliance como CIS, BACEN 4.893 e LGPD. Ao instalar via `pip`, você obtém a versão Python do Prowler v4, que é mais fácil de manter e integrar com automações.
+
+**Por que agora:** O Prowler precisa estar instalado antes de qualquer configuração de credenciais ou execução de scan. A instalação via pip garante que você tenha a última versão estável e que as dependências Python estejam corretamente resolvidas.
+
 ```bash
 # Instalar Prowler v4 via pip
 pip3 install prowler
@@ -96,20 +100,26 @@ prowler --version
 pip3 install --upgrade prowler
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
 prowler 4.3.0
 ```
+O número exato da versão pode variar. O importante é que apareça `4.x.x` — qualquer versão 3.x indica que a instalação não atualizou corretamente.
 
 **Troubleshooting:** Se `prowler` não for encontrado após instalação, adicionar `~/.local/bin` ao PATH:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 ```
+Esse problema ocorre quando o pip instala o binário fora do PATH padrão. O `~/.local/bin` é o diretório padrão de binários de usuário no Linux.
 
 ---
 
 ### Passo 2: Configurar Credenciais AWS
+
+**O que este passo faz:** Configura as credenciais de acesso AWS que o Prowler usará para realizar o scan. O Prowler precisa de permissões de leitura para inspecionar os recursos da conta — ele usa as políticas `SecurityAudit` e `ViewOnlyAccess`, que juntas dão visibilidade suficiente para verificar configurações sem poder modificar nada. Esse é o princípio de menor privilégio aplicado à própria ferramenta de auditoria.
+
+**Por que agora:** Sem credenciais configuradas, o Prowler não consegue se comunicar com a AWS API. O profile `bancomeridian-sandbox` isola as credenciais desta conta específica, sem interferir em outros ambientes AWS que você possa ter configurados.
 
 ```bash
 # Método 1: AWS CLI profile (recomendado)
@@ -133,7 +143,7 @@ export AWS_DEFAULT_REGION="us-east-1"
 aws sts get-caller-identity --profile bancomeridian-sandbox
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```json
 {
     "UserId": "AIDA...",
@@ -141,12 +151,17 @@ aws sts get-caller-identity --profile bancomeridian-sandbox
     "Arn": "arn:aws:iam::123456789012:user/prowler-audit"
 }
 ```
+O campo `Account` confirma que você está apontando para a conta correta. O `Arn` deve referenciar o usuário ou role de auditoria. Se aparecer `root` no Arn, revise as credenciais — não use root para auditorias.
 
 **Troubleshooting:** Se receber `AccessDenied`, verifique se as policies `SecurityAudit` e `ViewOnlyAccess` estão anexadas ao usuário/role.
 
 ---
 
 ### Passo 3: Executar Scan Completo com Compliance BACEN
+
+**O que este passo faz:** Inicia o scan principal do Prowler contra a conta AWS sandbox. O flag `--compliance brazil_lgpd cis_aws_foundations_benchmark_v3.0` instrui o Prowler a mapear cada finding automaticamente para os artigos da LGPD e para os controles do CIS AWS Foundations Benchmark — esses são os frameworks mais próximos do que o BACEN 4.893 exige. O `--severity critical high medium` filtra o ruído de baixa prioridade para que o relatório seja acionável. A saída `--output-formats html json csv` gera três formatos: HTML para o CISO ver no browser, JSON para automação e CSV para análise no Excel.
+
+**Por que agora:** Esta é a etapa central do laboratório. Tudo que vem depois depende dos dados gerados aqui. O scan pode levar 15-25 minutos dependendo do número de recursos na conta — use esse tempo para revisar o contexto do laboratório.
 
 ```bash
 # Criar diretório para resultados
@@ -166,7 +181,7 @@ prowler aws \
 # Prowler mostra progresso por serviço: IAM, S3, EC2, RDS, etc.
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
 Prowler for AWS
 Running at 2025-04-24T14:30:00Z
@@ -184,6 +199,7 @@ Assessment Summary:
   MEDIUM: 87
   LOW: 31
 ```
+O `tee` faz com que a saída apareça no terminal E seja salva no arquivo de log simultaneamente — isso é importante para auditoria (você terá evidência do momento exato da execução). O percentual de `Passed` indica a postura atual: menos de 65% é preocupante para um banco regulado.
 
 **Troubleshooting:** Se o scan travar ou receber ThrottlingException:
 ```bash
@@ -194,6 +210,10 @@ prowler aws --profile bancomeridian-sandbox --service s3 iam ec2 rds
 ---
 
 ### Passo 4: Filtrar Findings Críticos
+
+**O que este passo faz:** Processa o arquivo JSON gerado pelo Prowler e extrai apenas os findings de severidade CRITICAL e HIGH, formatando-os de forma legível. O script Python lê o JSON estruturado do Prowler e para cada finding extrai: o ID do check, o título descritivo, o recurso afetado, a região e o mapeamento para o artigo BACEN correspondente. Isso transforma 412 linhas de JSON em uma lista priorizada e acionável de problemas.
+
+**Por que agora:** Antes de mapear para o BACEN ou calcular scores, você precisa saber com o que está lidando. Filtrar por CRITICAL/HIGH primeiro foca a atenção nos problemas que, se explorados, teriam maior impacto no Banco Meridian.
 
 ```bash
 # Script para extrair e organizar os findings CRITICAL
@@ -228,7 +248,7 @@ for i, f in enumerate(critical, 1):
 PYEOF
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
 === RELATÓRIO DE POSTURA — BANCO MERIDIAN ===
 Data: 2025-04-24 14:55
@@ -252,6 +272,10 @@ Findings HIGH: 23
 ---
 
 ### Passo 5: Mapear Findings para BACEN 4.893
+
+**O que este passo faz:** Cria a ponte entre os checks técnicos do Prowler e os artigos específicos da Resolução BACEN 4.893. O dicionário `bacen_map` faz esse mapeamento manual para os checks mais comuns — por exemplo, `cloudtrail_enabled` mapeia para Art. 6 (monitoramento), enquanto `iam_user_mfa_enabled_console_access` mapeia para Art. 8 (autenticação). O resultado é uma tabela Markdown que o CISO pode inserir diretamente no relatório para o BACEN.
+
+**Por que agora:** O BACEN não fala em "Prowler checks" — ele fala em artigos e obrigações. Este mapeamento é a tradução que o auditor entende e que faz do relatório Prowler uma evidência formal de conformidade.
 
 ```bash
 # Criar tabela de mapeamento BACEN
@@ -292,6 +316,10 @@ PYEOF
 ---
 
 ### Passo 6: Calcular Security Score
+
+**O que este passo faz:** Calcula um score numérico de 0–100 para a postura de segurança da conta AWS. O cálculo usa ponderação por severidade — um check CRITICAL que falha pesa 4x mais que um check LOW que falha. Isso reflete a realidade: um bucket S3 público com dados de clientes é incomparavelmente mais grave que um tag faltando em um recurso de baixa criticidade. O resultado final é um número que o CISO pode apresentar ao Conselho e usar como linha de base para medir melhoria ao longo do tempo.
+
+**Por que agora:** O CISO precisa de um número único para apresentar ao Conselho. "412 checks, 145 falhando" não é acionável para executivos — "Security Score: 58/100 (meta: 85)" é. Este passo transforma dados técnicos em KPI executivo.
 
 ```bash
 python3 << 'PYEOF'
@@ -340,7 +368,7 @@ else:
 PYEOF
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
 === SECURITY SCORE BANCO MERIDIAN ===
 Total de checks: 412
@@ -352,10 +380,15 @@ Security Score (ponderado por severidade): 58/100
 Interpretação:
 ✗ PREOCUPANTE — Remediação urgente necessária
 ```
+Um score de 58 com a auditoria BACEN em 45 dias é uma situação de alerta. A meta para ser aprovado na auditoria é 85+. O plano de remediação do Passo 11 calculará o esforço necessário para chegar lá.
 
 ---
 
 ### Passo 7: Visualizar Relatório HTML
+
+**O que este passo faz:** Abre o relatório HTML interativo gerado pelo Prowler, que contém dashboards visuais, filtros por serviço e severidade, e para cada finding: descrição completa, recurso afetado, recomendação de remediação e link para a documentação oficial da AWS. Este é o documento que você entregará ao CISO — ele não precisa entender comandos bash para ler e compreender os problemas.
+
+**Por que agora:** Antes de apresentar ao CISO, você precisa verificar que o relatório está completo e bem formatado. O relatório HTML é gerado automaticamente durante o Passo 3 — este passo apenas o abre para inspeção visual.
 
 ```bash
 # Abrir relatório HTML gerado pelo Prowler
@@ -381,6 +414,10 @@ echo "Relatório copiado para Downloads do Windows"
 
 ### Passo 8: Comparar com ScoutSuite (Validação Cruzada)
 
+**O que este passo faz:** Instala e executa o ScoutSuite, uma segunda ferramenta CSPM open-source com abordagem diferente do Prowler. Enquanto o Prowler foca em checks individuais por controle, o ScoutSuite gera um mapa visual de relacionamentos entre recursos e destaca padrões de risco. Usar duas ferramentas é uma prática recomendada em auditorias formais — o BACEN valoriza validação cruzada porque cada ferramenta pode ter pontos cegos diferentes.
+
+**Por que agora:** A validação cruzada aumenta a credibilidade do relatório. Se Prowler e ScoutSuite concordam nos findings críticos, a evidência é muito mais forte do que um único scanner.
+
 ```bash
 # Instalar ScoutSuite
 pip3 install scoutsuite
@@ -398,6 +435,10 @@ echo "ScoutSuite: ver relatório HTML em ~/lab01-cspm-results/scoutsuite/"
 ---
 
 ### Passo 9: Identificar Top 3 Recursos Mais Expostos
+
+**O que este passo faz:** Identifica quais recursos AWS concentram o maior número de findings de alta severidade. O script agrupa todos os findings por recurso e calcula um "score de risco" ponderado — um recurso com 5 findings CRITICAL (score 100 cada) é mais urgente do que um com 10 findings LOW (score 10 cada). O resultado é uma lista dos 3 recursos que, se remediados primeiro, teriam o maior impacto na redução do risco.
+
+**Por que agora:** A equipe de Cloud Ops tem capacidade limitada. Em vez de remediar 145 findings aleatoriamente, este passo cria uma lista priorizada — os Top 3 recursos concentram provavelmente 60-70% do risco total e podem ser remediados antes da auditoria BACEN.
 
 ```bash
 python3 << 'PYEOF'
@@ -434,6 +475,10 @@ PYEOF
 ---
 
 ### Passo 10: Configurar Scan Agendado Semanal
+
+**O que este passo faz:** Cria um script bash de scan recorrente e o agenda via crontab para execução toda sexta-feira às 22h. O script automatiza o mesmo scan do Passo 3, mas salva os resultados em um diretório com data — isso cria um histórico que permite comparar a postura de segurança semana a semana. A flag `--security-hub` enviará os findings automaticamente para o AWS Security Hub, centralizando todas as alertas de segurança da conta.
+
+**Por que agora:** Uma auditoria BACEN não é um evento único — o Art. 5 exige "testes periódicos". O scan semanal transforma o exercício deste laboratório em um processo contínuo e documentado, que é exatamente o que o auditor do BACEN quer ver.
 
 ```bash
 # Criar script de scan agendado
@@ -473,6 +518,10 @@ crontab -l
 ---
 
 ### Passo 11: Gerar Relatório Executivo Final
+
+**O que este passo faz:** Cria um relatório executivo em Markdown que traduz os findings técnicos em linguagem de negócio. O relatório inclui: o Security Score atual, os top 5 riscos descritos em termos de impacto financeiro e regulatório (não termos técnicos), e uma tabela de remediação com prazo, esforço em horas e responsável. Este é o documento que vai para o CISO, que vai para o Conselho, e que vai para o BACEN como evidência de avaliação formal.
+
+**Por que agora:** Todos os dados técnicos já foram coletados. É hora de transformá-los em narrativa executiva. O CISO precisa deste relatório para a reunião do Conselho — sem ele, os dados técnicos ficam presos no terminal.
 
 ```bash
 cat > ~/lab01-cspm-results/relatorio-executivo.md << 'REPORT'
@@ -548,6 +597,10 @@ echo "Relatório executivo criado: ~/lab01-cspm-results/relatorio-executivo.md"
 
 ### Passo 12: Verificar Falsos Positivos
 
+**O que este passo faz:** Identifica findings do Prowler que podem ser falsos positivos no contexto específico do Banco Meridian. Por exemplo: um bucket S3 com acesso público pode ser intencional se for o bucket de assets públicos do site corporativo. O script verifica se algum recurso com findings críticos está na lista de recursos conhecidos como intencionalmente públicos — se estiver, ele deve ser revisado manualmente e suprimido com `#prowler:ignore` para não "poluir" o relatório com alertas que o time já analisou e aceitou o risco.
+
+**Por que agora:** Um relatório com falsos positivos não suprimidos perde credibilidade. O auditor do BACEN pode questionar por que o Banco Meridian tem um "finding CRITICAL" que na verdade é um website público intencional. Suprimir com justificativa demonstra maturidade no processo.
+
 ```bash
 # Verificar checks que podem ser falsos positivos no contexto do Banco Meridian
 # Exemplo: S3 bucket público de website pode ser intencional
@@ -579,6 +632,10 @@ PYEOF
 
 ### Passo 13: Integrar com AWS Security Hub
 
+**O que este passo faz:** Configura a integração do Prowler com o AWS Security Hub, o agregador central de findings de segurança da AWS. Com essa integração, todos os findings do Prowler aparecem automaticamente no Security Hub junto com findings de outros serviços (GuardDuty, Inspector, Macie) — criando um único painel de controle de segurança. O Security Hub também retém os findings por até 90 dias, o que é importante para evidência de auditoria contínua.
+
+**Por que agora:** O Security Hub é o passo para transformar o Prowler de uma ferramenta de auditoria pontual em um componente de monitoramento contínuo (Art. 6 do BACEN). Esta integração completa o ciclo: detectar → reportar → remediar → monitorar.
+
 ```bash
 # Verificar se Security Hub está habilitado
 aws securityhub describe-hub \
@@ -607,6 +664,10 @@ aws securityhub get-findings \
 
 ### Passo 14: Exportar CSV para Análise no Excel
 
+**O que este passo faz:** O Prowler já gerou um CSV durante o Passo 3. Este passo cria um CSV filtrado contendo apenas os findings CRITICAL e HIGH — um arquivo menor e mais focado que pode ser aberto no Excel pelo time de Cloud Ops ou pelo time de GRC para acompanhamento de remediação. O filtro por severidade reduz centenas de linhas para apenas as que precisam de ação imediata.
+
+**Por que agora:** Nem todos os stakeholders do processo de remediação têm acesso ao terminal ou ao relatório HTML. O CSV filtrado é o formato mais compatível para colaboração entre times técnicos e de gestão.
+
 ```bash
 # O Prowler já gerou o CSV — visualizar
 head -5 ~/lab01-cspm-results/prowler-output.csv
@@ -633,6 +694,10 @@ PYEOF
 ---
 
 ### Passo 15: Consolidar Evidências para Auditoria
+
+**O que este passo faz:** Reúne todos os artefatos gerados durante o laboratório em um diretório único datado, e gera um arquivo `SHA256SUMS.txt` com o checksum criptográfico de cada arquivo. Os checksums são fundamentais para integridade forense — eles provam que os arquivos não foram modificados após a geração. O diretório `evidencias-bacen-YYYYMMDD/` é o pacote completo que você entregaria ao auditor do BACEN ou guardaria no sistema de gestão de evidências da organização.
+
+**Por que agora:** A auditoria não aceita "arquivos avulsos" — ela exige um pacote organizado de evidências com cadeia de custódia. Os checksums SHA256 criam essa cadeia: o auditor pode verificar que os arquivos são originais e não foram alterados após a geração.
 
 ```bash
 # Criar pacote de evidências para o BACEN
@@ -701,6 +766,12 @@ Assessment Summary:
   LOW: 31 (monitorar, sem urgência)
 ```
 
+**Por que esta é a resposta correta:** O Prowler executa todos os checks disponíveis para os serviços selecionados. O total de 412 checks é típico para uma conta AWS com múltiplos serviços habilitados. A proporção de 64.8% de checks passando é preocupante mas realista para uma conta que nunca passou por hardening formal — contas maduras ficam acima de 85%. Os 4 findings CRITICAL são o principal indicador de risco imediato.
+
+**Erro mais comum:** Confundir o número de checks com o número de recursos. Um único check pode afetar múltiplos recursos — por exemplo, `cloudtrail_enabled` pode falhar em 5 regiões diferentes, gerando 5 findings do mesmo check.
+
+---
+
 ### Top 5 Findings CRITICAL/HIGH — Resultado Esperado
 
 | # | Check ID | Severidade | Recurso | Artigo BACEN |
@@ -710,6 +781,12 @@ Assessment Summary:
 | 3 | cloudtrail_enabled | CRITICAL | us-west-1, eu-west-1, ap-southeast-1 | Art. 6 |
 | 4 | rds_instance_publicly_accessible | CRITICAL | bancomeridian-db-prod | Art. 5 |
 | 5 | ec2_securitygroup_unrestricted_access_port_22 | HIGH | sg-0abc123def | Art. 5 |
+
+**Por que esta é a resposta correta:** Esses 5 findings são os mais comuns em contas AWS que cresceram sem governança formal. O bucket S3 público com dados de clientes é o finding de maior impacto regulatório (LGPD + BACEN). A root sem MFA é o finding de maior impacto operacional — comprometimento da conta root é catastrófico. O CloudTrail desabilitado em regiões não-primárias é uma falha clássica: a equipe habilita CloudTrail em us-east-1 mas esquece das outras regiões.
+
+**Erro mais comum:** Negligenciar o finding de CloudTrail por parecer "apenas log" — o BACEN Art. 6 exige monitoramento contínuo, e sem CloudTrail não há trilha de auditoria. Esse finding CRITICAL pode reprová-lo na auditoria mesmo com todos os outros resolvidos.
+
+---
 
 ### Script de Remediação — Comando Exato para Finding #1
 
@@ -731,6 +808,12 @@ prowler aws --check s3_bucket_public_access --resource-arn arn:aws:s3:::$BUCKET_
 # Esperado: PASS após remediação
 ```
 
+**Por que esta é a resposta correta:** O comando `put-public-access-block` com os 4 flags `true` é a configuração mais segura — cada flag bloqueia uma forma diferente de tornar o bucket público: ACLs existentes, novas ACLs, políticas de bucket existentes e novas políticas de bucket. Bloquear apenas um flag deixa brechas. A re-execução do check específico do Prowler após a remediação é a verificação imediata antes do próximo scan semanal.
+
+**Erro mais comum:** Usar apenas `BlockPublicAcls=true` sem os outros 3 flags. Um bucket pode ainda ser exposto via bucket policy mesmo com `BlockPublicAcls` habilitado — é preciso `BlockPublicPolicy=true` também.
+
+---
+
 ### Relatório Executivo — Estrutura Completa Esperada
 
 O arquivo `~/lab01-cspm-results/relatorio-executivo.md` deve conter:
@@ -740,6 +823,10 @@ O arquivo `~/lab01-cspm-results/relatorio-executivo.md` deve conter:
 4. Tabela de remediação com prazo, esforço e responsável
 5. Referência à evidência formal gerada (arquivo HTML + JSON)
 6. Próximos passos (scan semanal configurado)
+
+**Por que esta é a resposta correta:** O relatório executivo é o produto final do laboratório — é o que justifica a contratação do Cloud Security Engineer. A estrutura acima segue o padrão de relatórios de segurança aceitos por auditorias do Banco Central: linguagem não técnica para o Conselho, dados precisos para evidência, prazo e responsável para accountability.
+
+**Erro mais comum:** Escrever o relatório executivo em linguagem técnica. O Conselho de Administração não sabe o que é "CKV_AWS_19" — ele precisa ler "Bucket S3 com dados de clientes exposto publicamente na internet, risco de multa LGPD de até 2% do faturamento, correção em 30 minutos."
 
 **Este relatório é a evidência principal para o artigo 5º da BACEN 4.893 — testes periódicos de vulnerabilidade.**
 

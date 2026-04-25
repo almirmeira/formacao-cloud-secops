@@ -30,6 +30,14 @@ Antes de qualquer regra de detecção funcionar, os logs precisam chegar ao Goog
 A arquitetura de coleta é o alicerce de todo o SIEM — dados mal ingeridos resultam em
 detecções incompletas, investigações superficiais e blindspots críticos.
 
+No caso do Banco Meridian, o desafio é representativo do que qualquer instituição financeira
+brasileira enfrenta: fontes diversas e heterogêneas. O banco tem firewalls Palo Alto nas
+filiais exportando logs em CEF/Syslog; o sistema de core banking Tópus Banking gerando CSVs
+proprietários; o Azure AD gerando eventos JSON via Microsoft Graph API; servidores Windows
+com Event IDs clássicos; e cargas de trabalho no Google Cloud gerando Cloud Audit Logs.
+Cada uma dessas fontes usa um formato diferente, um protocolo diferente e um mecanismo de
+entrega diferente. A arquitetura de coleta precisa contemplar todas elas.
+
 ```
 DIAGRAMA: FLUXO DE INGESTÃO DO GOOGLE SECOPS
 ═══════════════════════════════════════════════════════════════════════════════
@@ -185,6 +193,12 @@ OpenTelemetry Collector). Ele substitui gradualmente o Chronicle Forwarder clás
 suporte nativo a dezenas de integrações, configuração centralizada via painel web e telemetria
 de saúde dos agentes em tempo real.
 
+No cenário do Banco Meridian, o Bindplane OP Agent é a escolha mais adequada para o servidor
+de logs centralizado (SRV-LOG-001), pois permite ao time de SOC gerenciar todas as fontes de
+coleta em um único painel web — sem precisar de SSH em servidor de produção para ajustar
+configurações. Quando uma nova filial é aberta, basta adicionar um novo agente via console
+e configurar as fontes remotamente.
+
 **Vantagens do Bindplane OP sobre o Forwarder clássico:**
 
 | Critério               | Chronicle Forwarder       | Bindplane OP Agent          |
@@ -215,6 +229,19 @@ sudo /usr/bin/bindplane-agent configure \
 ---
 
 ### 2.3 Parsers Nativos vs. CBN (Configuration-Based Normalization)
+
+Todo banco brasileiro tem sistemas legados que não constam na lista de parsers nativos do
+Google SecOps. O Tópus Banking, utilizado pelo Banco Meridian como sistema de core banking,
+é um exemplo clássico: seus logs são exportados em formato CSV proprietário, com campos em
+português e uma estrutura que nenhum parser nativo reconhece. Sem um parser CBN, esses logs
+chegam ao Google SecOps como texto bruto — visíveis, mas completamente inutilizáveis para
+detecção, correlação e hunting. Se um operador do Tópus tiver suas credenciais comprometidas,
+o SOC simplesmente não verá esse evento nos alertas.
+
+Criar parsers CBN é, portanto, uma das habilidades mais estratégicas do Engenheiro de Detecção
+em ambientes bancários. É o que garante que o SIEM tenha visibilidade completa do ambiente —
+não apenas das fontes "fáceis" (Windows, Palo Alto, CrowdStrike), mas também das fontes
+proprietárias onde muitas vezes o ataque se manifesta.
 
 Quando um log chega ao Google SecOps, ele precisa ser **normalizado** para o UDM. Existem
 dois mecanismos para isso:
@@ -312,6 +339,18 @@ mapping:
 O UDM é o schema central do Google SecOps. Todos os eventos, independentemente da fonte,
 são normalizados para este modelo antes do armazenamento. Compreender o UDM é fundamental
 para escrever queries e regras eficazes.
+
+Pense no UDM como uma "língua franca" do SOC. Quando Mariana (analista L2 do Banco Meridian)
+escreve uma query UDM Search, ela não precisa saber se o campo de usuário em um evento do
+Windows se chama `SubjectUserName` ou `TargetUserName`, nem se no Palo Alto o IP de origem
+está em `src` ou `srcip`. O UDM já traduziu tudo para `principal.user.userid` e `principal.ip`.
+Isso é o que torna possível investigar um incidente que atravessa quatro fontes de log diferentes
+em uma única sessão de hunting.
+
+Os seis namespaces a seguir são os pilares do UDM. Todo evento UDM é composto por subconjuntos
+desses namespaces — um evento de login usará `metadata`, `principal` e `target`; um evento de
+conexão de rede usará `metadata`, `principal`, `target` e `network`. Aprender a localizar a
+informação certa no namespace correto é a habilidade mais prática do analista que usa UDM Search.
 
 ```
 ESTRUTURA DO UDM — VISÃO HIERÁRQUICA

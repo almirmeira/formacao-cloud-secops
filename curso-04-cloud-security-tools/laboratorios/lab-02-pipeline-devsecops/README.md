@@ -55,6 +55,10 @@ Ao final deste laboratório, você terá um pipeline completo `.github/workflows
 
 ### Passo 1: Criar Repositório GitHub
 
+**O que este passo faz:** Cria o repositório GitHub que é o ponto central do pipeline DevSecOps. A estrutura de diretórios tem separação deliberada de responsabilidades: `terraform/` (o que Checkov e tfsec escaneiam), `.github/workflows/` (o pipeline de segurança CI/CD), `policy/` (políticas OPA/Rego customizadas do Banco Meridian), e `app/` (código da API que o Trivy escaneia na imagem Docker). Essa separação limita o raio de impacto se um componente for comprometido — um atacante que vaza secrets do `app/` não tem acesso automático às políticas de segurança do `policy/`.
+
+**Por que repositório público neste lab:** GitHub Actions tem 2.000 minutos/mês gratuitos para repositórios públicos. Em produção, o Banco Meridian usaria repositório privado no GitHub Enterprise com RBAC e branch protection obrigatória.
+
 ```bash
 # Pré-requisitos
 gh --version    # GitHub CLI instalado
@@ -184,6 +188,10 @@ echo "Terraform criado — inclui recurso inseguro (propositalmente) para teste 
 
 ### Passo 3: Configurar Checkov
 
+**O que este passo faz:** Cria o arquivo de configuração do Checkov (`checkov.yaml`) que define as regras de scan para o Banco Meridian. A configuração centraliza decisões importantes: quais frameworks verificar (terraform, dockerfile), quais checks suprimir globalmente com justificativa, e o threshold de severidade que falha o pipeline. Sem este arquivo, o Checkov usaria defaults que podem incluir checks irrelevantes (gerando ruído) ou omitir checks críticos para o contexto bancário.
+
+**Por que usar arquivo de configuração em vez de flags na linha de comando:** Um arquivo `checkov.yaml` no repositório é versionado via git — qualquer mudança nos critérios de segurança é rastreável, revisada via PR, e auditável. Flags na linha de comando são frágeis e invisíveis — um desenvolvedor pode silenciosamente remover um `--check` crítico sem revisão. O CISO do Banco Meridian exige que as regras de segurança do pipeline sejam tratadas como código.
+
 ```bash
 cat > checkov.yaml << 'YAML'
 # checkov.yaml — configuração do Banco Meridian
@@ -295,6 +303,18 @@ echo "Dockerfile e aplicação criados"
 
 ### Passo 5: Criar Política Rego para Validação Adicional
 
+**O que este passo faz:** Cria uma política OPA/Rego customizada que verifica regras de segurança específicas do Banco Meridian — regras que o Checkov não tem nativamente. Enquanto o Checkov verifica conformidade com benchmarks genéricos (CIS, NIST), a política Rego implementa requisitos do negócio: por exemplo, todo bucket S3 deve ter a tag `Owner` definida (para accountability) e deve ter nome prefixado com `bancomeridian-` (para identificação clara de propriedade em ambientes multi-conta).
+
+**Entendendo a sintaxe Rego:**
+- `package terraform.aws.s3` — escopo da política (Conftest usa o nome do package para agrupar checks)
+- `violations[msg] { ... }` — define um conjunto de violations; o pipeline falha se este conjunto NÃO for vazio
+- `resource := input.resource_changes[_]` — itera sobre todos os recursos no plan.json
+- `resource.type == "aws_s3_bucket"` — filtra apenas buckets S3
+- `not has_owner_tag(resource)` — chama a função auxiliar que verifica a existência da tag `Owner`
+- `msg := sprintf(...)` — gera mensagem de erro descritiva que aparece no log do pipeline
+
+**Por que OPA/Rego além do Checkov:** O Checkov verifica segurança técnica de infraestrutura. O OPA verifica políticas de governança de negócio. Eles são complementares: Checkov diz "este bucket não tem criptografia" (segurança técnica); OPA diz "este bucket não está tagueado para accountability" (governança). Um banco regulado pelo BACEN precisa de ambas as camadas.
+
 ```bash
 cat > policy/s3_security.rego << 'REGO'
 package terraform.aws.s3
@@ -323,6 +343,18 @@ echo "Política Rego criada"
 ---
 
 ### Passo 6: Criar o Workflow GitHub Actions Completo
+
+**O que este passo faz:** Cria o arquivo de workflow do GitHub Actions — o núcleo do pipeline DevSecOps. Este workflow executa automaticamente em dois gatilhos: a cada Pull Request para `main` (para bloquear código inseguro ANTES do merge) e a cada push em `main` (para builds e assinatura de imagens em produção). O pipeline tem 5 jobs que executam em paralelo onde possível, e um job final `security-gate` que consolida todos os resultados e decide se o PR pode ser mergeado.
+
+**Arquitetura do pipeline:**
+- **Job `checkov`:** Scan de IaC com Checkov (verifica se o Terraform tem misconfigurations)
+- **Job `tfsec`:** Segundo scan de IaC com tfsec (perspectiva complementar)
+- **Job `conftest-opa`:** Valida políticas de negócio customizadas via OPA/Rego
+- **Job `trivy-image`:** Escaneia a imagem Docker para CVEs e segredos
+- **Job `sign-image`:** Assina a imagem com Cosign (keyless) para supply chain security
+- **Job `security-gate`:** Verifica se TODOS os jobs acima passaram — bloqueia o merge se qualquer um falhou
+
+**Por que o security-gate é o passo mais importante:** Um pipeline sem gate permite que um desenvolvedor ignore um job com falha. O `security-gate` usa `needs: [checkov, tfsec, conftest-opa, trivy-image]` e `if: failure()` para garantir que SE qualquer job crítico falhou, o gate falha também — tornando impossível mergear código que violou qualquer política de segurança. Esta é a implementação técnica do princípio "Security as Code" do CISO do Banco Meridian.
 
 ```bash
 cat > .github/workflows/security.yml << 'WORKFLOW'
@@ -608,6 +640,10 @@ echo "Workflow GitHub Actions criado: .github/workflows/security.yml"
 
 ### Passo 7: Fazer Push e Criar PR
 
+**O que este passo faz:** Faz commit de todos os arquivos criados e abre uma Pull Request para a branch `main`. Este é o momento em que o pipeline de segurança é acionado pela primeira vez no contexto real — o GitHub detecta o PR e invoca automaticamente o workflow `.github/workflows/security.yml`. O commit message segue o padrão Conventional Commits (`feat:`) que muitas organizações usam para rastrear mudanças por tipo.
+
+**O que esperar:** O pipeline iniciará em ~30 segundos após o `gh pr create`. Você verá os checks aparecerem no PR no GitHub como "In progress". Como o `terraform/main.tf` contém um bucket S3 intencionalmente inseguro (sem criptografia, sem block public access), o job `checkov` **vai falhar** — e isso é o comportamento correto. O próximo passo (Passo 8) vai analisar e interpretar esta falha.
+
 ```bash
 # Adicionar todos os arquivos
 git add .
@@ -676,6 +712,10 @@ gh pr view --comments
 ---
 
 ### Passo 10: Corrigir o Terraform e Verificar Aprovação
+
+**O que este passo faz:** Demonstra o ciclo completo de "shift-left em ação": o desenvolvedor recebe feedback sobre a misconfiguration diretamente no PR (via comentário do Checkov), corrige o código, faz novo push na mesma branch, e o pipeline re-executa automaticamente — desta vez aprovando. Este ciclo é a prova prática do valor do shift-left: a correção ocorre em minutos, no contexto do código, antes de qualquer deploy.
+
+**O que o aluno aprende com este passo:** O pipeline não é uma barreira — é um assistente. Ao corrigir o bucket S3 adicionando as configurações de segurança necessárias (block public access, criptografia, logging), o desenvolvedor está aprendendo na prática o que as políticas CIS/BACEN exigem, e o porquê de cada configuração. Este é o verdadeiro objetivo do shift-left: educar enquanto bloqueia.
 
 ```bash
 # Editar terraform/main.tf — remover o bucket inseguro

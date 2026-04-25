@@ -43,6 +43,10 @@ O Sentinel possui 5 tipos de analytics rules, cada um com propósito e latência
 
 O tipo mais comum e flexível. Executa uma query KQL em intervalos definidos e gera um alerta quando o resultado não é vazio (ou quando atinge um threshold configurado).
 
+**Por que este tipo de rule é a espinha dorsal do SOC:** A grande maioria das detecções de segurança do mundo real são baseadas em padrões — um usuário que falha login 50 vezes em 5 minutos, um processo que lê centenas de arquivos em sequência, um endpoint que se comunica com um IP listado em threat intelligence. Esses padrões são detectados por queries KQL periódicas sobre dados históricos. A regra Scheduled é o mecanismo que transforma uma query KQL de investigação em um alerta automático que o SOC recebe sem precisar ficar consultando manualmente.
+
+> **Por que isso importa para o Banco Meridian:** Antes de implantar o Sentinel com analytics rules customizadas, o SOC do banco detectou apenas 12% dos ataques em menos de 1 hora. Com 5 Scheduled Rules cobrindo os principais TTPs do setor bancário, a detecção em menos de 1 hora sobe para 73%. A diferença é o tempo que o attacker tem para se mover lateralmente, exfiltrar dados e criar persistência.
+
 **Parâmetros principais**:
 - **Query**: KQL que define o que detectar
 - **Query scheduling**: frequência de execução (5min a 14 dias) e janela de dados consultados
@@ -61,6 +65,10 @@ Regras NRT executam aproximadamente a cada minuto, com latência de ingestão in
 - Bloqueio de conta após múltiplas falhas (brute force em andamento)
 - Tentativas de login com credenciais vazadas
 - Criação de conta de administrador não autorizada
+
+**Quando escolher NRT em vez de Scheduled:** Use NRT para os ataques onde a velocidade de detecção é crítica para a contenção. Exemplos: criação de nova conta de administrador global (T1098.003), desativação de ferramentas de segurança (T1562.001), adição de credencial a service principal, alteração de regra de encaminhamento de e-mail (T1114.003). Nesses casos, cada minuto conta — um attacker que criou uma conta backdoor e a removeu em 4 minutos não seria detectado por uma Scheduled Rule com janela de 5 minutos. A NRT garante detecção em 1-3 minutos.
+
+> **⚠️ Atenção ao custo:** Regras NRT consomem mais recursos de computação que Scheduled Rules equivalentes. Use NRT apenas para detecções de alta severidade onde a latência realmente importa para a contenção. Para volume alto de eventos (como logins normais), use Scheduled com intervalos de 5-15 minutos e agregação.
 
 **Limitações das NRT**:
 - Query deve retornar resultados em menos de 30 segundos
@@ -170,6 +178,10 @@ O entity mapping transforma campos de um alerta em entidades estruturadas. Entid
 ### 3.1 O que são Watchlists
 
 Watchlists são listas de referência armazenadas no Sentinel que podem ser consultadas em KQL durante a execução de analytics rules. Permitem contextualizar alertas sem precisar hardcodar valores nas queries.
+
+**Por que Watchlists são essenciais para detecções de qualidade:** O maior problema de analytics rules genéricas é o excesso de falsos positivos — alertas que tecnicamente disparam a regra, mas não representam um ataque real. Por exemplo: uma regra que detecta "login de localização incomum" vai alertar toda vez que o diretor de expansão fizer login de Nova York ou Londres. Uma Watchlist de `frequent-travelers` permite que a rule ignore esses usuários, focando apenas em pessoas que não costumam viajar. Resultado: menos ruído, mais foco no que importa.
+
+**A diferença prática no contexto do Banco Meridian:** Sem Watchlists, uma regra de impossible travel para os 2.800 funcionários do banco gera em média 15-20 falsos positivos por dia (viagens de negócios, VPNs domésticas, conexões de parceiros). Com a Watchlist `frequent-travelers` configurada corretamente, o número cai para 1-3 alertas reais por dia — exatamente o que o SOC consegue investigar adequadamente.
 
 **Casos de uso no Banco Meridian**:
 

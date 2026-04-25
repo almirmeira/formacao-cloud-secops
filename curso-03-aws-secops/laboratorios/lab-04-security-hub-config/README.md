@@ -7,13 +7,117 @@
 
 ---
 
-## Contexto
+## Seção 1 — Contexto Situacional
 
-O Banco Meridian precisa implementar conformidade contínua alinhada ao BACEN 4.893. Você vai: (1) configurar o Security Hub com os standards CIS e FSBP, (2) criar 3 Config rules customizadas alinhadas ao BACEN, (3) configurar auto-remediation para a rule de S3 público, e (4) deployar o conformance pack completo.
+O Banco Meridian foi notificado de uma revisão de conformidade pelo BACEN agendada para daqui a 45 dias. O auditor pediu evidências de que os controles de segurança estão sendo monitorados de forma contínua e que desvios são detectados e corrigidos automaticamente — não apenas pontualmente em auditorias anuais.
+
+O desafio é que o Banco Meridian não tem nenhum framework de conformidade contínua implementado. O Security Hub não está habilitado. O AWS Config está habilitado em apenas uma conta. Não existe nenhuma evidência automática de conformidade com o CIS AWS Foundations Benchmark ou com as exigências do BACEN.
+
+O CISO declarou que a implementação de conformidade contínua é a principal prioridade da semana.
 
 ---
 
-## Seção 1 — Configurar Security Hub
+## Seção 2 — Situação Inicial
+
+É quinta-feira, 17 de abril de 2026, 09h00. Você recebe o e-mail do CISO com o checklist da auditoria BACEN. Os primeiros três itens do checklist são:
+
+```
+CHECKLIST BACEN 4.893 — AUDITORIA AGENDADA
+──────────────────────────────────────────────────────────────
+ [FALHA] Art. 6 §2 — Evidência de criptografia obrigatória em repouso
+         → AWS Config rule: AUSENTE
+         → Security Hub control: AUSENTE
+
+ [FALHA] Art. 10 §1 — Monitoramento contínuo de conformidade de controles
+         → Security Hub: DESABILITADO
+         → Dashboard de postura: INEXISTENTE
+
+ [FALHA] Art. 7 §3 — Controle de acesso a recursos críticos
+         → IAM Access Analyzer: DESABILITADO na maioria das contas
+         → Config rule para MFA: AUSENTE
+──────────────────────────────────────────────────────────────
+ Status geral: NÃO CONFORME
+ Prazo para regularização: 45 dias
+```
+
+Mariana comenta no stand-up às 09h15:
+
+> "O relatório saiu ontem. Dos 89 controles do CIS v2.0, temos apenas 23 com evidência — os outros 66 simplesmente não têm monitoramento. Para a auditoria BACEN, precisamos no mínimo do Security Hub com os standards ativos e de Config rules para os controles críticos."
+
+Carlos verifica o estado atual do Security Hub via CLI:
+
+```bash
+aws securityhub describe-hub --region sa-east-1
+# Error: "ResourceNotFoundException" — Security Hub não está habilitado
+```
+
+> "Pois é — nem habilitado está. Vamos ter que começar do zero."
+
+**Estado atual do Security Hub:**
+
+```
+SECURITY HUB — BANCO MERIDIAN (Estado Atual)
+────────────────────────────────────────────────────────────
+ Security Hub:         DESABILITADO em todas as contas
+ Standards ativos:     Nenhum
+ Config Rules ativas:  3 (apenas as defaults — insuficiente)
+ Findings processados: 0 (sem dados históricos)
+ Security Score:       N/A
+────────────────────────────────────────────────────────────
+```
+
+---
+
+## Seção 3 — Problema Identificado
+
+**09h45 — Análise das três lacunas críticas para a auditoria:**
+
+**Lacuna 1 — Ausência de visibilidade unificada de postura:**
+O Security Hub é o único serviço AWS que agrega findings de GuardDuty, Inspector, Macie, Config e IAM Access Analyzer em um único painel com score de segurança. Sem ele, o time de segurança precisa acessar cada serviço individualmente — impossível de demonstrar para um auditor.
+
+**Lacuna 2 — Ausência de avaliação contínua de conformidade:**
+O AWS Config avalia configurações de recursos em tempo real. Quando um desenvolvedor cria um bucket S3 público, uma Config rule pode detectar isso em segundos e acionar remediação automática. Sem isso, o bucket público pode existir por semanas até ser descoberto numa varredura manual.
+
+**Lacuna 3 — Ausência de conformance packs alinhados ao BACEN:**
+O AWS Config oferece conformance packs — coleções de Config rules mapeadas a frameworks específicos. Existe um conformance pack para o NIST que serve como base para o mapeamento ao BACEN 4.893. Sem isso, cada regra precisa ser criada manualmente.
+
+**Mapeamento MITRE ATT&CK:**
+- **T1562.007 (Disable or Modify Cloud Firewall)** — detectável via Config rule `restricted-incoming-traffic`
+- **T1530 (Data from Cloud Storage Object)** — detectável via Config rule `s3-bucket-public-read-prohibited`
+- **T1078.004 (Valid Accounts: Cloud Accounts)** — detectável via Config rule `iam-root-access-key-check`
+
+---
+
+## Seção 4 — Roteiro de Atividades
+
+**Objetivo geral:** Implementar conformidade contínua com Security Hub (3 standards), AWS Config (3 rules customizadas e 1 conformance pack), e auto-remediation para S3 público.
+
+**Atividades deste laboratório:**
+
+1. Habilitar Security Hub com standards CIS v2.0, FSBP e PCI-DSS
+2. Configurar Security Hub como delegated admin da Audit Account
+3. Criar Config Recorder e Delivery Channel na conta Production
+4. Criar 3 Config rules customizadas alinhadas ao BACEN 4.893
+5. Configurar auto-remediation via SSM Automation para bucket S3 público
+6. Deployar conformance pack baseado no NIST
+7. Criar Security Hub Custom Action para escalar findings ao CISO
+8. Gerar relatório de score de conformidade
+
+---
+
+## Seção 5 — Proposição do Desafio
+
+Mariana vai testar sua implementação criando propositalmente um bucket S3 público após você finalizar a configuração. Você precisa demonstrar:
+
+1. O finding aparece no Security Hub em menos de 15 minutos após a criação do bucket
+2. A auto-remediation do Config aciona o SSM Automation que bloqueia o acesso público automaticamente
+3. O finding é marcado como `RESOLVED` no Security Hub após a remediação
+
+**Critério de aprovação:** O bucket criado por Mariana deve ter o acesso público bloqueado automaticamente, sem intervenção manual, e o finding correspondente deve estar `RESOLVED` no Security Hub.
+
+---
+
+## Seção de Implementação — Configurar Security Hub
 
 **Passo 1.1** — Habilitar Security Hub:
 

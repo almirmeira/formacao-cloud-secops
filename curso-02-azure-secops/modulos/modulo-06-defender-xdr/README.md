@@ -80,6 +80,10 @@ Hoje, tudo converge no **Microsoft Defender portal** (security.microsoft.com): u
 
 ### 2.1 Onboarding de Endpoints
 
+O onboarding de endpoints é o processo de instalar o sensor MDE (Microsoft Defender for Endpoint) nos dispositivos. Esse sensor coleta telemetria de processo, arquivo, rede e registro em tempo real, enviando para o backend Microsoft 365 Defender onde é processado por machine learning e inteligência de ameaças do MSTIC.
+
+**Por que o onboarding é o primeiro passo prático (não o portal):** Muitos profissionais cometem o erro de passar horas configurando políticas e regras no portal MDE sem ter onboardado nenhum endpoint. Resultado: um portal vazio, sem telemetria, sem alertas reais. O onboarding é o ato de "conectar o sensor" — sem ele, o MDE não vê nada. No Banco Meridian, a estratégia de onboarding define quantos dos 2.800 dispositivos estarão protegidos e monitorados.
+
 **Métodos de onboarding**:
 
 | Método                    | Melhor para                                          |
@@ -158,6 +162,12 @@ isolate
 ### 3.1 O que o MDI Protege
 
 O MDI monitora o tráfego do Active Directory diretamente nos Domain Controllers, analisando protocolos Kerberos, NTLM, LDAP e DNS. Não depende de logs — captura o tráfego em tempo real.
+
+**Por que o MDI é especialmente crítico para bancos com AD on-premises:** O Active Directory é o alvo preferencial de grupos APT porque comprometer o AD significa comprometer tudo. Um attacker que obtém credenciais de administrador de domínio tem acesso irrestrito a todos os servidores, dados e sistemas do banco. O MDI é a única ferramenta que monitora o tráfego de autenticação Kerberos e NTLM diretamente no Domain Controller — ataques como Kerberoasting, Golden Ticket e DCSync deixam rastros apenas no tráfego de rede do DC, não em logs tradicionais de evento do Windows.
+
+**O que diferencia o MDI do monitoramento tradicional de logs:** As ferramentas SIEM tradicionais dependem de logs de evento do Windows (Event IDs 4768, 4769, 4771 etc.) para detectar ataques Kerberos. O problema é que esses logs são configurados no próprio DC, e um attacker com acesso de administrador pode desabilitar o logging. O MDI captura o tráfego de rede no nível do kernel — um administrador comprometido não consegue desabilitar isso sem fisicamente desconectar o sensor.
+
+> **Por que isso importa para o Banco Meridian:** O banco tem um Domain Controller central e dois DCs regionais. Sem o MDI, um analista precisaria revisar manualmente os Event IDs de autenticação de 2.800 usuários para detectar Kerberoasting. Com o MDI, o alerta chega em segundos quando uma conta de serviço recebe mais solicitações TGS do que o normal para suas SPNs.
 
 Para o Banco Meridian, que tem um AD on-premises sincronizado com Entra ID (Entra ID Connect), o MDI cobre:
 - Domain Controllers on-premises (sensor direto no DC)

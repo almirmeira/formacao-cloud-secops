@@ -23,13 +23,48 @@ Esta investigação é sensível — envolve privacidade de funcionário. A inve
 
 ## Seção 2 — Situação Inicial
 
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  PORTAL COMPLIANCE — BANCO MERIDIAN — TERÇA, 10:15                  │
+│  Canal de denúncia anônima — Referência: COMP-2025-0312             │
+│                                                                      │
+│  DENÚNCIA RECEBIDA — ALTA PRIORIDADE                                │
+│  Funcionário envolvido: marcela.ferreira (Analista de Contratos)    │
+│  Descrição: "Suspeita de envio de planilhas de clientes premium      │
+│             para endereço externo."                                  │
+│                                                                      │
+│  STATUS DA INVESTIGAÇÃO SOC: INICIADA                               │
+│  Analista responsável: [você]                                       │
+│  Prazo compliance: 48 horas para resposta inicial                   │
+└──────────────────────────────────────────────────────────────────────┘
+
+"Recebi do compliance uma denúncia sobre a marcela.ferreira. Precisamos investigar.
+ Sem evidências técnicas, não há base para ação disciplinar. Você tem 48 horas.
+ Use o Advanced Hunting — não toque na conta dela, não bloqueie nada ainda.
+ Só investigue e preserve evidências. Se confirmar, o RH e o jurídico entram."
+ — Felipe Andrade, Analista L2 Senior / Supervisor do turno
+```
+
 **Estado do ambiente**:
 - Acesso ao portal security.microsoft.com configurado
 - M365 E5 com MDE, MDO e Entra ID ativos
 - Usuário de teste `marcela.ferreira@bancomeridian-lab.onmicrosoft.com` criado com dados de teste
 - Atividade simulada de acesso a arquivos nos últimos 7 dias (injetada pelo ambiente de lab)
+- **Sentinel:** operacional com o workspace `meridian-secops-prod` (Labs 01 e 03 concluídos)
+- **Incidente Sentinel:** nenhum alerta ativo para marcela.ferreira — a investigação é proativa baseada na denúncia, não em um alerta automático
 
 **Nota do instrutor**: O ambiente de lab contém atividade simulada de `marcela.ferreira` que inclui: e-mails recebidos de domínio externo suspeito, download de arquivos do SharePoint, e upload para serviço cloud externo. Você encontrará evidências reais ao executar as queries.
+
+**O que é o Advanced Hunting do Defender XDR e por que usá-lo neste caso:**
+
+O Advanced Hunting é o motor de investigação proativa do portal security.microsoft.com. Ele acessa tabelas com telemetria granular dos últimos 30 dias de todos os produtos Microsoft Defender:
+- `EmailEvents`: todos os e-mails enviados/recebidos, remetentes, assuntos, IPs
+- `EmailUrlInfo`: URLs em e-mails que foram clicadas
+- `DeviceFileEvents`: criação, modificação, cópia, download de arquivos nos endpoints
+- `DeviceNetworkEvents`: conexões de rede estabelecidas pelos dispositivos
+- `IdentityLogonEvents`: autenticações de identidade correlacionadas pelo MDI
+
+A razão de usar o Advanced Hunting do XDR (e não diretamente o Sentinel) é que ele tem telemetria de endpoint mais granular (cada operação de arquivo individual) que o Sentinel não recebe por padrão. Para uma investigação de insider threat que depende de evidências de acesso a arquivos específicos, o XDR é o ambiente correto.
 
 ---
 
@@ -71,6 +106,8 @@ Ao final deste laboratório:
 ## Seção 6 — Script Passo a Passo
 
 ### Passo 1: Acessar o Advanced Hunting
+
+**Por que este passo é necessário:** Antes de iniciar qualquer investigação, é fundamental verificar se os dados estão disponíveis no ambiente de hunting. Muitos analistas iniciam investigações e ficam frustrados com queries que retornam zero resultados — não porque o suspeito não fez nada, mas porque o dado não chegou ao sistema. Este passo diagnóstico economiza tempo e define o escopo real da investigação disponível.
 
 **security.microsoft.com → Hunting → Advanced hunting**
 
@@ -394,3 +431,30 @@ Classificação: CONFIDENCIAL
    d. Notificar usuária e RH sobre o comprometimento
    e. Verificar integridade dos 47 arquivos acessados
 ```
+
+---
+
+### Erros Comuns e Como Identificar
+
+| Problema | Sintoma | Causa Provável | Solução |
+|:---------|:--------|:---------------|:--------|
+| Query retorna 0 resultados para EmailEvents | Tabela vazia mesmo com atividade simulada | MDO não está conectado ao workspace de Advanced Hunting ou dados ainda não ingeridos | Verificar em security.microsoft.com → Settings → Microsoft 365 Defender → Connected services se MDO está ativo |
+| `AccountUpn` não funciona em IdentityLogonEvents | Erro `Column not found` | Tabela usa `AccountUpn` mas versão do conector pode ter nomes diferentes | Tentar `AccountName` ou `AccountId` — usar `getschema IdentityLogonEvents` para ver as colunas disponíveis |
+| Timeline do Passo 7 retorna duplicatas | Evento único aparece múltiplas vezes | `union` em tabelas com sobreposição de dados | Adicionar `| distinct TimeGenerated, Source, EventType, Description` ao final da query |
+| Bookmark não vincula ao incidente correto | Bookmark criado mas não aparece no incidente | Incidente foi criado antes dos bookmarks, sem vinculação automática | Em Sentinel → Incidents → [incidente] → Bookmarks → Add para vincular manualmente |
+| `DeviceFileEvents` muito lento | Query leva mais de 2 minutos | Filtro de tempo amplo (30d) sem filtro de dispositivo ou usuário suficiente | Adicionar `| where DeviceName == "NOTEBOOK-MARCELA"` ou reduzir `ago(30d)` para `ago(7d)` |
+
+### Interpretação do MITRE ATT&CK para as Evidências Encontradas
+
+A cadeia de ataque do cenário Marcela Ferreira mapeia para as seguintes técnicas MITRE:
+
+| Fase | TTP | Técnica |
+|:-----|:----|:--------|
+| Acesso inicial | T1566.002 | Phishing - Link malicioso |
+| Coleta de credencial | T1539 | Roubo de sessão web (token) |
+| Descoberta | T1083 | Enumeração de arquivos |
+| Coleta | T1213.002 | SharePoint (Data from Information Repositories) |
+| Exfiltração | T1567.002 | Exfiltração para Cloud Storage |
+| Persistência | T1114.003 | Email Forwarding Rule |
+
+Este mapeamento deve constar no relatório técnico e nos bookmarks para facilitar futuras correlações em threat hunting e analytics rules.

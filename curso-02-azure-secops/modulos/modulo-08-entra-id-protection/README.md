@@ -69,6 +69,12 @@ Requer **Entra ID P2** (incluído no M365 E5 ou E5 Security).
 
 ### 2.1 Sign-In Risk Policy
 
+As Sign-In Risk Policies são o mecanismo que transforma a detecção de risco em proteção automatizada. Sem uma policy configurada, o Entra ID detecta o risco (ex.: login de IP anônimo) e não faz nada — apenas registra. Com a policy configurada, o Entra ID automaticamente exige MFA ou bloqueia o login baseado no nível de risco calculado.
+
+**Como funciona o cálculo de risco em tempo real:** O Entra ID avalia cada tentativa de autenticação em milissegundos, consultando dezenas de sinais: endereço IP (comparado com bilhões de logins históricos da Microsoft), localização geográfica (é possível ter chegado aqui dado o último login?), propriedades do dispositivo (browser, sistema operacional, linguagem), hora do dia para aquele usuário, velocidade de deslocamento. O score de risco resultante é um número entre 0 e 100, mapeado para baixo/médio/alto.
+
+**Por que o threshold "Medium and above" é o recomendado para o Banco Meridian:** O threshold "High only" gera poucos falsos positivos mas deixa passar muitos ataques reais. O threshold "Low and above" gera muitos falsos positivos e treina os usuários a ignorar solicitações de MFA ("MFA fatigue"). "Medium and above" é o equilíbrio que captura ~85% dos logins maliciosos com uma taxa de falso positivo de 3-5% — aceitável para um banco onde o custo de uma conta comprometida é muito maior que o incômodo de um usuário legítimo tendo que passar por MFA adicional.
+
 ```
 Portal Azure → Entra ID → Security → Identity Protection → Sign-in risk policy
 
@@ -201,6 +207,12 @@ ENTRA ID RECEBE TENTATIVA
 No modelo tradicional, um administrador de TI tem o papel de **Global Administrator** permanentemente. Isso significa que qualquer comprometimento da conta resulta imediatamente em acesso de altíssimo privilégio ao tenant inteiro.
 
 O **PIM** resolve isso com Just-In-Time access: o administrador é **elegível** ao papel mas não o tem ativo. Para ativar, precisa solicitar, pode precisar de aprovação, e o acesso expira automaticamente após um tempo definido.
+
+**Por que contas permanentemente privilegiadas são o maior risco em ambientes Microsoft:** Uma conta com Global Admin permanente, se comprometida por phishing, dá ao attacker acesso irrestrito a todo o tenant — todos os usuários, todos os dados, todas as configurações. O attacker pode criar backdoors, exportar dados de todos os usuários, desabilitar controles de segurança. Com PIM, mesmo que a conta do admin seja comprometida quando não está com a role ativa, o attacker tem uma conta comum — não Global Admin. O raio de explosão é dramaticamente reduzido.
+
+**O impacto concreto no Banco Meridian:** Antes do PIM, o banco tinha 5 contas com Global Admin permanente. Isso significa que se qualquer uma dessas 5 contas for comprometida, o attacker tem acesso irrestrito ao tenant M365 com 2.800 usuários. Com PIM, as 5 contas são apenas "elegíveis" ao Global Admin. A role só é ativada quando necessário, por no máximo 2 horas (conforme configuração abaixo), com aprovação do CISO. A janela de risco é minimizada.
+
+> **💡 Dica do instrutor:** Configure pelo menos 2 contas "Break Glass" que ficam permanentemente com Global Admin fora do PIM, com credenciais armazenadas em cofre físico. Essas contas são usadas apenas em emergências (PIM indisponível, bloqueio acidental de todos os admins). Configure uma Analytics Rule NRT no Sentinel que alerta imediatamente qualquer login nessas contas — elas não devem ser usadas no dia a dia, então qualquer login é automaticamente suspeito.
 
 ### 4.2 Configuração de PIM para Banco Meridian
 

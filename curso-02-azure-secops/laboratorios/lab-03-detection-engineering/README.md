@@ -73,6 +73,10 @@ Ao final deste laboratório, o Banco Meridian terá:
 
 ### Passo 1: Criar Watchlist Service Accounts
 
+**O que este passo faz:** Cria uma watchlist que cataloga as contas de serviço legítimas do Banco Meridian (backup, monitoramento e ETL). Uma watchlist é uma lista de referência consultada pelas queries KQL das analytics rules — ela permite que a regra de "Service Principal em Role Privilegiada" exclua automaticamente os service principals conhecidos e legítimos, reduzindo drasticamente os falsos positivos. Sem esta watchlist, cada vez que o processo de backup (`svc-backup`) fizer uma operação IAM legítima, um analista seria acordado às 3h da manhã com um falso alerta.
+
+**Por que criamos a watchlist ANTES das analytics rules:** As queries KQL das rules referenciam `_GetWatchlist('service-accounts')`. Se tentarmos salvar uma rule que referencia uma watchlist que ainda não existe, ela falhará na validação ou gerará erros de referência nula durante a avaliação. As watchlists são a fundação de dados de contexto — precisam existir antes da lógica de detecção que as consome.
+
 **Sentinel → Watchlists → New**
 
 ```
@@ -95,9 +99,8 @@ Search key: UserPrincipalName
 → Review + Create → Create
 ```
 
-**Resultado esperado**: Watchlist com 3 registros visível em Watchlists.
+**O que confirma que funcionou:** A watchlist aparece em Sentinel → Watchlists com status "Succeeded" e exibe "3 items" na coluna Source Rows. Para validar via KQL, execute a query abaixo em Logs — ela deve retornar exatamente 3 linhas, uma para cada conta de serviço cadastrada:
 
-**Verificação**:
 ```kql
 _GetWatchlist('service-accounts')
 | project UserPrincipalName, ServiceType
@@ -108,6 +111,10 @@ _GetWatchlist('service-accounts')
 
 ### Passo 2: Criar Watchlist Frequent Travelers
 
+**O que este passo faz:** Cria uma segunda watchlist listando os usuários do Banco Meridian que viajam internacionalmente com frequência por razões legítimas de negócio (diretores, executivos com agendas internacionais). Esta lista é consumida pela regra de Impossible Travel para excluir os usuários que genuinamente fazem login de múltiplos países — sem ela, cada viagem do CEO geraria um alerta de alta severidade que consumiria tempo do analista sem valor operacional.
+
+**Por que esta watchlist vem antes da regra de Impossible Travel:** A analytics rule do Passo 3 referencia `_GetWatchlist('frequent-travelers')` na sua lógica de exclusão. Criar as duas watchlists em sequência (Passos 1 e 2) antes de qualquer rule garante que toda a camada de contexto esteja disponível quando as rules forem criadas e imediatamente ativadas.
+
 **Sentinel → Watchlists → New**
 
 ```csv
@@ -117,9 +124,21 @@ admin@bancomeridian-lab.onmicrosoft.com,Diretoria,"BR,US,AR"
 
 Alias: `frequent-travelers`, Search key: `UserPrincipalName`
 
+**O que confirma que funcionou:** A watchlist `frequent-travelers` aparece em Sentinel → Watchlists com status "Succeeded" e exibe "1 item" na coluna Source Rows. Execute a query de validação abaixo — ela deve retornar 1 linha com o usuário da diretoria e os países permitidos:
+
+```kql
+_GetWatchlist('frequent-travelers')
+| project UserPrincipalName, Department, Countries
+// Deve retornar 1 linha
+```
+
 ---
 
 ### Passo 3: Criar Analytics Rule — Impossible Travel
+
+**O que este passo faz:** Cria uma regra agendada (Scheduled) que detecta quando o mesmo usuário autentica com sucesso em dois países diferentes com menos de 60 minutos de intervalo — um cenário fisicamente impossível sem a ajuda de proxies, VPNs anônimas ou credenciais comprometidas. A query usa uma auto-junção (self-join) da tabela `SigninLogs` para comparar pares de logins do mesmo usuário e calcular se a diferença de país e o intervalo de tempo são suspeitos. As watchlists criadas nos Passos 1 e 2 são aplicadas para filtrar contas de serviço e viajantes frequentes antes da comparação.
+
+**Por que esta é a primeira analytics rule a ser criada:** O Impossible Travel é a detecção com maior impacto imediato para o cenário do FS-ISAC — o relatório de inteligência indica que o Lazarus-BR usa credenciais roubadas para acesso remoto, e logins de países incomuns são o sinal mais precoce desse padrão. Além disso, a lógica de self-join desta regra é a mais complexa do lab, servindo como referência para as demais.
 
 **Sentinel → Analytics → Create → Scheduled query rule**
 
@@ -192,11 +211,15 @@ TimeDiffMinutes → TimeDiffMinutes
 
 **Clicar em Review + Create**
 
-**Resultado esperado**: Rule aparece em Analytics → Active rules com status "Enabled".
+**O que confirma que funcionou:** A rule "Banco Meridian - Impossible Travel - Login de Dois Países em 1h" aparece em Sentinel → Analytics → Active rules com status "Enabled" e ícone de relógio (Scheduled). Na coluna "Last run", após até 30 minutos, aparece um timestamp e o status "Succeeded" — indicando que a query foi executada sem erros de sintaxe KQL ou referência de watchlist.
 
 ---
 
 ### Passo 4: Criar Analytics Rule — Password Spray (NRT)
+
+**O que este passo faz:** Cria uma regra do tipo NRT (Near-Real-Time) que detecta o padrão característico de password spray: um mesmo endereço IP tentando autenticar em muitas contas diferentes com poucas tentativas por conta. O atacante do Grupo Lazarus-BR usa esta técnica deliberadamente para evitar o bloqueio por conta (que ocorre após 5-10 falhas consecutivas na mesma conta). A query agrega falhas de login por IP e avalia dois critérios simultaneamente: mínimo de 5 contas únicas atacadas E média de no máximo 3 tentativas por conta — a "assinatura matemática" do spray.
+
+**Por que esta rule usa o tipo NRT em vez de Scheduled:** Password spray é uma ameaça com janela de ataque curta — o atacante frequentemente conclui o ciclo de spray em minutos antes de trocar de IP. Uma rule Scheduled com intervalo de 30 minutos poderia perder ou atrasar a detecção. O NRT avalia a query praticamente em tempo real (latência de ~1 minuto), permitindo que o SOC bloqueie o IP ainda durante o ataque. Esta é a segunda rule a ser criada porque a detecção de credenciais comprometidas (Impossible Travel) deve estar ativa antes da detecção do vetor de comprometimento inicial.
 
 **Sentinel → Analytics → Create → NRT query rule**
 
@@ -245,9 +268,15 @@ AccountList → AccountList
 
 **Clicar em Review + Create**
 
+**O que confirma que funcionou:** A rule aparece em Sentinel → Analytics → Active rules com status "Enabled" e o ícone NRT (raio/lightning) que diferencia visualmente das rules Scheduled. A coluna "Type" exibe "NRT" e a coluna "Last run" começa a ser atualizada em menos de 2 minutos após a criação, pois rules NRT iniciam imediatamente.
+
 ---
 
 ### Passo 5: Criar Analytics Rule — Service Principal em Role Privilegiada
+
+**O que este passo faz:** Cria uma regra NRT que monitora o AuditLog do Entra ID em busca de operações de atribuição de role onde o alvo é um Service Principal (não um usuário humano) e a role atribuída é privilegiada (Global Administrator, Security Administrator, etc.). Este é o padrão de persistência do Lazarus-BR: após obter acesso inicial, o grupo registra um novo Service Principal e concede a ele uma role privilegiada para manter acesso persistente mesmo que as credenciais do usuário humano sejam revogadas. A query extrai o tipo do objeto alvo e o nome da role dos campos JSON aninhados do AuditLogs.
+
+**Por que esta rule usa NRT e janela de 15 minutos:** A adição de um Service Principal a uma role privilegiada é um evento de altíssima criticidade que não tolera latência de detecção. Em 15 minutos, um Service Principal com role de Global Administrator já pode ter criado backdoors adicionais, exportado credenciais ou desabilitado políticas de Conditional Access. O NRT garante que o alerta chegue ao analista enquanto o atacante ainda está no ambiente. Esta rule vem após as de credenciais (Passos 3 e 4) porque representa a fase de persistência — posterior ao acesso inicial.
 
 **Sentinel → Analytics → Create → NRT query rule**
 
@@ -285,9 +314,15 @@ Account (Initiator): Name → InitiatorUPN
 Account (Target SP): Name → TargetDisplayName
 ```
 
+**O que confirma que funcionou:** A rule aparece em Sentinel → Analytics com status "Enabled" e tipo "NRT". O mapeamento MITRE ATT&CK deve aparecer preenchido com T1098 e T1548 na coluna "Tactics" da listagem. Para validar o mapeamento de entidades, clique na rule criada e acesse a aba "Entity mapping" — devem aparecer dois mapeamentos de Account (Initiator e Target SP), o que permite ao Sentinel correlacionar automaticamente incidentes envolvendo os mesmos service principals.
+
 ---
 
 ### Passo 6: Criar Analytics Rule — AiTM Token Theft
+
+**O que este passo faz:** Cria uma regra Scheduled que detecta o padrão de roubo de token via ataque AiTM (Adversary-in-the-Middle): um usuário que normalmente autentica com MFA (nos últimos 7 dias) de repente faz login com autenticação de fator único (SFA) sem um device registrado. Isso indica que o atacante está usando um token de sessão roubado por proxy — o token já passou pelo MFA legítimo, então o Entra ID aceita a autenticação como válida, mas o sinal de "SFA sem device" delata a anomalia. A query cruza logins recentes (2h) com o histórico de 7 dias via join para identificar esta mudança de padrão.
+
+**Por que esta rule usa tipo Scheduled em vez de NRT:** Ao contrário do password spray (evento pontual e rápido), a detecção de AiTM requer correlação com dados históricos — a query precisa olhar 7 dias de histórico de MFA do usuário para estabelecer o baseline. Queries com joins contra grandes volumes de dados históricos são mais adequadas para execução Scheduled (30 minutos) do que NRT, que tem restrições de complexidade e volume de dados consultados. Esta rule vem após as de acesso inicial e persistência porque representa uma técnica de evasão sofisticada que pressupõe que o atacante já passou pela autenticação básica.
 
 **Sentinel → Analytics → Create → Scheduled query rule**
 
@@ -320,9 +355,15 @@ SigninLogs
           AuthenticationRequirement, RiskLevelDuringSignIn, LastMFALogin
 ```
 
+**O que confirma que funcionou:** A rule aparece em Sentinel → Analytics com tipo "Scheduled", severidade "High" e agendamento "Every 30 minutes / 2 hours lookback". Na coluna "MITRE tactics", os campos "Initial Access" e "Credential Access" devem estar visíveis. Após a primeira execução (até 30 minutos), a coluna "Last run" exibe o timestamp e "Succeeded" — confirmando que o join contra 7 dias de SigninLogs foi executado sem timeout ou erro de sintaxe.
+
 ---
 
 ### Passo 7: Criar Analytics Rule — SharePoint Exfiltration
+
+**O que este passo faz:** Cria uma regra Scheduled que detecta exfiltração de dados via SharePoint/OneDrive usando comparação de volume com baseline histórico. A lógica calcula a média diária de downloads de cada usuário nos últimos 30 dias (excluindo a última hora, que é a janela de análise) e compara com o volume da última hora. Se um usuário baixar 5x ou mais do que sua média diária em uma única hora, gera um alerta. Este padrão é típico de funcionários em processo de demissão copiando dados antes de sair, ou de atacantes que comprometeram uma conta e estão exfiltrando documentos corporativos em massa.
+
+**Por que esta é a última analytics rule a ser criada:** A regra de exfiltração representa a fase final da cadeia de ataque (Collection → Exfiltration no MITRE ATT&CK) — ela detecta o objetivo final do atacante após acesso inicial, evasão de MFA e persistência. A sequência de criação segue a ordem da kill chain: primeiro detectamos o acesso (Passos 3-4), depois a persistência (Passo 5), depois a evasão (Passo 6) e por último o objetivo final (Passo 7). Além disso, esta rule usa dados do Office 365 (OfficeActivity) — diferente das anteriores que usavam SigninLogs e AuditLogs — validando que o data connector Office 365 está funcionando corretamente.
 
 **Sentinel → Analytics → Create → Scheduled query rule**
 
@@ -360,9 +401,15 @@ recentActivity
           Multiplier = round(Multiplier, 1), IPs
 ```
 
+**O que confirma que funcionou:** A rule aparece em Sentinel → Analytics com tipo "Scheduled", severidade "Medium" e agendamento "Every 1 hour / 1 hour lookback". A severidade "Medium" (diferente das "High" anteriores) deve aparecer corretamente na listagem. Para confirmar que o data connector Office 365 tem dados suficientes para o baseline, execute manualmente a subquery de baseline em Logs — se retornar linhas, o connector está ativo há mais de 1 hora e a regra terá dados para comparação.
+
 ---
 
 ### Passo 8: Criar Automation Rule de Triagem
+
+**O que este passo faz:** Cria uma automation rule que executa automaticamente três ações de triagem sempre que um incidente de alta severidade envolvendo entidades do tipo Account é criado no Sentinel: atribui o incidente ao analista de plantão, adiciona tags de classificação para facilitar filtragem e muda o status de "New" para "Active". Esta automação elimina o trabalho manual repetitivo de triagem inicial, garantindo que todo incidente de alta severidade com conta seja imediatamente atribuído e marcado — mesmo que o analista esteja respondendo a outro incidente simultaneamente. No contexto do Banco Meridian, todas as 5 analytics rules criadas podem gerar incidentes que passarão por esta triagem automática.
+
+**Por que a automation rule vem DEPOIS das analytics rules:** A automation rule é disparada por incidentes gerados pelas analytics rules. Se criássemos a automation rule antes, ela não teria incidentes para processar durante o lab — pois as rules ainda não existiriam. A ordem correta é: criar as fontes de incidentes (analytics rules) e depois criar o orquestrador de resposta (automation rule).
 
 **Sentinel → Automation → Create → Automation rule**
 
@@ -379,9 +426,15 @@ Actions (em ordem):
   3. Change status: Active
 ```
 
+**O que confirma que funcionou:** A automation rule aparece em Sentinel → Automation → Automation rules com status "Enabled". A ordem das 3 ações (Assign owner → Add tags → Change status) deve estar visível no resumo da rule. Para testar a automação sem esperar um incidente real, crie manualmente um incidente de severidade High com uma entidade Account em Sentinel → Incidents → Create — após alguns segundos, o incidente deve mostrar o owner atribuído, as tags adicionadas e o status "Active".
+
 ---
 
 ### Passo 9: Verificação Completa
+
+**O que este passo faz:** Executa uma query de saúde do Sentinel para confirmar que todas as 5 analytics rules criadas estão operacionais, sem erros de execução. A tabela `_SentinelHealth` registra o resultado de cada execução de analytics rule — se uma rule tem erro de KQL, referência de watchlist inválida ou problema de permissão, o status aparece como "Failed" aqui. Esta verificação final garante que o ambiente do Banco Meridian está efetivamente protegido e não apenas "configurado no papel".
+
+**Por que esta verificação encerra o lab:** O Passo 9 é o critério de aceitação de todo o trabalho anterior. Um analista pode criar todas as rules sem erros de validação no portal, mas se uma watchlist tiver alias incorreto ou se um data connector estiver desconectado, as rules executarão com zero resultados ou falharão silenciosamente. Esta query de saúde detecta exatamente esses cenários e dá confiança ao SOC de que a cobertura de detecção está ativa.
 
 Execute a query de verificação final:
 
@@ -397,6 +450,8 @@ _SentinelHealth
 )
 | project TimeGenerated, SentinelResourceName, Status = SentinelResourceType
 ```
+
+**O que confirma que funcionou:** A query retorna 5 linhas (uma por analytics rule) com status "Succeeded" para todas. Se alguma rule aparecer com status "Failed", anote o nome e consulte a seção de troubleshooting: os erros mais comuns são alias de watchlist incorreto (verificar ortografia exata) ou connector desconectado (verificar em Data connectors). O lab está concluído quando todas as 5 rules mostram "Succeeded" e a automation rule está "Enabled" em Sentinel → Automation.
 
 ---
 
@@ -427,6 +482,20 @@ _SentinelHealth
 | 4 | AiTM Token Theft                             | Scheduled | 30min/2h   | Account, IP       | T1557, T1539   |
 | 5 | SharePoint Exfiltração Anômala               | Scheduled | 1h/1h      | Account           | T1530          |
 
+**Por que esta é a resposta correta — tabela de regras:**
+
+- **Impossible Travel como Scheduled (30min/1h):** A janela de lookup de 1h é proposital — logins com menos de 1h de diferença são o limiar para "fisicamente impossível" mesmo com voos domésticos curtos. Um intervalo maior (ex.: 4h) geraria falsos negativos em ataques rápidos; um intervalo menor (ex.: 10min) seria irrealista. O agendamento de 30min garante detecção antes que o atacante possa causar dano significativo dentro da sessão.
+
+- **Password Spray como NRT:** A natureza rápida do spray (ciclo completo em minutos) exige latência mínima de detecção. NRT (~1min) vs. Scheduled 30min pode ser a diferença entre bloquear o IP durante o ataque ou descobrir o comprometimento horas depois. O lookback de 1h na query é suficiente para capturar o padrão sem consumir recursos excessivos.
+
+- **Service Principal como NRT (15min):** Um Service Principal com Global Administrator é uma backdoor imediata e irrevogável se não detectada. O lookback de 15min é propositalmente curto — apenas eventos muito recentes precisam ser avaliados, pois operações de atribuição de role são raras e qualquer instância é suspeita se o alvo for ServicePrincipal.
+
+- **AiTM como Scheduled com lookback de 7d:** A detecção de anomalia de autenticação requer baseline histórico. Sem os 7 dias de histórico de MFA, não há como distinguir "usuário que nunca usou MFA" (conta nova ou isenta) de "usuário que normalmente usa MFA mas desta vez não usou" (sinal de AiTM). O lookback longo é o custo necessário para esta detecção de alta fidelidade.
+
+- **SharePoint como Scheduled (1h/1h) com Severity Medium:** O baseline de 30 dias e a janela de análise de 1h são o equilíbrio entre sensibilidade e precisão. Severity Medium (não High) é intencional — exfiltração via SharePoint pode ter causas legítimas (projeto de grande entrega, backup pessoal autorizado) e merece investigação, não resposta imediata de contenção.
+
+---
+
 ### Verificação das Watchlists
 
 ```kql
@@ -438,6 +507,10 @@ union (
 )
 | project WatchlistName, UserPrincipalName
 ```
+
+**Por que esta é a resposta correta — verificação de watchlists:** A query usa `union` para verificar as duas watchlists em uma única execução, retornando 4 linhas no total (3 de service-accounts + 1 de frequent-travelers). Se qualquer watchlist retornar 0 linhas, o alias está incorreto — verifique se o alias foi digitado exatamente como `service-accounts` e `frequent-travelers` (com hífen, sem espaço, sem maiúsculas). Um alias incorreto faz com que `_GetWatchlist()` retorne uma tabela vazia sem gerar erro, causando rules que "funcionam" mas nunca excluem as contas legítimas.
+
+---
 
 ### Queries KQL Finais para cada Rule
 
@@ -452,6 +525,10 @@ _SentinelHealth
 | summarize count() by Status = SentinelResourceType, ResourceName = SentinelResourceName
 | sort by Status asc
 ```
+
+**Por que esta é a resposta correta — validação de health:** A query usa `_SentinelHealth` (não `SecurityAlert` nem `Incidents`) porque registra o resultado de execução de cada rule independentemente de ter gerado alertas. Uma rule pode executar com sucesso e retornar 0 resultados (sem atividade suspeita no período) — isso é diferente de uma rule que falha na execução. O `summarize count() by Status` agrupa por resultado (Succeeded/Failed) para facilitar a identificação de rules com problema sem precisar ler cada linha individualmente.
+
+---
 
 ### Desafio Extra (Opcional)
 
@@ -498,3 +575,29 @@ SecurityAlert
 | where AlertName contains "Password Spray"
 | project TimeGenerated, AlertName, Description, Entities
 ```
+
+---
+
+### Erros Comuns Neste Lab
+
+**Erro 1: Watchlist retorna 0 linhas na query KQL**
+- **Causa provável:** Alias digitado incorretamente (ex.: `ServiceAccounts` em vez de `service-accounts`, ou `service_accounts` com underscore)
+- **Como corrigir:** Vá em Sentinel → Watchlists, clique na watchlist e confirme o valor exato do campo "Alias". O alias é case-sensitive nas queries KQL. Edite a watchlist se necessário.
+
+**Erro 2: Analytics rule em status "Failed" no _SentinelHealth**
+- **Causa provável A:** Data connector desconectado (SigninLogs ou OfficeActivity sem dados)
+- **Causa provável B:** Watchlist referenciada na query ainda não foi criada
+- **Como corrigir:** Verifique em Sentinel → Data connectors se o status é "Connected". Execute a subquery manualmente em Logs para isolar qual parte da query falha.
+
+**Erro 3: Rule NRT não aparece na lista após salvar**
+- **Causa provável:** Erro de validação silencioso ao salvar — o portal às vezes aceita o clique em "Create" mas descarta a rule se houver campo obrigatório vazio
+- **Como corrigir:** Volte em Analytics → Create → NRT e verifique se o campo "Name" está preenchido e se pelo menos uma tática MITRE foi selecionada. Rules sem nome ou sem tática podem ser rejeitadas silenciosamente.
+
+**Erro 4: Query de Impossible Travel retorna resultados inesperados (zero ou muitos)**
+- **Causa provável — zero resultados:** Ambiente de lab com poucos logins nos últimos 60 minutos; aguardar atividade orgânica ou gerar logins de teste com dois IPs de países diferentes
+- **Causa provável — muitos resultados:** Watchlist `frequent-travelers` com alias incorreto, não excluindo o usuário admin que faz logins de múltiplos países em demos
+- **Como corrigir:** Execute cada subquery (`excludedAccounts`, `frequentTravelers`, `recentLogins`) separadamente em Logs para identificar onde o filtro falha.
+
+**Erro 5: Automation rule não é disparada em incidentes de teste**
+- **Causa provável:** A condition "Incident contains entities of type: Account" requer que o incidente tenha entidade Account mapeada — se as analytics rules não tiverem entity mapping configurado, os incidentes não terão entidades e a automation rule não será disparada
+- **Como corrigir:** Confirme que as rules de Passos 3, 4 e 5 têm entity mapping de Account configurado (conforme Passo 3 — "Account: Name → UserPrincipalName"). Incidentes gerados por rules sem entity mapping não acionarão a automation rule de triagem.

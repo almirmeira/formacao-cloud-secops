@@ -26,6 +26,19 @@ Ao concluir este módulo, você será capaz de:
 
 ### 1.1 O que é o Google SecOps?
 
+Antes de explorar a plataforma em si, é importante entender o problema que ela resolve. O Banco
+Meridian, como qualquer instituição financeira regulada pelo BACEN, é obrigado a detectar e
+responder a incidentes cibernéticos em até 24 horas (Resolução 4.893). Com 2.800 funcionários,
+12 filiais e um ambiente híbrido que combina sistemas legados de core banking, Azure AD, Google
+Cloud e VMware, o volume de logs gerado diariamente chega a dezenas de gigabytes. Um SIEM
+tradicional, instalado em hardware próprio, simplesmente não consegue acompanhar esse crescimento
+sem investimento proibitivo em infraestrutura.
+
+O Google SecOps nasce exatamente desse desafio: oferecer uma plataforma de Security Operations
+capaz de ingerir, armazenar e analisar petabytes de dados de segurança usando a mesma
+infraestrutura que sustenta o Google Search e o YouTube — sem que a organização precise gerenciar
+servidores ou se preocupar com licenças por usuário.
+
 O Google SecOps é a evolução da plataforma Chronicle, adquirida pelo Google em 2019 e integrada
 ao Google Cloud. Trata-se de uma plataforma de **Security Operations** nativamente em nuvem que
 combina em um único produto:
@@ -59,9 +72,22 @@ combina em um único produto:
 | **Detecção**           | YARA-L 2.0 (linguagem proprietária)          | SPL, KQL, Sigma (não nativos)            |
 | **Performance**        | Busca sobre anos de dados em segundos        | Buscas longas, timeouts comuns           |
 
+> **Por que isso importa para o Banco Meridian:** A Resolução BACEN 4.893 exige que o banco
+> mantenha registros de eventos de segurança por pelo menos 5 anos. Com o modelo de retenção
+> do Google SecOps (1 ano no UD Mode + archival ilimitado), o banco atende essa exigência sem
+> precisar de investimento adicional em storage. Além disso, o modelo de pricing por ingestão
+> é especialmente vantajoso para bancos de tier 2: você paga pelo volume de dados, não pelo
+> número de analistas no SOC ou pelo número de alertas gerados.
+
 ---
 
 ### 1.2 Arquitetura do Google SecOps
+
+O Google SecOps é composto por três camadas funcionais que trabalham em conjunto: ingestão,
+processamento e análise. Compreender cada camada é fundamental para entender onde os dados
+entram no sistema, como são transformados e como ficam disponíveis para detecção e investigação.
+No contexto do Banco Meridian, cada uma dessas camadas terá fontes específicas: desde o sistema
+de core banking Tópus até os logs do Azure AD e firewalls Palo Alto das filiais.
 
 #### Camada de Ingestão
 
@@ -92,6 +118,18 @@ SIEM Legado        ──────►   Syslog / CEF / LEEF    ──►│
 ---
 
 ### 1.3 Unified Data Model (UDM) — Introdução
+
+Imagine que o SOC do Banco Meridian precisa investigar se um usuário suspeito fez login
+com sucesso. Os logs de login existem em pelo menos três lugares: Windows Active Directory
+(formato de Windows Event ID 4624/4625), Azure AD (formato JSON proprietário da Microsoft)
+e o sistema Tópus Banking (CSV proprietário). Sem normalização, o analista precisaria escrever
+uma query diferente para cada fonte — e ainda assim não conseguiria correlacionar os três em
+uma única visão.
+
+O UDM resolve esse problema de forma elegante. Todo log ingerido — de qualquer fonte e em
+qualquer formato — é traduzido para um schema comum antes de ser armazenado. Assim, uma única
+query (`security_result.action = "BLOCK" AND metadata.event_type = "USER_LOGIN"`) retorna
+tentativas de login bloqueadas de TODAS as fontes ao mesmo tempo.
 
 O UDM é o schema normalizado do Google SecOps. Todos os logs ingeridos, independentemente do
 formato original, são normalizados para o UDM antes de serem armazenados.
@@ -134,9 +172,33 @@ formato original, são normalizados para o UDM antes de serem armazenados.
 }
 ```
 
+**Interpretando o resultado — o que cada campo significa:**
+
+- `metadata.event_type: "USER_LOGIN"` → o Google SecOps classificou este evento como uma
+  tentativa de autenticação. Independente de ser Windows, Azure AD ou Okta, esse campo sempre
+  será `USER_LOGIN` para eventos de login.
+- `principal.hostname: "WRK-JOAO-001"` → a máquina DE ONDE o login foi originado. "Principal"
+  é sempre quem faz a ação.
+- `target.hostname: "SRV-DC-001"` → o servidor PARA ONDE o login foi direcionado. "Target" é
+  sempre quem sofre a ação.
+- `network.application_protocol: "KERBEROS"` → o protocolo de autenticação usado. No ambiente
+  Active Directory do Banco Meridian, Kerberos é o padrão para logins em domínio.
+- `security_result.action: "ALLOW"` → o login foi autorizado pelo sistema.
+
+> **💡 Dica do instrutor:** A distinção entre `principal` (quem faz) e `target` (quem sofre)
+> é crítica para escrever queries corretas. No Windows Event ID 4625 (falha de login), o usuário
+> que TENTOU fazer login está em `target.user.userid` — não em `principal.user.userid`. Confundir
+> os dois é um dos erros mais comuns de quem começa no Google SecOps.
+
 ---
 
 ### 1.4 Comparativo: Google SecOps vs. Outros SIEMs
+
+O Banco Meridian avaliou três plataformas SIEM antes de optar pelo Google SecOps: Microsoft
+Sentinel (já que o banco usa Azure AD e Microsoft 365), Splunk Enterprise (o SIEM legado que
+estava sendo substituído) e IBM QRadar (usado por alguns bancos parceiros). A tabela abaixo
+reflete os critérios que um banco de tier 2 brasileiro considera nessa decisão, incluindo
+custo de propriedade, compliance com BACEN e capacidade de ingestão de logs legados.
 
 | Critério               | Google SecOps    | Microsoft Sentinel  | Splunk Enterprise  | IBM QRadar        |
 |:-----------------------|:----------------:|:-------------------:|:------------------:|:-----------------:|
@@ -153,9 +215,26 @@ formato original, são normalizados para o UDM antes de serem armazenados.
 > "Líder" com forte capacidade de análise em grande escala, especialmente para organizações com
 > volumes massivos de telemetria. Microsoft Sentinel lidera em integração com ecosistema M365.
 
+> **Por que isso importa para o Banco Meridian:** O banco usa tanto Azure AD quanto sistemas
+> legados como o Tópus Banking. O Google SecOps suporta ambos via parsers CBN (que estudaremos
+> no Lab 01) e feeds nativos do Azure AD, sem exigir que o banco abandone seu ecossistema
+> Microsoft. Essa flexibilidade multi-fonte é o principal diferencial frente ao Sentinel, que
+> funciona melhor em ambientes exclusivamente Microsoft.
+
+> ⚠️ **Atenção:** A escolha de SIEM deve considerar o ecossistema existente. Migrar de um SIEM
+> para outro sem considerar os parsers existentes e as integrações legadas pode gerar meses de
+> trabalho de adaptação. No caso do Banco Meridian, o fato de já usar Google Cloud para cargas
+> analíticas foi um fator decisivo na escolha do Google SecOps.
+
 ---
 
 ### 1.5 Modelo de Retenção e Pricing
+
+O modelo de retenção e pricing do Google SecOps é um dos aspectos mais relevantes para
+decisões de aquisição, especialmente em instituições reguladas. A BACEN 4.893 exige retenção
+de logs por 5 anos, o que em SIEMs tradicionais representa um custo elevado de armazenamento.
+Entender os três modos de retenção permite ao gestor de SOC equilibrar custo e acessibilidade
+dos dados históricos.
 
 #### Modelos de Retenção
 
@@ -187,9 +266,32 @@ TOTAL                   110 GB/dia             ~US$ 220/dia*
   para precificação atual e negociação de contrato enterprise.
 ```
 
+**Interpretando a estimativa acima:**
+
+- 110 GB/dia × 365 dias = ~40 TB/ano de dados de log do Banco Meridian
+- Com o modelo UD Mode (1 ano de retenção com busca rápida), esses 40 TB ficam prontamente
+  acessíveis para qualquer investigação ou retrohunt
+- Os anos 2–5 de retenção (exigência BACEN) seriam armazenados no UDM Archive, a um custo
+  significativamente menor — com busca mais lenta, mas adequada para investigações forenses
+- O custo de ~US$ 220/dia (estimativa) equivale a um analista L1 adicional no SOC — mas com
+  cobertura 24x7 e capacidade de processar milhões de eventos simultaneamente
+
+> **💡 Dica do instrutor:** Ao apresentar o custo de um SIEM cloud-native para o gestor de
+> TI ou CISO, sempre compare com o custo total de propriedade (TCO) do SIEM on-premises que
+> seria substituído. Hardware, licenças de EPS, manutenção, energia e equipe de operação
+> geralmente tornam o modelo SaaS competitivo mesmo para volumes menores.
+
 ---
 
 ### 1.6 Google SecOps no Contexto do SOC Moderno
+
+O SOC do Banco Meridian conta atualmente com três analistas: Mariana (L2, investigação e
+detecção), Carlos (L1, triagem e monitoramento) e você (Engenheiro de Detecção, criação e
+manutenção de regras YARA-L). Com apenas três profissionais monitorando um ambiente com
+2.800 funcionários, a plataforma SIEM precisa fazer a "triagem pesada" automaticamente —
+gerando alertas com contexto suficiente para que os analistas tomem decisões rápidas. O Google
+SecOps foi projetado exatamente para esse modelo: poucos analistas, grande volume de dados,
+alta exigência de automação.
 
 O Google SecOps é projetado para suportar todas as funções de um SOC moderno:
 

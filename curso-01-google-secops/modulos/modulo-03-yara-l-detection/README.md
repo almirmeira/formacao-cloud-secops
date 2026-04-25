@@ -31,6 +31,18 @@ Google SecOps. Ela foi projetada especificamente para operar sobre o UDM, permit
 correlação de eventos ao longo do tempo — algo que consultas SQL simples não conseguem
 expressar de forma eficiente.
 
+Antes de estudar a sintaxe, é importante entender por que o Google criou uma linguagem nova,
+em vez de adotar SQL ou um padrão existente como Sigma. O problema central é que ameaças
+reais raramente são sobre um único evento isolado. Um password spray não é "uma tentativa de
+login com falha" — é "50 tentativas de login com falha para 30 usuários diferentes a partir
+do mesmo IP, tudo dentro de 15 minutos". SQL consegue expressar isso com joins e subqueries
+complexas, mas sem a noção de janela temporal deslizante nativa que o YARA-L oferece.
+
+No contexto do Banco Meridian, onde o SOC opera com três analistas cobrindo 2.800 funcionários,
+a capacidade do YARA-L de detectar padrões complexos automaticamente — sem intervenção humana
+para cada event — é o que torna o monitoramento 24x7 viável. Uma única regra bem escrita pode
+substituir horas de análise manual diária.
+
 ```
 ESTRUTURA COMPLETA DE UMA REGRA YARA-L 2.0
 ═══════════════════════════════════════════════════════════════════════
@@ -86,7 +98,15 @@ rule NOME_DA_REGRA {
 
 #### 3.1.2 Seção `events` — Definição dos Eventos
 
-A seção `events` define QUAIS eventos o YARA-L deve capturar e COMO correlacioná-los.
+A seção `events` é onde você define QUAIS eventos o YARA-L deve capturar e COMO correlacioná-los
+entre si. É aqui que você especifica os filtros UDM que selecionam os eventos relevantes para
+a detecção. Pense nela como a "cláusula WHERE" da sua detecção: você está dizendo ao motor
+"me traga apenas eventos que tenham estas características".
+
+No contexto do Banco Meridian, a seção `events` de uma regra de password spray, por exemplo,
+filtraria apenas eventos de login com falha (`security_result.action = "BLOCK"`) para o domínio
+corporativo do banco (`target.user.email_addresses = /.*@bancomeridian\.com\.br$/`), excluindo
+automaticamente logins de contas de serviço que geram muitas falhas por razões legítimas.
 
 **Variáveis de evento:** `$e1`, `$e2`, `$e3` — cada variável representa um tipo de evento.
 
@@ -106,6 +126,16 @@ events:
 ```
 
 #### 3.1.3 Seção `match` — Janela Temporal
+
+A seção `match` é o que transforma uma query de busca em uma detecção de padrão temporal.
+Sem ela, você tem uma regra single-event — que verifica cada evento individualmente. Com ela,
+você tem uma regra multi-event — que agrupa eventos que compartilham um campo comum (como o
+IP de origem) dentro de uma janela de tempo deslizante, e avalia o conjunto como um todo.
+
+No Banco Meridian, a seção `match` é o mecanismo que distingue uma tentativa isolada de
+login com falha (que acontece centenas de vezes por dia de forma legítima) de um ataque de
+password spray (onde o mesmo IP tenta dezenas de contas diferentes em minutos). Sem o `match`
+e sua janela temporal, a regra não conseguiria fazer essa distinção.
 
 A seção `match` é **obrigatória em regras multi-event**. Ela define:
 - **A variável de agrupamento** — como os eventos são correlacionados
@@ -138,6 +168,16 @@ match:
 | **AND / OR**                               | `#e1 >= 10 AND #e2 >= 1`                             | Operadores lógicos                                 |
 
 #### 3.1.5 Seção `outcome` — Campos do Alerta
+
+A seção `outcome` é onde você decide o que o analista verá quando abrir o alerta. Sem um
+`outcome` bem elaborado, o analista recebe um alerta genérico e precisa navegar manualmente
+pelo SIEM para entender o que aconteceu. Com um `outcome` rico, o alerta já vem com a lista
+de usuários afetados, o IP do atacante, o número de tentativas e o risk score — tudo que
+o analista precisa para tomar a primeira decisão de triagem em segundos.
+
+No contexto do Banco Meridian, onde Mariana (L2) e Carlos (L1) precisam triar alertas
+rapidamente durante o turno, um `outcome` bem preenchido pode reduzir o tempo de triagem
+de 15 minutos para 2 minutos por alerta.
 
 A seção `outcome` permite calcular e adicionar campos extras ao alerta gerado, enriquecendo
 o contexto para o analista de triagem:
@@ -267,6 +307,21 @@ rule password_spray_simples {
 
 ### 3.4 Retrohunt vs. Live Rules
 
+Um dos principais erros cometidos por analistas que são novos no Google SecOps é ativar uma
+regra YARA-L como Live Rule imediatamente após escrevê-la, sem validação prévia. O resultado
+típico é uma enxurrada de falsos positivos que sobrecarrega o SOC e faz os analistas perderem
+a confiança no sistema de detecção.
+
+O Retrohunt é a etapa de validação que evita esse problema. Ao rodar a regra sobre dados
+históricos ANTES de ativá-la em produção, você consegue medir: quantas detecções reais a
+regra encontraria? E quantos falsos positivos? Essa análise prévia é o que torna possível
+calibrar os thresholds e exclusões com dados reais do ambiente.
+
+No caso do Banco Meridian, um Retrohunt de 7 dias sobre os logs de login do Azure AD e
+Windows Event, antes de ativar qualquer regra de brute force, revelaria quantas vezes por
+semana os sistemas de monitoramento internos geram falhas de login legítimas — informação
+essencial para definir o threshold correto da regra.
+
 | Característica         | Retrohunt                                    | Live Rule                                      |
 |:-----------------------|:--------------------------------------------:|:----------------------------------------------:|
 | **Quando executa**     | Sob demanda, sobre dados históricos          | Continuamente, sobre eventos em tempo real     |
@@ -294,6 +349,21 @@ rule password_spray_simples {
 
 Falsos positivos são o maior inimigo da efetividade de um SOC. Uma regra que gera 50 alertas
 por dia onde 49 são FP treina os analistas a ignorar os alertas — incluindo o real.
+
+Esse fenômeno tem um nome: **alert fatigue** (fadiga de alerta). É um dos maiores problemas
+operacionais de qualquer SOC, e tem uma consequência direta e perigosa: analistas que
+recebem centenas de FPs por dia começam a "aprovar" alertas no modo automático, sem análise
+real. Quando o alerta genuíno aparece, ele passa despercebido exatamente como os outros.
+
+No Banco Meridian, um SOC com apenas três analistas é especialmente vulnerável à fadiga de
+alerta. Se cada analista recebe 80 alertas por turno e 70 são FPs, a capacidade de resposta
+a incidentes reais fica seriamente comprometida. Por isso, o tuning de regras não é opcional
+— é tão crítico quanto a escrita das próprias regras.
+
+> ⚠️ **Atenção:** A fadiga de alerta foi um fator contribuinte em vários incidentes de alto
+> perfil documentados pelo Verizon DBIR e pelo Mandiant M-Trends. Em um desses casos, o alerta
+> real ficou na fila de revisão por 47 dias antes de ser investigado — porque os analistas
+> estavam sobrecarregados com FPs. Mantenha a taxa de FP abaixo de 10% em todas as Live Rules.
 
 #### 3.5.1 Técnicas de Exclusão
 
@@ -339,6 +409,13 @@ O threshold ideal depende do baseline do ambiente. Processo para definir:
 ---
 
 ### 3.6 Cinco Exemplos Completos de Regras YARA-L
+
+Os cinco exemplos a seguir foram construídos especificamente para o cenário do Banco Meridian.
+Cada um detecta uma técnica diferente do MITRE ATT&CK que é relevante para o setor financeiro
+brasileiro. Estude o código de cada exemplo entendendo primeiro a lógica de segurança por trás
+da regra — o que o atacante faz que torna o padrão detectável? — antes de analisar a sintaxe
+YARA-L. Essa ordem de raciocínio (do problema para o código) é o que diferencia um bom
+Detection Engineer de alguém que apenas copia regras sem entender o que está fazendo.
 
 #### Exemplo 1: Login Fora do Horário Comercial (Single-Event)
 

@@ -99,6 +99,14 @@ Interface: 3 abas
 
 ### 2.2 Criando e Salvando uma Hunting Query
 
+Salvar uma hunting query no Sentinel é um passo fundamental que transforma a investigação individual numa capacidade coletiva da equipe. Quando uma query é salva com nome descritivo, tags MITRE e mapeamento de entidades, qualquer analista do SOC pode reproduzi-la durante uma investigação futura. Hunting queries bem documentadas também são o ponto de partida para criar Analytics Rules — se a query encontrou algo valioso desta vez, provavelmente encontrará novamente.
+
+**O que configurar em cada campo e por quê:**
+- **Name:** Use um prefixo como "Hunting -" para distinguir de analytics rules. Inclua a TTP ou o comportamento buscado.
+- **Description:** Explique a hipótese que a query testa, não apenas o que ela faz tecnicamente. Exemplo: "Busca logins de contas de serviço fora do horário, assumindo que service accounts legítimas só operam em horário comercial — a exceção pode indicar uso de credenciais roubadas."
+- **MITRE ATT&CK:** Necessário para que a query apareça filtrada por tática/técnica na interface de hunting. Facilita encontrar todas as queries relacionadas a uma Tática específica durante uma investigação guiada por MITRE.
+- **Entity mappings:** Permitem que resultados da query sejam vinculados automaticamente a entidades (usuários, hosts, IPs) no gráfico de incidente do Sentinel.
+
 ```
 Sentinel → Hunting → Queries → New query
 
@@ -161,6 +169,10 @@ Os **Notebooks Jupyter** no Sentinel permitem análise avançada usando Python, 
 - Machine learning customizado (clustering de IPs suspeitos, anomalia detection)
 - Análise de threat intelligence (MISP, STIX, TAXII integration)
 - Correlação com dados externos (OSINT, threat feeds)
+
+**Quando um Notebook Jupyter é mais adequado que uma query KQL:** O KQL é excelente para queries estruturadas, filtros e agregações. Mas para análises que exigem estatística avançada (zscore, distribuições, correlações), aprendizado de máquina não supervisionado (clustering para encontrar usuários comportamentalmente similares e identificar outliers), ou visualizações complexas (gráficos de rede mostrando caminhos de lateral movement), Python + pandas é a ferramenta certa. No Banco Meridian, o Notebook é usado para análises mensais de baseline — uma vez identificada a baseline, as detecções baseadas nela são implementadas como Analytics Rules KQL.
+
+> **⚠️ Atenção:** Notebooks Jupyter no Sentinel requerem autenticação com uma conta que tenha permissão de leitura no workspace. Para investigações sensíveis (insider threat, investigação de executivos), use uma conta de serviço dedicada com acesso apenas ao período relevante, para manter a cadeia de custódia e evitar que um notebook acidentalmente sobrescreva dados.
 
 ### 3.2 MSTIC Libraries
 

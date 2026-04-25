@@ -29,6 +29,22 @@ Ao concluir este módulo, você será capaz de:
 O SOAR (Security Orchestration, Automation and Response) do Google SecOps conecta o SIEM
 (detecção) com as ferramentas de resposta para criar um ciclo de operações fechado.
 
+Para entender por que o SOAR é crítico para o Banco Meridian, considere o seguinte cálculo:
+sem automação, quando um alerta de phishing dispara, Carlos (analista L1) precisa abrir o
+caso, consultar o VirusTotal manualmente para verificar o hash do anexo, abrir o Azure AD para
+ver se o usuário clicou no link, acionar o CrowdStrike para isolar o host se necessário,
+criar um ticket no Jira, notificar o CISO por e-mail e atualizar o status no sistema de
+gestão de incidentes. Esse processo manual leva em média 47 minutos — durante os quais o
+atacante já pode ter exfiltrado dados ou movido lateralmente.
+
+Com o SOAR configurado corretamente, todo esse fluxo acontece em 38 segundos, de forma
+automática, enquanto Carlos continua focado em outros alertas. Essa redução de MTTR de 47
+minutos para 38 segundos é o argumento de ROI mais poderoso para justificar o investimento
+em um SOC com SOAR — e é exatamente o que você vai construir no Lab 04.
+
+O SOAR (Security Orchestration, Automation and Response) do Google SecOps conecta o SIEM
+(detecção) com as ferramentas de resposta para criar um ciclo de operações fechado.
+
 ```
 ARQUITETURA SOAR — GOOGLE SECOPS
 ══════════════════════════════════════════════════════════════════
@@ -86,6 +102,20 @@ ARQUITETURA SOAR — GOOGLE SECOPS
 
 O Playbook Designer é uma interface visual baseada em blocos (similar ao draw.io) onde você
 arrasta e conecta blocos de lógica para criar fluxos de resposta.
+
+Antes de começar a criar playbooks, é importante adotar a mentalidade correta: um playbook
+SOAR não substitui o analista — ele elimina as **tarefas mecânicas e repetíveis** que
+consomem o tempo do analista. Para cada ação de um playbook, você deve perguntar: "Esta
+decisão requer julgamento humano, ou é sempre a mesma dado o mesmo contexto?" Se a resposta
+for "sempre a mesma", automatize. Se requer julgamento contextual, use um bloco de aprovação
+humana (`Wait`).
+
+No contexto do Banco Meridian, a regra geral é:
+- **Enriquecimento** (consultar VirusTotal, Mandiant, GeoIP) → SEMPRE automatize
+- **Contenção de nível P2** (bloquear IP, notificar usuário, criar ticket) → automatize
+- **Contenção de nível P1** (isolar host, revogar credenciais, desabilitar conta) → aprovação
+  humana antes de executar (risco de impacto operacional)
+- **Escalação para CISO/Diretoria** → NUNCA automatize sem validação humana
 
 #### 6.2.1 Tipos de Bloco Disponíveis
 

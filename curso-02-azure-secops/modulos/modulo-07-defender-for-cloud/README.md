@@ -187,6 +187,16 @@ Após habilitação (até 24h para avaliação completa), o relatório de compli
 
 ### 4.2 Habilitando Defender Plans via PowerShell
 
+Habilitar os Defender Plans via PowerShell é o método recomendado para ambientes que seguem Infrastructure as Code. Permite documentar exatamente quais planos estão habilitados em qual subscription, revisar mudanças via pull request e replicar a configuração em outros ambientes (ex.: criar um sandbox com a mesma postura de segurança que a produção).
+
+**Por que não basta clicar em "Enable All" no portal:** O portal tem um botão "Enable all plans" que é tentador, mas pode gerar custos significativos não planejados. Para o Banco Meridian, habilitar todos os planos em uma subscription com 200 VMs, 50 SQL databases e 30 storage accounts pode custar $2.000-5.000/mês. A abordagem seletiva — habilitando apenas os planos para workloads que existem e que têm risco relevante — é mais responsável financeiramente sem comprometer a cobertura de segurança.
+
+**O que cada plano no script abaixo protege no contexto do Banco Meridian:**
+- `VirtualMachines`: Protege os servidores que hospedam o sistema bancário core e middleware de integração
+- `SqlServers`: Protege os bancos de dados relacionais onde ficam as transações e dados de clientes
+- `StorageAccounts`: Protege o armazenamento de extratos, contratos digitalizados e backups
+- `KeyVaults`: Protege as chaves criptográficas usadas para assinar transações e certificados TLS
+
 ```powershell
 # Habilitar Defender for Servers P2 na subscription do Banco Meridian
 Set-AzSecurityPricing -Name "VirtualMachines" -PricingTier "Standard"

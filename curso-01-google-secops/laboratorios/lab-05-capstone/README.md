@@ -12,7 +12,109 @@
 
 ---
 
-## 1. Instruções Gerais
+## 1. Contexto Situacional — A Operação Antas
+
+*"O alerta chegou às 3h17 de uma terça-feira. O sistema UEBA enviou uma notificação automática
+ao canal #soc-alerts do Slack: Risk Score de marcos.pereira havia saltado de 15 para 94 em
+menos de 6 horas. Mariana estava de plantão e abriu o caso imediatamente..."*
+
+O Banco Meridian passa pela pior crise de segurança de sua história. Durante 9 dias consecutivos,
+um grupo APT especializado em ataques ao setor financeiro brasileiro — identificado internamente
+como APT-FIN-BR — conduziu uma operação multifásica contra o banco. A campanha, denominada
+**Operação Antas** pelo time de IR, foi cuidadosamente planejada: os atacantes fizeram OSINT
+sobre funcionários do departamento financeiro por semanas antes de lançar o spearphishing.
+
+Marcos Pereira, analista financeiro responsável por conciliações de alto valor, recebeu um
+e-mail aparentemente originado do Banco Central do Brasil — com PDF anexo sobre "Novas
+Diretrizes de Compliance para Operações de Câmbio 2026". O PDF explorou uma vulnerabilidade
+no Adobe Reader para instalar um Cobalt Strike Beacon, que permaneceu ativo por 9 dias antes
+de ser detectado. Nesse período, 4,7 GB de dados financeiros foram exfiltrados e uma conta
+de backdoor foi criada com privilégios de administrador de domínio.
+
+**Seu papel:** Você é o Engenheiro de Detecção chamado para liderar a investigação técnica.
+Mariana (L2) e Carlos (L1) irão apoiar. Sua missão é reconstruir completamente o que aconteceu,
+criar as detecções que preveniriam o próximo ataque e elaborar o relatório de incidente exigido
+pelo BACEN.
+
+---
+
+## 2. Situação Inicial
+
+Ao começar o lab, o ambiente está no seguinte estado:
+
+```
+DASHBOARD — BANCO MERIDIAN SOC — OPERAÇÃO ANTAS
+════════════════════════════════════════════════════════════════════
+
+  Risk Analytics (momento atual, 03:45 BRT):
+  ─────────────────────────────────────────────
+  Entidade              Risk Score  Variação 24h  Status
+  marcos.pereira            94        +79        ⚠️ CRITICAL
+  WRK-MARCOS-015            87        +72        ⚠️ CRITICAL
+  diana.ferreira            45         +0        HIGH (incidente anterior)
+  WRK-RODRIGO-011           31        -58        RECOVERING (Lab 03 contido)
+
+  Alertas ativos:
+  ─────────────────────────────────────────────
+  UEBA: Risk Score crítico — marcos.pereira      [NOVO - 03:17]
+  password_spray_detection: (sem novos disparos)
+  login_fora_horario: 1 alerta — marcos.pereira  [NOVO - 02:47]
+
+  Feeds de TI:
+  ─────────────────────────────────────────────
+  Mandiant TI Feed     → HEALTHY
+  VirusTotal Augment   → HEALTHY
+  CERT.BR Feed         → HEALTHY (atualizado há 2h)
+
+════════════════════════════════════════════════════════════════════
+```
+
+O alerta de login fora do horário (`login_fora_horario`) foi o primeiro sinal — às 02:47,
+marcos.pereira fez login bem-sucedido de um IP em Moscou. O UEBA capturou isso e começou a
+elevar o Risk Score. Às 03:17, o score atingiu o threshold crítico e o alerta automático foi
+enviado.
+
+---
+
+## 3. Problema Identificado
+
+Mariana analisa o alerta inicial e envia a seguinte mensagem no Slack às 03:52:
+
+*"@todos — accordei com o alerta. Marcus.pereira fez login às 02:47 de Moscou. Ele está de
+férias em Campos do Jordão, confirmado — falei com ele agora. Não foi ele. A conta está
+comprometida. Mas quando fui ver o histórico de atividade dos últimos dias, o UEBA está
+marcando WRK-MARCOS-015 com 72 pontos de aumento em 24h. Isso não é de hoje. Tem coisa
+acontecendo há dias nessa máquina. Precisamos de uma investigação completa. O CISO precisa
+ser acionado às 06h com um briefing preliminar."*
+
+**O que sabemos até agora:**
+- Login bem-sucedido às 02:47 de Moscou para marcus.pereira (conta comprometida)
+- WRK-MARCOS-015 com Risk Score em crescimento há mais de 24h
+- Nenhuma regra YARA-L disparou para o host nos últimos 9 dias
+- O BACEN exige notificação de incidente em até 24 horas — o relógio está correndo
+
+**Sua missão:**
+1. Reconstruir a kill chain completa da Operação Antas
+2. Identificar todos os IOCs (IP de C2, hash do dropper, conta backdoor, dados exfiltrados)
+3. Criar 3 regras YARA-L que teriam detectado o ataque antes
+4. Criar o playbook SOAR de resposta para esse tipo de incidente
+5. Produzir o relatório de incidente no formato NIST SP 800-61 para o CISO e BACEN
+
+---
+
+## 4. Roteiro de Atividades
+
+| Fase | Atividade                                              | Tempo estimado |
+|:----:|:-------------------------------------------------------|:--------------:|
+| A    | Detecção inicial — Risk Analytics, UEBA, alertas ativos | 20 min        |
+| B    | Investigação e hunting — UDM Search avançado com pivoting | 30 min      |
+| C    | Criação das 3 regras YARA-L com Retrohunt              | 30 min         |
+| D    | Criação do playbook SOAR de resposta a APT             | 30 min         |
+| E    | Finalizar os 4 entregáveis obrigatórios                | 10 min         |
+
+---
+
+## 5. Instruções Gerais
 
 Este é o laboratório final do Curso 1 — Google SecOps Essentials. Diferente dos labs anteriores,
 não há um script passo a passo para guiar você. Este é o momento de aplicar de forma integrada
@@ -297,12 +399,76 @@ Você não precisa de slides. Na defesa, você vai:
 
 ## 7. Gabarito
 
-O gabarito completo está disponível no **Módulo 07, seção 5** e será apresentado pelo
-instrutor durante a revisão coletiva da Parte 2. Para garantir o aprendizado genuíno,
-o gabarito **não é disponibilizado antes da sessão live**.
+O gabarito completo é revelado pelo instrutor durante a revisão coletiva da Parte 2. Para
+garantir o aprendizado genuíno, o gabarito completo **não é disponibilizado antes da sessão live**.
+Após a sessão live, o conteúdo abaixo fica disponível para consulta futura.
 
-Após a sessão live, o gabarito fica permanentemente disponível no Módulo 07 para
-consulta futura.
+### Gabarito — Timeline Oficial (Kill Chain da Operação Antas)
+
+| Timestamp (UTC)     | Evento                                                     | Técnica MITRE       | Fonte          |
+|:--------------------|:-----------------------------------------------------------|:--------------------|:---------------|
+| 2026-04-15 13:42:07 | marcos.pereira recebe e-mail com PDF malicioso             | T1566.001 Phishing  | Proofpoint     |
+| 2026-04-15 14:08:33 | AcroRd32.exe abre PDF e executa exploit                    | T1203 Exploit       | SYSMON         |
+| 2026-04-15 14:08:41 | Dropper `bc_cert_helper.exe` criado em %TEMP%             | T1204.002 User Exec | SYSMON         |
+| 2026-04-15 14:08:44 | Cobalt Strike Beacon injetado em svchost.exe               | T1055.001 Injection | CROWDSTRIKE    |
+| 2026-04-15 14:08:46 | 1ª conexão C2 para `45.77.123.89:443`                      | T1071.001 C2 Web    | PAN_FIREWALL   |
+| 2026-04-15–24       | 12.847 conexões C2 em 9 dias (intervalo ~62s)              | T1071.001 C2 Web    | PAN_FIREWALL   |
+| 2026-04-20 02:33:11 | User Agent de reconhecimento (acesso a SharePoint e CIFS)  | T1083 File Discovery| SYSMON         |
+| 2026-04-20 03:17:45 | Exfiltração de 4,7 GB via HTTPS para `185.220.101.34`      | T1048 Exfil Alt Prot| PAN_FIREWALL   |
+| 2026-04-22 09:14:29 | Criação de conta backdoor `administrador_ti2` no AD        | T1136.002 Crt Acct  | WINDOWS_EVENT  |
+| 2026-04-22 09:15:02 | `administrador_ti2` adicionado ao grupo Domain Admins       | T1098 Acct Manip    | WINDOWS_EVENT  |
+| 2026-04-24 02:47:33 | Login de `marcos.pereira` de IP em Moscou (conta roubada)  | T1078 Valid Accounts| AZURE_AD       |
+| 2026-04-24 03:17:00 | UEBA dispara — Risk Score de marcos.pereira: 15 → 94       | N/A (Detecção)      | UEBA           |
+
+**Pontuação da timeline:** 12 eventos = nota máxima. 8–11 eventos = aprovado. < 8 = reprovado.
+
+**Por que essa timeline confirma o incidente:**
+A sequência explicitamente mostra a kill chain completa do MITRE ATT&CK: Phishing (Entrega) →
+Exploit (Execução) → C2 (Comando e Controle) → Discovery → Exfiltração → Persistência (conta
+backdoor) → Credential Access (uso da conta de marcos.pereira). Esse mapeamento 1:1 com as
+táticas do ATT&CK é o que estrutura o relatório BACEN e evidencia a extensão do comprometimento.
+
+### Gabarito — IOCs da Operação Antas
+
+| Tipo   | Indicador                                                            | Confiança |
+|:-------|:---------------------------------------------------------------------|:---------:|
+| IP C2  | `45.77.123.89` (Vultr VPS, EUA)                                     | HIGH      |
+| IP Exfil| `185.220.101.34` (Tor Exit Node / Frantech, Moldova)               | HIGH      |
+| SHA256 | `3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d...`  (PDF malicioso)    | HIGH      |
+| SHA256 | `7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d...`  (bc_cert_helper.exe) | HIGH      |
+| Path   | `%TEMP%\bc_cert_helper.exe`                                         | HIGH      |
+| Conta  | `administrador_ti2` (backdoor, Domain Admin)                        | HIGH      |
+| Domínio| `banco-central-br.com` (domínio de phishing — typosquat)            | HIGH      |
+
+### Gabarito — Regras YARA-L Esperadas
+
+**Regra 1 (C2 Beaconing com Processo Pai em %TEMP%):** Deve ter `$e2` detectando lançamento
+de svchost.exe por processo em `%TEMP%` ou `%APPDATA%`, e correlacionar com as conexões
+C2 (`$e1`) pelo `$hostname_origem`. Threshold mínimo aceitável: `#e1 >= 20` em `1h`.
+
+**Regra 2 (Privilege Escalation):** Deve detectar `USER_CREATION` seguido de adição a grupo
+admin no mesmo host dentro de 5 minutos. Severidade: CRITICAL. Ausência de exclusões para
+`administrador_ti2` confirma corretude — contas de backdoor não estão nas watchlists.
+
+**Regra 3 (Exfiltração em massa HTTPS):** Threshold de `sum(sent_bytes) >= 1073741824` (1 GB)
+em janela de `4h` é aceitável. Thresholds mais baixos (100 MB em 1h) também são aceitos se
+justificados. Qualquer threshold acima de 10 GB é excessivo para detecção de exfiltração.
+
+**Variações aceitáveis:**
+- A janela temporal das regras pode variar ±50% (ex: `2h` em vez de `1h` para beaconing)
+- Exclusões diferentes para contas de serviço são aceitáveis se documentadas
+- Nomes diferentes para as regras são aceitáveis desde que o padrão de nomenclatura seja
+  consistente com `{categoria}_{descrição}` conforme Módulo 03 seção 3.8.1
+
+### Gabarito — Erros Comuns e Como Identificar
+
+| Erro                                          | Sinal de Identificação                        | Solução                                              |
+|:----------------------------------------------|:----------------------------------------------|:-----------------------------------------------------|
+| Timeline não inclui a exfiltração             | Timeline tem < 10 eventos; missing T1048      | Buscar `sum(network.sent_bytes)` agrupado por dia    |
+| Regra de beaconing não detectou o caso        | Retrohunt retorna 0 detecções                 | Verificar se svchost.exe está na watchlist — remover |
+| Regra de exfil com threshold irreal (< 1 MB)  | Retrohunt retorna centenas de FPs (backups)   | Aumentar threshold; calibrar com dados históricos    |
+| Conta backdoor não identificada               | Timeline não tem T1136 / T1098                | Buscar `metadata.event_type = "USER_CREATION"` no período |
+| Relatório sem seção de recomendações          | Rubrica: -2 pontos na seção 6 do relatório    | Adicionar 3–5 recomendações técnicas pós-incidente   |
 
 ---
 

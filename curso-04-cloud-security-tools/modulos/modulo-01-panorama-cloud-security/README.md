@@ -1,9 +1,9 @@
 # Módulo 01 — Panorama e Taxonomia das Ferramentas de Cloud Security
 ## Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps · CECyber
 
-> **Duração:** 1h videoaula + 1h live online  
-> **Certificação Alvo:** CCSP (ISC²) domínio 6 / CCSK (CSA) domínio 3  
-> **Cenário:** Banco Meridian iniciando avaliação do stack de segurança cloud
+> **Duração:** 1h videoaula + 1h live online
+> **Certificação Alvo:** CCSP (ISC²) domínio 6 / CCSK (CSA) domínio 3
+> **Cenário:** Banco Meridian iniciando avaliação de segurança cloud
 
 ---
 
@@ -11,73 +11,73 @@
 
 Ao concluir este módulo, você será capaz de:
 
-1. Nomear e definir precisamente cada categoria da taxonomia Gartner de Cloud Security Tools (2025)
-2. Explicar o problema de segurança específico que cada categoria resolve
-3. Descrever a convergência do mercado para CNAPP e as razões estratégicas por trás dela
-4. Conduzir uma análise Build vs Buy para ferramentas de segurança cloud
-5. Aplicar os critérios de seleção de ferramentas ao contexto regulatório brasileiro (BACEN 4.893, LGPD)
+1. Definir com precisão cada categoria da taxonomia Gartner de Cloud Security Tools (2025)
+2. Explicar o problema de segurança que cada categoria resolve, com exemplos práticos do Banco Meridian
+3. Descrever a convergência para CNAPP e por que ela acontece agora
+4. Conduzir uma análise Build vs Buy de ferramentas de cloud security com TCO realista
+5. Aplicar critérios de seleção considerando o contexto regulatório brasileiro (BACEN 4.893, LGPD)
 
 ---
 
-## 1. Taxonomia Gartner de Cloud Security Tools — 2025
+## 1. Taxonomia Gartner Cloud Security Tools — 2025
 
-O mercado de segurança cloud evoluiu de ferramentas pontuais para um ecossistema complexo de categorias especializadas. Entender essa taxonomia é o ponto de partida para qualquer avaliação de postura de segurança.
+A taxonomia de ferramentas de cloud security foi consolidada pelo Gartner ao longo de uma década de evolução. Cada categoria surgiu como resposta a um problema específico que emergiu conforme a adoção de cloud cresceu. Entender a origem de cada categoria é fundamental para saber qual ferramenta usar em qual situação.
 
 ### 1.1 CNAPP — Cloud-Native Application Protection Platform
 
-**Definição precisa:** Plataforma integrada que combina múltiplas capacidades de segurança cloud (CSPM, CWPP, CIEM, IaC security, code security) em uma única solução com dados correlacionados. O termo foi cunhado pelo Gartner em 2021.
+**Definição:** Plataforma unificada que converge CSPM, CWPP, CIEM, IaC security e code security em uma única console com correlação de dados. O termo foi cunhado pelo Gartner em 2021.
 
-**Problema que resolve:** A proliferação de ferramentas pontuais criou silos de segurança. Times têm 12+ consoles diferentes sem correlação entre os dados. Um atacante explora combinações de misconfigurations + permissões excessivas + vulnerabilidades de imagem — mas cada ferramenta vê apenas um pedaço. O CNAPP enxerga a cadeia completa.
+**Problema que resolve:** O problema da combinação tóxica. Um ambiente cloud típico pode ter uma EC2 com misconfiguration (Security Group aberto), uma CVE crítica no OS (Log4Shell), e uma role IAM excessivamente permissiva — tudo no mesmo servidor. Com ferramentas isoladas, você vê três findings separados. Com CNAPP, você vê um único alerta: "Esta EC2 está exposta + tem CVE exploitável remotamente + role IAM de admin — risco crítico imediato de comprometimento total."
 
-**Exemplos:**
-- Comerciais: Wiz, Prisma Cloud (Palo Alto), Orca Security, Lacework, Defender for Cloud (Microsoft)
-- Open-source: combinação de Prowler + Trivy + Falco + Checkov (não é um CNAPP verdadeiro, mas cobre as categorias)
+**Por que é relevante para o Banco Meridian:** A auditoria do BACEN exige evidências de monitoramento contínuo (Art. 6) e avaliação de controles (Art. 5). Com CNAPP, o Banco Meridian consegue um console único com cobertura AWS + Azure + GCP, correlação de riscos e relatórios de conformidade prontos para auditoria.
 
-**Capacidade diferencial:** Toxic combinations — identifica quando uma instância EC2 tem uma misconfiguration + uma CVE crítica + uma role IAM excessiva ao mesmo tempo. Individualmente, cada finding teria prioridade média; combinados, são críticos.
+**Exemplos comerciais:** Wiz, Prisma Cloud (Palo Alto Networks), Orca Security, Microsoft Defender for Cloud
 
 ---
 
 ### 1.2 CSPM — Cloud Security Posture Management
 
-**Definição precisa:** Ferramenta que avalia continuamente a configuração dos recursos cloud contra benchmarks de segurança (CIS, NIST, LGPD, BACEN) e identifica desvios — misconfigurations, exposições públicas, falta de criptografia, controles ausentes.
+**Definição:** Categoria de ferramentas que avalia continuamente a configuração dos recursos cloud contra benchmarks de segurança estabelecidos (CIS, NIST, LGPD, BACEN), identificando misconfigurations, exposições públicas e desvios de política.
 
-**Problema que resolve:** Operadores de cloud erram ao configurar recursos. Um S3 bucket público, um Security Group com porta 22 aberta para 0.0.0.0/0, um banco de dados sem backup habilitado — são misconfigurations que exporão dados do Banco Meridian a uma multa do BACEN ou a um vazamento. CSPM automatiza a detecção contínua desses erros.
+**Problema que resolve:** A misconfiguration acidental. Um S3 bucket público expondo dados de clientes, um Security Group com porta 22 aberta para 0.0.0.0/0, um banco de dados RDS sem criptografia — cada uma dessas configurações pode levar o Banco Meridian a uma multa do BACEN ou a um vazamento de dados. CSPM automatiza a detecção contínua desses erros sem precisar acessar o conteúdo dos dados.
 
-**Foco:** Plano de controle (configuração), não plano de dados (o que roda dentro).
+**Foco:** Plano de controle — analisa as configurações via API, não o conteúdo dos workloads.
 
-**Exemplos:**
-- Open-source: Prowler v4, ScoutSuite, CloudSploit (Aqua)
-- Comerciais: Wiz (CSPM como parte do CNAPP), Prisma Cloud, Orca, Defender for Cloud
+**Diferença crítica com CWPP:** CSPM pergunta "como esse recurso está configurado?" enquanto CWPP pergunta "o que está rodando dentro desse recurso e tem CVEs?".
+
+**Exemplos open-source:** Prowler v4, ScoutSuite, CloudSploit
+**Exemplos comerciais (integrados em CNAPP):** Wiz, Prisma Cloud, Orca, Defender for Cloud
 
 ---
 
 ### 1.3 CWPP — Cloud Workload Protection Platform
 
-**Definição precisa:** Protege o que está rodando dentro das instâncias — VMs, containers, funções serverless. Inclui vulnerability management (CVEs no OS e nas dependências), runtime protection, integrity monitoring e controle de aplicações.
+**Definição:** Categoria que protege os workloads em execução — VMs, containers, serverless functions — analisando vulnerabilidades (CVEs no OS e dependências) e comportamentos anômalos em runtime.
 
-**Problema que resolve:** Uma VM bem configurada (sem misconfigurations — CSPM clean) pode ter uma aplicação com Log4Shell. Uma imagem Docker pode ter 200 CVEs no OS base. CWPP olha para dentro da carga de trabalho.
+**Problema que resolve:** As vulnerabilidades dentro dos workloads. Um container pode estar rodando com uma versão de nginx que tem Log4Shell. O servidor pode ter pacotes de sistema desatualizados com CVEs críticas. Isso não é visível via API do provedor cloud (CSPM não detecta) — requer análise do filesystem ou monitoramento de syscalls.
 
-**Diferença do CSPM:** CSPM = "sua casa está trancada?" (configuração). CWPP = "o que está acontecendo dentro da casa?" (conteúdo e comportamento).
+**Duas dimensões do CWPP:**
+- **Pré-deploy (static):** scan de imagens de container e pacotes de VMs para CVEs antes de ir para produção (Trivy, Grype, Snyk Container)
+- **Runtime:** monitoramento comportamental em tempo real durante a execução (Falco com eBPF, Sysdig Secure, Aqua Security)
 
-**Exemplos:**
-- Open-source: Trivy (scan), Falco (runtime), Grype, Syft
-- Comerciais: Sysdig Secure, Aqua Security, Prisma Cloud Compute, Defender for Containers
+**Exemplos open-source:** Trivy, Falco, Grype, Syft (SBOM)
+**Exemplos comerciais:** Sysdig Secure, Aqua Security, Prisma Cloud CWPP
 
 ---
 
 ### 1.4 CIEM — Cloud Infrastructure Entitlement Management
 
-**Definição precisa:** Gerencia identidades e permissões em ambientes cloud — identifica permissões excessivas, unused permissions, shadow admins, e riscos de movimentação lateral via identidades.
+**Definição:** Categoria especializada no gerenciamento de identidades e permissões em ambientes cloud, onde cada Lambda, cada EC2, cada pod Kubernetes é uma identidade com permissões. O CIEM analisa o que cada identidade pode realmente fazer (effective permissions), identifica excessos e toxic combinations.
 
-**Problema que resolve:** Em cloud, existem muito mais identidades do que em ambientes on-premises: cada Lambda, cada EC2, cada pod K8s tem uma identidade. 95% dessas identidades têm mais permissões do que precisam. Um atacante que compromete qualquer uma delas pode se mover lateralmente ou escalar privilégios. CIEM identifica esse excesso.
+**Problema que resolve:** A explosão de identidades não-humanas. Uma empresa de médio porte tem 1.200+ identidades não-humanas em cloud (EC2 instance profiles, Lambda roles, K8s service accounts, CI/CD machine users). Pesquisas indicam que 95% dessas identidades têm mais permissões do que usam na prática. Uma role "inofensiva" com `iam:CreateUser` + `iam:AttachUserPolicy` é um shadow admin que pode comprometer toda a conta.
 
 **Conceitos-chave:**
-- Effective permissions: o que uma identidade realmente pode fazer (levando em conta todas as policies, SCPs, permission boundaries)
-- Permissions creep: acúmulo gradual de permissões que nunca são removidas
-- Non-human identities (NHI): service accounts, instance profiles, workload identities
+- **Effective permissions:** o que uma identidade realmente pode fazer considerando todas as policies, SCPs e boundaries
+- **Permissions creep:** acúmulo gradual de permissões que nunca são removidas
+- **Non-human identities (NHI):** service accounts, instance profiles, workload identities
 
 **Exemplos:**
-- AWS: IAM Access Analyzer
+- AWS: IAM Access Analyzer (unused access + external access)
 - Azure: Entra Permissions Management
 - GCP: Policy Intelligence
 - Comerciais multi-cloud: Wiz CIEM, Ermetic (Tenable), CyberArk Cloud Entitlements Manager
@@ -86,97 +86,89 @@ O mercado de segurança cloud evoluiu de ferramentas pontuais para um ecossistem
 
 ### 1.5 CASB — Cloud Access Security Broker
 
-**Definição precisa:** Ponto de controle de segurança posicionado entre usuários e aplicações cloud (SaaS, IaaS, PaaS). Monitora, controla e protege o acesso a aplicações cloud corporativas e pessoais.
+**Definição:** Ponto de controle de segurança entre os usuários da empresa e as aplicações cloud (SaaS, IaaS, PaaS). Monitora e controla o acesso a aplicações aprovadas e não aprovadas (shadow IT).
 
-**Problema que resolve:** Colaboradores do Banco Meridian usam centenas de aplicações SaaS — algumas aprovadas pelo TI, muitas não (shadow IT). Dados sensíveis de clientes podem ser uploadados para um Google Drive pessoal ou compartilhados via WeTransfer. CASB detecta e bloqueia esse vazamento.
+**Problema que resolve:** O shadow IT e a exfiltração de dados via SaaS. Um analista do Banco Meridian pode estar enviando planilhas com dados de clientes para o Google Sheets pessoal, ou usando o ChatGPT para resumir documentos confidenciais. Sem CASB, isso é invisível para o TI.
 
-**Capacidades:** Shadow IT discovery, DLP (Data Loss Prevention), ATP (Advanced Threat Protection), session control, conditional access, SSPM (SaaS Security Posture Management).
+**Capacidades principais:** Shadow IT discovery, DLP (Data Loss Prevention), ATP (Advanced Threat Protection), session control, conditional access, SSPM (SaaS Security Posture Management).
 
-**Exemplos:**
-- Comerciais: Netskope, Zscaler Internet Access (ZIA), Microsoft Defender for Cloud Apps, Cisco Umbrella, Broadcom Symantec CloudSOC
+**Exemplos comerciais:** Zscaler Internet Access (ZIA), Microsoft Defender for Cloud Apps, Netskope, Palo Alto Prisma Access
 
 ---
 
-### 1.6 SSE — Security Service Edge
+### 1.6 SSE — Security Service Edge / ZTNA — Zero Trust Network Access
 
-**Definição precisa:** Convergência de CASB + SWG (Secure Web Gateway) + ZTNA (Zero Trust Network Access) entregues como serviço cloud. Substitui a VPN corporativa tradicional com acesso baseado em identidade e contexto.
+**Definição:** SSE é o modelo de segurança de acesso à rede baseado em Zero Trust, substituindo VPN tradicional. ZTNA é o componente de acesso a aplicações do SSE.
 
-**Problema que resolve:** VPNs tradicionais dão acesso à rede inteira após autenticação — um atacante que compromete um endpoint tem acesso a tudo. SSE/ZTNA permite acesso apenas às aplicações específicas de que o usuário precisa, verificando identidade, dispositivo e contexto a cada sessão.
+**Problema que resolve:** A VPN como perímetro de segurança. VPN concede acesso a toda a rede uma vez autenticado — um dispositivo comprometido tem acesso lateral ilimitado. ZTNA verifica identidade, postura do dispositivo e contexto (localização, horário) para cada sessão de acesso, para cada aplicação específica.
 
-**Exemplos:**
-- Comerciais: Zscaler Private Access (ZPA), Netskope SASE, Prisma Access (Palo Alto), Cloudflare One, Cisco Umbrella
+**Exemplos comerciais:** Zscaler Private Access (ZPA), Netskope SASE, Prisma Access (Palo Alto), Cloudflare One, Cisco Umbrella
 
 ---
 
 ### 1.7 KSPM — Kubernetes Security Posture Management
 
-**Definição precisa:** CSPM especializado para clusters Kubernetes — avalia configurações de clusters, namespaces, pods e recursos K8s contra CIS Kubernetes Benchmark e outras políticas de segurança.
+**Definição:** Especialização do CSPM para clusters Kubernetes. Avalia configurações de clusters, namespaces, pods e recursos K8s contra CIS Kubernetes Benchmark e outras políticas de segurança.
 
-**Problema que resolve:** Kubernetes tem uma superfície de ataque muito específica: API server exposto, pods privilegiados, RBAC mal configurado, segredos em variáveis de ambiente. KSPM automatiza a detecção desses problemas específicos de K8s.
+**Problema que resolve:** As misconfigurations específicas de K8s que CSPM geral não detecta — pods privilegiados, ausência de NetworkPolicy, ServiceAccounts com cluster-admin, PSS violations, hostPath mounts perigosos.
 
-**Exemplos:**
-- Open-source: kube-bench (CIS benchmark), kube-hunter (penetration testing), OPA Gatekeeper (preventivo)
-- Comerciais: Wiz (KSPM integrado), Prisma Cloud, Sysdig Secure
+**Exemplos open-source:** kube-bench (CIS Kubernetes Benchmark), kube-hunter (penetration testing), OPA Gatekeeper
+**Exemplos comerciais:** Wiz (KSPM integrado), Prisma Cloud, Sysdig Secure
 
 ---
 
 ### 1.8 DSPM — Data Security Posture Management
 
-**Definição precisa:** Descobre, classifica e monitora dados sensíveis espalhados em ambientes cloud (buckets S3, Azure Blob, BigQuery, bancos de dados, data lakes) — identificando dados expostos, mal classificados ou sem controles adequados.
+**Definição:** Categoria focada em descobrir, classificar e proteger dados em ambientes cloud — buckets S3, Azure Blob, BigQuery, bancos de dados, data lakes.
 
-**Problema que resolve:** Uma organização não pode proteger o que não sabe que tem. O Banco Meridian pode ter PII de clientes em um bucket S3 criado por um desenvolvedor há 3 anos, esquecido, sem criptografia e sem logging. DSPM descobre esses repositórios de dados "esquecidos" e avalia o risco.
+**Problema que resolve:** Saber onde estão os dados sensíveis. O Banco Meridian pode ter 500 buckets S3 — mas em quais estão CPFs de clientes? Dados de cartão de crédito? DSPM descobre e classifica automaticamente, identificando dados sensíveis em lugares inesperados.
 
-**Exemplos:**
-- Comerciais: Wiz DSPM, Varonis, Dig Security, Cyera, BigID
+**Exemplos comerciais:** Wiz DSPM, Varonis, Dig Security, Cyera, BigID
 
 ---
 
 ### 1.9 ASPM — Application Security Posture Management
 
-**Definição precisa:** Agrega e correlaciona findings de múltiplas ferramentas de segurança de aplicações (SAST, DAST, SCA, IaC scan, secret scan) em uma visão unificada, priorizando por risco de negócio.
+**Definição:** Categoria mais recente que consolida findings de segurança de aplicações (SAST, DAST, SCA, container scan) em uma única visão com priorização baseada em contexto de runtime.
 
-**Problema que resolve:** Times de segurança recebem dezenas de milhares de findings de múltiplas ferramentas. Sem correlação, é impossível priorizar. ASPM normaliza, deduplica e prioriza esses findings, conectando vulnerabilidades de código ao contexto de produção.
-
-**Exemplos:**
-- Comerciais: Wiz Code, Apiiro, Armo, Ox Security, Legit Security
+**Problema que resolve:** O flood de findings de ferramentas isoladas de AppSec. Um SAST pode gerar 10.000 findings — mas quais desses achados estão em código que realmente vai para produção? Quais são reachable por um atacante externo? ASPM correlaciona com dados de runtime para priorizar o que importa.
 
 ---
 
-## 2. Por que as Categorias Existem — A Evolução Histórica
+## 2. Linha do Tempo — Evolução das Ferramentas
 
 ```
-LINHA DO TEMPO DA SEGURANÇA CLOUD
-───────────────────────────────────────────────────────────────────────────────
+LINHA DO TEMPO: COMO CADA CATEGORIA NASCEU
 
 2010–2015: CLOUD NASCENTE
-  → Primeira onda de migração para cloud
-  → Times usavam ferramentas de segurança on-premises (não funcionavam bem)
-  → Problema: "Quem mudou aquele Security Group?"
-  → Solução emergente: CSPM (varredura de configuração)
+→ Primeira onda de migração para cloud
+→ Times usavam ferramentas de segurança on-premises (que não funcionavam bem)
+→ Problema: "Quem mudou aquele Security Group?"
+→ Solução emergente: CSPM
 
 2015–2018: CONTAINERS E DEVOPS
-  → Docker e Kubernetes explodem em adoção
-  → Containers têm CVEs, imagens baixadas sem verificação
-  → Problema: "Que CVEs existem nessa imagem de produção?"
-  → Solução emergente: CWPP + Image scanners
+→ Docker e Kubernetes explodem em adoção
+→ Containers vinham com dezenas ou centenas de CVEs no sistema operacional base
+→ Problema: "Que CVEs existem nessa imagem de produção?"
+→ Solução emergente: CWPP + Image scanners
 
 2018–2020: EXPLOSÃO DE IDENTIDADES
-  → Microsserviços = centenas de service accounts
-  → Cada Lambda, pod, EC2 com uma role IAM
-  → Problema: "Essa role tem muito mais acesso do que deveria"
-  → Solução emergente: CIEM
+→ Microsserviços = centenas de service accounts
+→ Cada Lambda, pod, EC2 com uma role IAM
+→ Problema: "Essa role tem muito mais acesso do que deveria"
+→ Solução emergente: CIEM
 
 2020–2022: SHADOW IT E SaaS
-  → Pandemia acelerou adoção de SaaS corporativo e pessoal
-  → Dados sensíveis saindo via apps não aprovadas
-  → Problema: "Colaboradores estão usando Dropbox pessoal com dados de clientes"
-  → Solução emergente: CASB + SSE
+→ Pandemia acelerou adoção de SaaS corporativo e pessoal
+→ Dados sensíveis saindo via apps não aprovadas
+→ Problema: "Colaboradores estão usando Dropbox pessoal com dados de clientes"
+→ Solução emergente: CASB + SSE
 
 2022–2025: CONVERGÊNCIA → CNAPP
-  → 12+ consoles diferentes, sem correlação
-  → Attackers exploram combinações de problemas
-  → Problema: "Temos 50.000 findings. Qual é realmente crítico?"
-  → Solução: CNAPP — plataforma unificada com correlation engine
+→ 12+ consoles diferentes, sem correlação entre eles
+→ Atacantes exploram combinações de problemas (misconfiguration + CVE + permissão)
+→ Problema: "Temos 50.000 findings. Qual é realmente crítico?"
+→ Solução: CNAPP — plataforma unificada com correlação
 ```
 
 ---
@@ -186,33 +178,35 @@ LINHA DO TEMPO DA SEGURANÇA CLOUD
 ### 3.1 O Problema das Ferramentas Pontuais
 
 Um ambiente cloud típico de uma fintech brasileira tem, em média:
-- 1 ferramenta de CSPM
-- 1 ferramenta de image scanning
-- 1 ferramenta de DAST
+- 1 ferramenta CSPM
+- 1 ferramenta de image scanning (CWPP)
+- 1 ferramenta de runtime security
 - 1 ferramenta de secrets scanning
-- 1 ferramenta de SAST
-- 1 ferramenta de runtime protection
+- 1 ferramenta de IaC security
 - 1 ferramenta de CIEM
 
-Cada ferramenta tem seu próprio console, seu próprio formato de findings, sua própria priorização. Não há correlação entre elas.
+Isso são 6 consoles diferentes, 6 sets de alertas não correlacionados, 6 contratos para gerenciar. E o mais crítico: **zero correlação** entre os findings.
 
-### 3.2 O Conceito de "Toxic Combination"
+### 3.2 O Problema da Combinação Tóxica
 
-O poder do CNAPP está na correlação. Considere este cenário real:
+Considere este cenário real do Banco Meridian:
 
 ```
-FINDING INDIVIDUAL (cada ferramenta vê um pedaço):
-  CSPM:    EC2 instance com porta 8080 exposta para 0.0.0.0/0 → MEDIUM
-  CWPP:    EC2 instance com Log4Shell (CVE-2021-44228) → HIGH
-  CIEM:    Role IAM da EC2 tem s3:* e iam:* → HIGH
-
-TOXIC COMBINATION (CNAPP correlaciona):
-  A MESMA EC2 está exposta + tem Log4Shell + tem role de admin IAM
-  → Se comprometida, o atacante tem acesso a todos os S3 buckets e pode criar novos usuários IAM
-  → CRÍTICO — precisa de remediação IMEDIATA
+CSPM detecta: EC2 api-pagamentos tem Security Group com porta 8080 exposta para 0.0.0.0/0 → MEDIUM
+CWPP detecta: EC2 api-pagamentos tem Log4Shell (CVE-2021-44228) → HIGH
+CIEM detecta: Role IAM da EC2 tem s3:* e iam:CreateUser → HIGH
 ```
 
-### 3.3 Razões Estratégicas para a Convergência
+Três ferramentas isoladas: 1 finding MEDIUM + 2 findings HIGH. Parece gerenciável.
+
+**Mas a realidade é:**
+A MESMA EC2 está exposta na internet (porta 8080) + tem Log4Shell exploitável remotamente + a role IAM permite ao atacante acessar TODOS os S3 buckets e criar usuários IAM na conta.
+
+Se um atacante explorar o Log4Shell pela porta 8080 exposta, ele tem em mãos as credenciais IAM da role com `s3:*` e `iam:CreateUser`. Em minutos, pode exfiltrar todos os dados de clientes e criar um usuário backdoor com acesso permanente.
+
+**CNAPP conecta esses três nós e gera um único alerta:** "Toxic combination — CRITICAL IMEDIATO" com o caminho de ataque completo.
+
+### 3.3 Razões Estratégicas da Convergência
 
 | Razão | Descrição |
 |:------|:----------|
@@ -220,498 +214,345 @@ TOXIC COMBINATION (CNAPP correlaciona):
 | **Correlação de dados** | Findings isolados vs attack path analysis que conecta os pontos |
 | **Priorização inteligente** | Risk-based prioritization em vez de flood de findings sem contexto |
 | **Cobertura do ciclo** | Code → Build → Deploy → Runtime cobertos na mesma plataforma |
-| **ROI** | TCO de 1 plataforma CNAPP pode ser menor que 5 ferramentas pontuais |
+| **ROI** | TCO de 1 plataforma CNAPP pode ser menor do que manter 5 ferramentas separadas |
 
 ---
 
-## 4. Build vs Buy — Análise de TCO para Cloud Security Tools
+## 4. Build vs Buy — Análise de TCO Cloud Security Tools
 
 ### 4.1 Quando Construir com Open-Source
 
 **Faz sentido quando:**
 - Organização tem equipe de segurança madura (5+ engenheiros dedicados)
-- Orçamento de segurança é limitado mas há capacidade de engenharia
-- Necessidade de customização profunda (políticas muito específicas do negócio)
-- Requisito regulatório de soberania de dados (não pode enviar dados para SaaS externo)
+- Orçamento limitado de security tools (startup, empresa de pequeno porte)
+- Necessidade de customização alta (políticas proprietárias, integrações específicas)
+- Apenas um ou dois provedores cloud (não multi-cloud complexo)
 
-**Stack open-source equivalente ao CNAPP:**
-
-| Função | Ferramenta | Esforço de Integração |
-|:-------|:-----------|:---------------------:|
-| CSPM | Prowler v4 | Médio |
-| Image scan | Trivy | Baixo |
-| IaC scan | Checkov | Baixo |
-| Runtime | Falco | Alto |
-| CIEM | IAM Access Analyzer (nativo AWS) | Baixo |
-| Policy | OPA Gatekeeper | Alto |
-| SBOM | Syft | Baixo |
-| Orquestração | Defect Dojo + scripts | Muito Alto |
-
-**Custo real do open-source (organização com 200 recursos cloud):**
+**Custo real do open-source (estimativa para 200 recursos cloud):**
 
 ```
-CUSTO ANUAL ESTIMADO — STACK OPEN-SOURCE
-───────────────────────────────────────────────────────
-Infra para rodar as ferramentas (EC2, armazenamento):  R$ 24.000/ano
-Engenheiro dedicado para manutenção (50% do tempo):   R$ 80.000/ano
-Integrações e automações:                              R$ 30.000/ano
-Treinamento e atualização:                             R$ 10.000/ano
+CUSTO ANUAL ESTIMADO — STACK OPEN-SOURCE (Prowler + Trivy + Falco + Checkov)
+
+Infraestrutura (EC2, armazenamento, K8s nodes para Falco): R$ 24.000/ano
+Engenheiro dedicado para manutenção (50% do tempo de um sênior): R$ 80.000/ano
+Integrações e automações customizadas: R$ 30.000/ano
+Treinamento e atualização contínua: R$ 10.000/ano
 ─────────────────────────────────────────────────────
-TOTAL:                                                 R$ 144.000/ano
-(Não inclui o custo de oportunidade de não ter correlação entre ferramentas)
+TOTAL: ~R$ 144.000/ano
 ```
 
 ### 4.2 Quando Comprar Plataforma Comercial
 
 **Faz sentido quando:**
-- Organização tem equipe pequena de segurança (1–3 pessoas)
-- Velocidade de time-to-value é crítica (auditoria chegando, precisa de postura visível rápido)
-- Cobertura multi-cloud é necessária (AWS + Azure + GCP na mesma visão)
-- Compliance com frameworks múltiplos (CIS + SOC2 + BACEN + LGPD simultaneamente)
+- Velocidade time-to-value é crítica (auditoria próxima, incidente recente)
+- Cobertura multi-cloud é necessária (AWS + Azure + GCP em visão unificada)
+- Compliance com frameworks múltiplos (CIS + SOC2 + BACEN + LGPD + PCI-DSS)
+- Equipe de segurança pequena (1–3 pessoas cobrindo multi-cloud)
 
 **Custo estimado de plataformas CNAPP comerciais (referência 2025):**
 
-| Plataforma | Modelo de Preço | Estimativa Anual (200 workloads) |
-|:-----------|:----------------|:---------------------------------|
-| Wiz | Por workload/mês | USD 80.000–120.000 |
-| Prisma Cloud | Por crédito | USD 60.000–100.000 |
-| Orca Security | Por asset/mês | USD 50.000–80.000 |
-| Defender for Cloud | Pay-as-you-go + planos | USD 30.000–70.000 |
-| Lacework | Por GB de dados + workloads | USD 60.000–90.000 |
+| Plataforma | Estimativa anual (USD) | Inclui |
+|:-----------|:----------------------:|:-------|
+| Wiz | 80.000–150.000 | CSPM + CWPP + CIEM + DSPM + KSPM |
+| Prisma Cloud | 60.000–120.000 | Code to Cloud completo |
+| Orca Security | 50.000–90.000 | CSPM + CWPP agentless |
+| Defender for Cloud | Variável por plano | Grátis (Foundational CSPM Azure) + pago |
 
-### 4.3 Framework de Decisão Build vs Buy
+**Árvore de decisão:**
 
 ```
-FLUXO DE DECISÃO — BUILD VS BUY
-
-Início: Preciso de cloud security tooling
-   │
-   ├─→ Tenho auditoria do BACEN nos próximos 6 meses?
-   │      Sim → BUY (time-to-value crítico)
-   │
-   ├─→ Minha equipe tem < 3 engenheiros de segurança?
-   │      Sim → BUY (capacidade operacional insuficiente)
-   │
-   ├─→ Preciso de cobertura multi-cloud (AWS + Azure)?
-   │      Sim → considere BUY (integração nativa é vantagem)
-   │
-   ├─→ Tenho requisito de soberania de dados?
-   │      Sim → BUILD (dados não saem da minha infra)
-   │
-   ├─→ Tenho equipe madura e orçamento limitado?
-   │      Sim → BUILD com open-source (Prowler + Trivy + Falco)
-   │
-   └─→ Todos os outros casos → análise de TCO detalhada
+Tem auditoria regulatória em menos de 90 dias?
+│ Sim → BUY (time-to-value é crítico)
+│
+Ambiente multi-cloud (AWS + Azure + GCP)?
+│ Sim → BUY (complexidade justifica)
+│
+Equipe de segurança com menos de 3 engenheiros?
+│ Sim → BUY (custo de manutenção inviabiliza open-source)
+│
+Orçamento limitado + equipe técnica madura?
+│ Sim → BUILD com open-source (Prowler + Trivy + Falco + Checkov)
+│
+Todos os outros casos → Análise de TCO detalhada
 ```
 
 ---
 
 ## 5. Critérios de Seleção de Ferramentas de Cloud Security
 
-Ao avaliar qualquer ferramenta para o Banco Meridian ou qualquer organização, use este framework de 7 critérios:
-
 ### 5.1 Critérios Técnicos
 
 | Critério | O que Avaliar | Peso |
 |:---------|:-------------|:----:|
-| **Cobertura de cloud providers** | AWS + Azure + GCP native? Kubernetes? SaaS? | Alto |
+| **Cobertura de cloud providers** | AWS + Azure + GCP nativo? Kubernetes? SaaS? | Alto |
 | **Profundidade de checks** | Quantos checks? Framework coverage (CIS, NIST, LGPD)? | Alto |
 | **Integrações SIEM/SOAR** | Splunk, Microsoft Sentinel, Google SecOps, XSOAR, Shuffle? | Médio |
-| **False positive rate** | Qual a taxa de falsos positivos? Customizável? | Alto |
-| **Agent vs Agentless** | Agentless é preferível (menor overhead operacional) | Médio |
-| **API e automação** | API REST completa? Terraform provider? SDK? | Médio |
-| **Performance** | Tempo de scan, impacto em produção, frequência máxima | Médio |
+| **False positive rate** | Taxa de falsos positivos em avaliações independentes? | Alto |
+| **Agent vs Agentless** | Impacto operacional do deployment? | Médio |
+| **Latência de detecção** | Tempo entre misconfiguration e alerta? | Alto |
 
-### 5.2 Critérios de Negócio
+### 5.2 Critérios de Conformidade Regulatória Brasileira
 
-| Critério | O que Avaliar | Peso |
-|:---------|:-------------|:----:|
-| **Custo total (TCO)** | Licença + infra + operação + treinamento | Alto |
-| **Suporte** | SLA, idioma (pt-BR disponível?), tier de suporte | Médio |
-| **Maturidade do vendor** | Anos no mercado, base de clientes, quadrante Gartner | Médio |
-| **Referências no Brasil** | Clientes brasileiros, especialmente no setor financeiro | Alto |
-| **Roadmap** | Alinhamento do roadmap com necessidades futuras | Baixo |
-| **Dados no Brasil** | Região de dados disponível no Brasil? LGPD compliance? | Alto |
+Para o Banco Meridian, os critérios regulatórios são determinantes na seleção de ferramentas.
 
----
-
-## 6. Contexto Regulatório Brasileiro — Como a Regulação Influencia a Escolha de Ferramentas
-
-### 6.1 Resolução BACEN 4.893/2021
-
-**Impacto direto na seleção de ferramentas:**
-
-A Resolução 4.893 exige que Instituições Financeiras (IFs) mantenham:
-- Política de segurança da informação documentada
+**BACEN 4.893 — Controles exigidos:**
 - Registro de incidentes com evidência de detecção
 - Testes periódicos de vulnerabilidade
 - Gestão de acessos privilegiados
 - Monitoramento contínuo
 
-**Como isso mapeia para ferramentas:**
-
 | Requisito BACEN 4.893 | Ferramenta Indicada | Evidência Gerada |
 |:----------------------|:--------------------|:-----------------|
-| Art. 5º - Testes de vulnerabilidade periódicos | Prowler + Trivy | Relatório PDF/HTML com findings |
-| Art. 6º - Monitoramento contínuo | CSPM com alertas | Logs de eventos e alertas em SIEM |
-| Art. 8º - Gestão de acessos | CIEM (IAM Access Analyzer) | Relatório de permissões excessivas |
-| Art. 9º - Incidentes: registro e reporte | Falco → SIEM → SOAR | Logs de eventos com timestamp |
-| Art. 10º - Plano de continuidade | Checkov + IaC review | Políticas de DR como código |
+| Art. 5º — Testes de vulnerabilidade periódicos | Prowler + Trivy | Relatórios HTML/JSON com timestamp |
+| Art. 6º — Monitoramento contínuo | CSPM com alertas | Logs de alertas em SIEM |
+| Art. 8º — Gestão de acessos | CIEM (IAM Access Analyzer) | Relatório de permissões com least privilege |
+| Art. 9º — Incidentes: registro e reporte | Falco → SIEM → SOAR | Eventos de segurança com contexto forense |
+| Art. 10º — Plano de continuidade | IaC security | Políticas como código com versionamento |
 
-### 6.2 CMN 4.658/2018
+### 5.3 CMN 4.658/2018
 
-Resolução específica para serviços de processamento e armazenamento de dados em cloud por IFs.
+Resolução sobre uso de cloud por instituições financeiras (IFs).
 
-**Requisito crítico:** Art. 16 — dados de clientes não podem ser armazenados fora do território nacional sem aprovação prévia do BACEN. Isso impacta diretamente:
-- Escolha de região de dados das ferramentas CNAPP (deve ser sa-east-1 ou Brazil South)
-- Ferramentas SaaS que processam dados de configuração devem ter contrato de processamento de dados
+**Requisito crítico:** Art. 16 — dados de clientes não podem ser armazenados fora do território nacional sem aprovação prévia do BACEN.
 
-### 6.3 LGPD (Lei 13.709/2018)
+**Impacto na seleção de ferramentas:**
+- Ferramentas CNAPP SaaS que processam dados de configuração dos workloads devem ter PoP no Brasil (região sa-east-1 AWS ou Brazil South do Azure)
+- Plataformas que só têm PoP nos EUA podem representar problema regulatório
 
-**Impacto:**
-- DSPM é quase mandatório para organizações que processam dados pessoais em cloud
-- Qualquer ferramenta que scaneie dados em buckets S3 ou bancos de dados precisa de base legal
-- Relatórios de CSPM/CWPP podem conter dados pessoais — precisam de controles de acesso
+### 5.4 LGPD (Lei 13.709/2018)
+
+**Impacto:** DSPM se torna quase mandatório para organizações que processam dados pessoais em cloud. Qualquer CSPM ou CIEM que identifica dados de clientes em recursos mal configurados auxilia diretamente no cumprimento da LGPD.
 
 ---
 
-## 7. Diagrama ASCII — Ecossistema de Ferramentas de Cloud Security
+## 6. Mapa Visual: Cada Ferramenta no Seu Problema
 
 ```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║              ECOSSISTEMA DE CLOUD SECURITY TOOLS — 2025                     ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐    ║
-║  │                         C N A P P                                   │    ║
-║  │          (Cloud-Native Application Protection Platform)             │    ║
-║  │                                                                     │    ║
-║  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │    ║
-║  │  │  C S P M │  │  C W P P │  │  C I E M │  │  I a C   │           │    ║
-║  │  │ Postura  │  │ Workload │  │ Entitle- │  │ Security │           │    ║
-║  │  │  Cloud   │  │ Runtime  │  │  ments   │  │  Scan    │           │    ║
-║  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘           │    ║
-║  │                                                                     │    ║
-║  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │    ║
-║  │  │  K S P M │  │  D S P M │  │  A S P M │  │ Secrets  │           │    ║
-║  │  │  K8s     │  │  Data    │  │   App    │  │  Mgmt    │           │    ║
-║  │  │ Security │  │ Security │  │ Security │  │  (Vault) │           │    ║
-║  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘           │    ║
-║  └─────────────────────────────────────────────────────────────────────┘    ║
-║                                                                              ║
-║  ┌──────────────────────────────┐  ┌─────────────────────────────────┐      ║
-║  │     ACESSO E IDENTIDADE      │  │    PROTEÇÃO DE BORDA (SSE)      │      ║
-║  │                              │  │                                 │      ║
-║  │  ┌──────────┐  ┌──────────┐  │  │  ┌──────────┐  ┌──────────┐   │      ║
-║  │  │   CIEM   │  │   PAM    │  │  │  │   CASB   │  │   ZTNA   │   │      ║
-║  │  │ (cloud)  │  │ (híbrido)│  │  │  │  SaaS    │  │  VPN     │   │      ║
-║  │  └──────────┘  └──────────┘  │  │  │  Shadow  │  │  Replace │   │      ║
-║  └──────────────────────────────┘  │  └──────────┘  └──────────┘   │      ║
-║                                    └─────────────────────────────────┘      ║
-║                                                                              ║
-║  PLATAFORMAS CLOUD (WHERE THESE TOOLS OPERATE)                              ║
-║  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐            ║
-║  │    AWS     │  │   Azure    │  │    GCP     │  │ Kubernetes │            ║
-║  └────────────┘  └────────────┘  └────────────┘  └────────────┘            ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+MAPA DE FERRAMENTAS × PROBLEMAS × REGULAÇÃO
+
+               CÓDIGO    BUILD     RUNTIME    ACESSO      DADOS      SaaS
+               (IaC)     (Container)          (Identity)  (Storage)  (Apps)
+               ────────  ─────────  ─────────  ──────────  ─────────  ─────
+Problema       Misconfig  CVE in    Comporta   Excesso     PII em     Shadow
+               no Terraform image   Malicioso  permissões  bucket     IT
+
+Ferramenta     Checkov    Trivy     Falco      IAM Acces   DSPM       CASB
+open-source    tfsec      Grype     eBPF       Analyzer    (limitado)
+               Conftest   Syft (SBOM)
+
+Ferramenta     Wiz Code   Sysdig    Sysdig     Wiz CIEM    Wiz DSPM   Netskope
+comercial      Prisma Code Aqua     Aqua       Ermetic     Varonis    Zscaler ZIA
+
+Regulação      BACEN      BACEN     BACEN      BACEN       LGPD       LGPD
+BACEN/LGPD     Art. 10    Art. 5    Art. 9     Art. 8      Art. 46    Art. 6
 ```
 
 ---
 
-## 8. Tabela Comparativa das Categorias
+## 7. Tabela Consolidada — Todas as Categorias
 
-| Categoria | Foco Principal | Problema que Resolve | Exemplos Open-Source | Exemplos Comerciais | Integração com BACEN 4.893 |
-|:----------|:--------------|:---------------------|:--------------------:|:-------------------:|:--------------------------|
-| **CNAPP** | Plataforma unificada | Silos de segurança, falta de correlação | Combinação de ferramentas | Wiz, Prisma Cloud, Orca | Visão unificada para relatórios |
-| **CSPM** | Configuração de recursos cloud | Misconfigurations, exposições | Prowler, ScoutSuite | Wiz, Prisma Cloud | Art. 5º — testes de vulnerabilidade |
-| **CWPP** | Workloads em execução | CVEs em VMs/containers, runtime threats | Trivy, Falco, Grype | Sysdig, Aqua | Art. 9º — monitoramento |
-| **CIEM** | Identidades e permissões | Permissões excessivas, privilege escalation | IAM Access Analyzer | Wiz CIEM, Ermetic | Art. 8º — gestão de acessos |
-| **CASB** | Acesso a SaaS | Shadow IT, DLP, dados vazando | — | Netskope, Zscaler ZIA | Art. 6º — monitoramento contínuo |
-| **SSE/ZTNA** | Acesso à rede | VPN tradicional, lateral movement | Headscale (WireGuard) | Zscaler ZPA, Cloudflare One | Art. 6º — controle de acesso |
-| **KSPM** | Clusters Kubernetes | Misconfigs K8s, pods privilegiados | kube-bench, OPA | Wiz, Prisma Cloud | Art. 5º — testes de vulnerabilidade |
-| **DSPM** | Dados em cloud | PII exposta, dados não classificados | — | Wiz DSPM, Varonis | LGPD Art. 46 — segurança de dados |
-| **ASPM** | Postura de aplicações | Flood de findings sem priorização | Defect Dojo | Wiz Code, Apiiro | Art. 5º — gestão de vulnerabilidades |
-| **Secrets Mgmt** | Credenciais e segredos | Hardcoded secrets, rotação manual | HashiCorp Vault, Infisical | AWS Secrets Manager, Azure KV | Art. 8º — gestão de acessos |
+| Categoria | O que Protege | Problema Resolvido | Open-source | Comercial | Regulação |
+|:----------|:-------------|:-------------------|:------------|:---------|:----------|
+| **CNAPP** | Tudo integrado | Silos de segurança, falta de correlação | — | Wiz, Prisma Cloud, Orca | Múltipla |
+| **CSPM** | Configuração de recursos cloud | Misconfigurations, exposições públicas | Prowler, ScoutSuite | Wiz, Prisma Cloud | BACEN Art. 5 |
+| **CWPP** | Workloads em execução | CVEs em VMs/containers, runtime threats | Trivy, Falco, Grype | Sysdig, Aqua | BACEN Art. 9 |
+| **CIEM** | Identidades e permissões | Escalation IAM, shadow admins | IAM Access Analyzer | Wiz CIEM, Ermetic | BACEN Art. 8 |
+| **CASB** | Acesso a SaaS | Shadow IT, DLP, exfiltração | — | Netskope, Zscaler ZIA | BACEN Art. 6 |
+| **SSE/ZTNA** | Acesso à rede | VPN lateral movement | Headscale | Zscaler ZPA, Cloudflare | BACEN Art. 6 |
+| **KSPM** | Clusters Kubernetes | Misconfigs K8s, pods privilegiados | kube-bench, OPA | Wiz, Prisma Cloud | BACEN Art. 5 |
+| **DSPM** | Dados em cloud | PII exposto, classificação ausente | — | Wiz DSPM, Varonis | LGPD Art. 46 |
+| **ASPM** | Segurança de aplicações | Flooding de findings sem priorização | DefectDojo | Wiz Code, Apiiro | Múltipla |
+
+---
+
+## 8. Glossário
+
+| Sigla | Expansão |
+|:------|:---------|
+| CASB | Cloud Access Security Broker |
+| CIEM | Cloud Infrastructure Entitlement Management |
+| CNAPP | Cloud-Native Application Protection Platform |
+| CSPM | Cloud Security Posture Management |
+| CWPP | Cloud Workload Protection Platform |
+| DSPM | Data Security Posture Management |
+| KSPM | Kubernetes Security Posture Management |
+| SBOM | Software Bill of Materials |
+| SSE | Security Service Edge |
+| ZTNA | Zero Trust Network Access |
 
 ---
 
 ## 9. Atividades de Fixação
 
 ### Questão 1
-O Banco Meridian recebeu um alerta: um desenvolvedor criou um bucket S3 com dados de clientes sem criptografia e sem restrição de acesso público. Qual categoria de ferramenta de cloud security é mais indicada para detectar esse tipo de problema continuamente?
 
-**a)** CWPP — Cloud Workload Protection Platform  
-**b)** CASB — Cloud Access Security Broker  
-**c)** CSPM — Cloud Security Posture Management  
-**d)** CIEM — Cloud Infrastructure Entitlement Management  
+Um S3 bucket do Banco Meridian foi configurado sem Block Public Access. Qual categoria de ferramenta detecta esse problema?
 
-**Gabarito: c)**  
-Justificativa: CSPM monitora continuamente a configuração dos recursos cloud (como S3 buckets) contra benchmarks de segurança. Um bucket público sem criptografia é uma misconfiguration de configuração — exatamente o domínio do CSPM. CWPP protege o workload dentro da instância (não a configuração do serviço). CASB protege o acesso a aplicações SaaS. CIEM gerencia identidades e permissões.
+**a)** CWPP — porque monitora o conteúdo dos workloads em runtime
+**b)** CSPM — porque monitora a configuração de recursos cloud contra benchmarks de segurança
+**c)** CIEM — porque envolve permissões de identidades
+**d)** CASB — porque é uma aplicação cloud acessível externamente
+
+**Gabarito: b)**
+Justificativa: CSPM monitora a configuração dos recursos cloud (como S3 buckets) contra benchmarks de segurança. Um bucket público sem criptografia é um finding de CSPM. CWPP analisaria o conteúdo dentro do bucket ou CVEs de workloads que acessam o bucket.
 
 ---
 
 ### Questão 2
-Um atacante comprometeu uma instância EC2 e está executando comandos dentro de um container em produção. Qual ferramenta de código aberto é mais indicada para detectar esse comportamento em tempo real?
 
-**a)** Prowler  
-**b)** Falco  
-**c)** Checkov  
-**d)** kube-bench  
+Qual ferramenta open-source é mais adequada para detectar comportamentos maliciosos em tempo real dentro de containers em execução no Kubernetes?
 
-**Gabarito: b)**  
-Justificativa: Falco é uma ferramenta de runtime security que usa eBPF/kernel modules para detectar comportamentos suspeitos em containers e VMs em tempo real — como execução de shell em container, escrita em diretórios sensíveis, ou conexões de rede inesperadas. Prowler é CSPM (configuração). Checkov é IaC scanner (antes do deploy). kube-bench verifica conformidade CIS em clusters K8s (não monitora runtime).
+**a)** Trivy — porque faz scan de vulnerabilidades em imagens de container
+**b)** Checkov — porque analisa configurações de IaC e Kubernetes YAML
+**c)** Falco — porque usa eBPF para monitorar syscalls em runtime e detectar comportamentos anômalos
+**d)** kube-bench — porque executa testes de configuração contra CIS Kubernetes Benchmark
+
+**Gabarito: c)**
+Justificativa: Falco usa eBPF (ou kernel module) para interceptar syscalls em tempo real e detectar comportamentos maliciosos — shell interativo em container, acesso ao IMDS AWS, escrita em diretórios sensíveis. Trivy faz scan estático de imagens (antes do deploy). kube-bench avalia configurações do cluster. Checkov analisa YAML de IaC.
 
 ---
 
 ### Questão 3
-Qual é o principal diferencial de uma plataforma CNAPP em relação ao uso de ferramentas pontuais de CSPM + CWPP + CIEM separadas?
 
-**a)** CNAPP tem mais checks individuais do que ferramentas especializadas  
-**b)** CNAPP é sempre mais barato do que ferramentas open-source  
-**c)** CNAPP correlaciona findings de múltiplas categorias para identificar toxic combinations  
-**d)** CNAPP substitui a necessidade de SIEM e SOAR  
+A CMN 4.658 exige que dados de clientes de instituições financeiras não sejam armazenados fora do Brasil sem aprovação do BACEN. Qual é o impacto dessa regulação na seleção de ferramentas CNAPP?
 
-**Gabarito: c)**  
-Justificativa: A principal vantagem do CNAPP é a correlação. Uma misconfiguration + uma CVE + uma permissão excessiva na mesma instância individualmente podem ser MEDIUM, mas correlacionadas formam um caminho de ataque crítico (toxic combination). Ferramentas pontuais não se comunicam entre si. CNAPP não é necessariamente mais barato nem substitui SIEM/SOAR.
+**a)** Nenhum — ferramentas de segurança não processam dados de clientes
+**b)** A ferramenta CNAPP deve ter licenciamento registrado no BACEN
+**c)** Ferramentas SaaS de cloud security que processam dados de configuração devem ter PoP no Brasil (sa-east-1 AWS ou Brazil South Azure) ou aprovação específica do BACEN
+**d)** A obrigatoriedade de usar apenas ferramentas open-source hospedadas no Brasil
+
+**Gabarito: c)**
+Justificativa: A CMN 4.658 restringe armazenamento e processamento de dados de clientes fora do território nacional sem aprovação do BACEN. Ferramentas SaaS de cloud security (CNAPP, CSPM) que processam dados de configuração dos workloads — potencialmente incluindo metadados de dados de clientes — precisam ter seu processamento no Brasil (região sa-east-1 ou Brazil South) ou ter aprovação específica. Ferramentas que só têm PoP nos EUA podem representar problema regulatório.
 
 ---
 
 ### Questão 4
-O artigo 16 da Resolução CMN 4.658/2018 impacta diretamente qual aspecto da seleção de ferramentas de cloud security para bancos brasileiros?
 
-**a)** O modelo de licenciamento (por workload vs por usuário)  
-**b)** A localização geográfica onde os dados escaneados são processados e armazenados  
-**c)** O número máximo de checks que a ferramenta pode executar  
-**d)** A obrigatoriedade de usar apenas ferramentas open-source  
+O Banco Meridian precisa implementar uma stack de segurança cloud open-source para cobrir CSPM, CWPP e IaC security, com orçamento limitado. Qual combinação é a mais adequada?
 
-**Gabarito: b)**  
-Justificativa: A CMN 4.658 restringe o armazenamento e processamento de dados de clientes fora do território nacional sem aprovação do BACEN. Ferramentas SaaS de cloud security (CNAPP, CSPM) que processam dados de configuração ou conteúdo dos workloads precisam ter seus data centers localizados no Brasil (região sa-east-1 da AWS ou Brazil South do Azure), ou ter um contrato de processamento de dados aprovado.
+**a)** Wiz + Netskope + Prisma Cloud
+**b)** Trivy + OPA Gatekeeper + kube-bench + Falco
+**c)** Prowler (CSPM) + Trivy (CWPP + IaC) + Checkov (IaC) + Falco (runtime)
+**d)** Netskope + Zscaler + Prisma Cloud
+
+**Gabarito: c)**
+Justificativa: Prowler (CSPM — scans de configuração AWS/Azure/GCP), Trivy (CWPP — scans de imagens de container + IaC), Checkov (IaC security — scans de Terraform/CloudFormation/K8s YAML) e Falco (runtime security — eBPF) formam uma stack open-source completa cobrindo CSPM, CWPP e IaC security. Todas são gratuitas e amplamente adotadas.
 
 ---
 
 ### Questão 5
-Uma startup de fintech com equipe de segurança de 2 pessoas precisa implementar segurança cloud básica com orçamento limitado. Qual stack open-source mínimo viável cobre CSPM + CWPP + IaC security?
 
-**a)** Vault + Consul + Nomad  
-**b)** Prowler + Trivy + Checkov  
-**c)** OPA Gatekeeper + kube-bench + Falco  
-**d)** Netskope + Zscaler + Prisma Cloud  
+Por que um ataque que combina misconfiguration (Security Group aberto) + CVE explorável remotamente + permissão IAM excessiva é mais crítico do que cada problema isolado?
 
-**Gabarito: b)**  
-Justificativa: Prowler (CSPM — scans configuração AWS/Azure/GCP), Trivy (CWPP — scans imagens de container e IaC), e Checkov (IaC security — scans Terraform/CloudFormation antes do deploy). Essa combinação cobre as três categorias mais críticas com ferramentas gratuitas e de fácil configuração inicial. OPA Gatekeeper + kube-bench + Falco é um bom stack mas focado em K8s, não cobre CSPM e IaC para nuvem em geral. Vault/Consul/Nomad é infraestrutura, não security tooling. Netskope/Zscaler/Prisma Cloud são soluções comerciais caras.
+**a)** Porque cada problema tem severidade HIGH individualmente, totalizando CRITICAL
+**b)** Porque a combinação cria um caminho de ataque completo: o atacante entra pela misconfiguration, explora a CVE para RCE, e usa as permissões IAM excessivas para lateral movement e persistência — comprometimento total a partir de um único ponto de entrada
+**c)** Porque ferramentas de segurança tradicionais não detectam cada problema individualmente
+**d)** Porque o custo de remediação é maior quando há múltiplos problemas
+
+**Gabarito: b)**
+Justificativa: Cada problema isolado pode ser tolerable. Mas a combinação cria um attack path: (1) Security Group aberto permite que o atacante alcance o serviço externamente; (2) CVE explorável permite RCE (Remote Code Execution) no servidor; (3) permissão IAM excessiva permite que o atacante, agora com acesso ao servidor, use as credenciais AWS para acessar S3 buckets com dados de clientes e criar backdoors. CNAPP detecta essa toxic combination — ferramentas isoladas não.
 
 ---
 
-## 10. Roteiro de Gravação — Aula 1.1: Panorama e Taxonomia Gartner (55 min)
+## 10. Roteiros de Gravação
 
-### Informações da Aula
+### Aula 1.1: Panorama e Taxonomia (55 min)
+
+#### Informações da Aula
 
 | Campo | Valor |
 |:------|:------|
-| **Título** | Panorama e Taxonomia Gartner de Cloud Security Tools 2025 |
+| **Título** | Panorama das Ferramentas de Cloud Security: Do CSPM ao CNAPP |
 | **Duração** | 55 minutos |
-| **Formato** | Talking head + slides + diagrama interativo |
-| **Ferramentas** | Slides com diagrama animado das categorias |
+| **Formato** | Talking head + slides animados + mapa visual |
 
 ---
 
-### ROTEIRO COMPLETO — em primeira pessoa
+**[00:00 – 05:00 | ABERTURA | Talking head]**
+
+Bem-vindo ao Curso 4 da nossa Formação Cloud SecOps, aqui na CECyber. Eu sou o instrutor responsável por este curso e nestes próximos módulos você vai aprender a usar as ferramentas que os melhores times de cloud security do mundo usam no dia a dia.
+
+Neste módulo de abertura, vamos construir o mapa completo das ferramentas de cloud security. Não é memorizar siglas — é entender por que cada ferramenta existe, qual problema ela resolve, e quando usar cada uma. Porque sem esse mapa, você vai usar a ferramenta errada para o problema errado.
+
+Nosso cenário será o Banco Meridian — um banco fictício de médio porte, com 2.800 funcionários, ambiente híbrido em AWS, Azure e GCP, regulado pelo BACEN. Um ambiente real, com problemas reais.
 
 ---
 
-**[00:00 – 02:00 | ABERTURA | Talking head | Corte rápido após apresentação]**
+**[05:00 – 25:00 | TAXONOMIA GARTNER | Slides animados]**
 
-Olá e seja muito bem-vindo ao Curso 4 do programa de Formação em Security Operations em Nuvem da CECyber. Eu sou [nome do instrutor], e neste primeiro módulo vamos estabelecer o mapa mental que vai guiar todo o curso.
+*[Dica de edição: slides animam categoria por categoria, cada uma surgindo com o "problema que resolve" em destaque]*
 
-Se você chegou até aqui, provavelmente já ouviu termos como CSPM, CWPP, CNAPP, CASB, SSE… e talvez tenha ficado se perguntando: isso é tudo a mesma coisa? São ferramentas diferentes? Por onde começo?
+A resposta curta para "por que temos tantas categorias de ferramentas" é: cada categoria surgiu para resolver um problema específico que apareceu conforme a adoção de cloud cresceu.
 
-A resposta curta é: são categorias distintas de ferramentas que resolvem problemas diferentes de segurança cloud. E nesta aula, vou te mostrar um mapa completo desse ecossistema — a taxonomia oficial do Gartner para 2025 — para que você entenda exatamente o que cada categoria faz, por que ela existe, e quando você precisa dela.
+Vou te contar a história cronologicamente.
 
-Ao final desta aula, você vai conseguir olhar para qualquer ferramenta de cloud security e saber imediatamente em qual categoria ela se encaixa e qual problema ela resolve.
+Entre 2010 e 2015, na primeira onda de migração para cloud, o problema era simples: "Quem mudou aquele Security Group?" Os times tentavam usar ferramentas de segurança on-premises — ferramentas que não foram feitas para cloud e que não entendiam APIs de provedor. Surgiu o CSPM para monitorar continuamente a configuração dos recursos cloud contra benchmarks de segurança. Um S3 bucket público? CSPM encontra. Security Group com porta 22 aberta para o mundo? CSPM encontra.
 
-Bora lá.
+*[Avança slide]*
 
----
+Entre 2015 e 2018, Docker e Kubernetes explodiram em adoção. Containers vinham com dezenas ou centenas de CVEs no sistema operacional base. O problema mudou: não era mais só "a configuração está errada", era "tem uma vulnerabilidade grave rodando em produção nesse container". Surgiu o CWPP — Cloud Workload Protection Platform — para analisar o que está dentro dos workloads.
 
-**[02:00 – 08:00 | CONTEXTO HISTÓRICO | Slides com linha do tempo | Tela cheia]**
+*[Avança slide]*
 
-*[Dica de edição: use animação de linha do tempo entrando da esquerda para a direita]*
-
-Antes de entrar nas categorias, deixa eu te mostrar por que elas existem. O mercado de segurança cloud não surgiu com essas categorias todas de uma vez — elas foram surgindo em resposta a problemas reais que foram aparecendo ao longo da adoção de cloud.
-
-Em 2010 a 2015, as empresas estavam começando a migrar para a nuvem. O principal problema era simples: alguém mudava uma configuração de Security Group, deixava uma porta 22 aberta para o mundo, e ninguém sabia até acontecer um incidente. A resposta foi o CSPM — ferramentas que varrem continuamente as configurações dos recursos cloud e alertam quando algo está fora do padrão.
-
-*[Aponta para o diagrama de linha do tempo]*
-
-Entre 2015 e 2018, Docker e Kubernetes explodiram em adoção. As imagens de container vinham com dezenas ou centenas de CVEs no sistema operacional base. O problema mudou: não era mais só "a configuração está errada", era "tem uma vulnerabilidade grave rodando em produção nesse container". Surgiu o CWPP — ferramentas que olham para dentro dos workloads em execução.
-
-De 2018 a 2020, a proliferação de microsserviços criou outro problema: cada Lambda, cada pod Kubernetes, cada EC2 tem uma identidade, uma role IAM com permissões. E 95% dessas identidades têm muito mais acesso do que precisam. Se um atacante comprometer qualquer uma delas, pode se mover lateralmente por toda a infraestrutura. Surgiu o CIEM para gerenciar esse caos de entitlements.
+De 2018 a 2020, a proliferação de microsserviços criou outro problema: cada Lambda, cada pod Kubernetes, cada EC2 tem uma identidade, uma role IAM com permissões. E 95% dessas identidades têm muito mais acesso do que precisam. Surgiu o CIEM para gerenciar entitlements.
 
 A pandemia de 2020 acelerou outro problema: colaboradores usando dezenas de aplicações SaaS não aprovadas, carregando dados sensíveis de clientes para Dropbox pessoal ou WeTransfer. O CASB surgiu para dar visibilidade e controle sobre esse shadow IT.
 
-E chegamos em 2022–2025, onde o problema ficou ainda mais complexo: as empresas tinham 8, 10, 12 ferramentas diferentes, cada uma com seu próprio console, sem nenhuma correlação entre elas. Um atacante explora a combinação de uma misconfiguration + uma CVE + uma permissão excessiva — e cada ferramenta isolada via apenas um pedaço do quebra-cabeça. Surgiu o CNAPP, a plataforma unificada que conecta todos esses pontos.
+E chegamos em 2022–2025, onde o problema ficou mais complexo: as empresas tinham 8, 10, 12 ferramentas diferentes, cada uma com seu próprio console, sem nenhuma correlação entre elas. E os atacantes passaram a explorar combinações de problemas — uma misconfiguration mais uma CVE mais uma permissão excessiva criando um caminho de ataque completo. Surgiu o CNAPP — a plataforma unificada.
 
 ---
 
-**[08:00 – 25:00 | TAXONOMIA COMPLETA | Slides com diagrama animado | Tela cheia]**
+**[25:00 – 45:00 | MAPEAMENTO DETALHADO | Slides + whiteboard virtual]**
 
-*[Dica de edição: para cada categoria, fade in do card no diagrama enquanto fala sobre ela]*
+*[Dica de edição: quadro branco virtual onde cada categoria vai sendo colocada em seu "quadrante" do mapa]*
 
-Agora vamos ver cada categoria em detalhe. Tenho aqui um diagrama do ecossistema completo — vou percorrer cada uma.
+Deixa eu te mostrar o mapa com todas as categorias e onde cada uma atua no ciclo de vida cloud.
 
-**CSPM — Cloud Security Posture Management**
+*[Explica cada categoria usando o mapa visual da seção 6]*
 
-*[Clique: aparece card CSPM no diagrama]*
+*[08:00 – 25:00: explica CSPM com o exemplo de S3 bucket e Security Group]*
 
-CSPM é a base de tudo. Pensa assim: o CSPM é o auditor de configuração da sua nuvem. Ele vai em todos os seus recursos — EC2, S3, RDS, Azure VMs, GCP Storage — e verifica se cada um está configurado corretamente de acordo com os benchmarks de segurança: CIS, NIST, e no caso do Banco Meridian, também BACEN 4.893 e LGPD.
+O CSPM é a base. Ele faz chamadas de API read-only para todos os seus recursos — EC2, S3, RDS, Azure VMs, GCP Storage — e verifica se cada um está configurado de acordo com os benchmarks de segurança: CIS, NIST, e no caso do Banco Meridian, também BACEN 4.893 e LGPD.
 
-Um S3 bucket público? CSPM encontra. Uma regra de Security Group com porta 22 aberta para 0.0.0.0/0? CSPM encontra. Um banco de dados sem backup habilitado? CSPM encontra. Isso é configuração — e configuração é o domínio do CSPM.
+Um S3 bucket público? CSPM encontra. Security Group com porta 22 aberta para 0.0.0.0/0? CSPM encontra. Um banco de dados sem backup habilitado? CSPM encontra. Se é um problema de configuração de recurso cloud — CSPM.
 
-A ferramenta open-source mais usada para CSPM é o Prowler, versão 4. Vamos trabalhar muito com ele nos laboratórios. No mundo comercial, toda grande plataforma CNAPP inclui CSPM como componente central.
+A ferramenta open-source mais usada para CSPM é o Prowler, versão 4. Vamos trabalhar com ela no Módulo 2 e no Lab 01.
 
-**CWPP — Cloud Workload Protection Platform**
+*[Avança para CWPP]*
 
-*[Clique: aparece card CWPP]*
+O CWPP olha para dentro dos workloads. A diferença fundamental: CSPM pergunta "como esse recurso está configurado?" — CWPP pergunta "o que está rodando dentro desse recurso e tem vulnerabilidades?".
 
-Se o CSPM olha para a configuração dos serviços, o CWPP olha para o que está rodando dentro. A analogia: CSPM verifica se a porta da sua casa está trancada. CWPP verifica o que está acontecendo dentro da casa.
+Trivy é o scanner open-source mais usado para imagens de container. Falco usa eBPF para monitorar comportamentos em runtime. Veremos ambos em detalhe nos Módulos 3 e 4.
 
-CWPP cobre duas grandes áreas: vulnerability management — escanear imagens de container e VMs em busca de CVEs em pacotes do OS e dependências de aplicação — e runtime protection — detectar comportamentos maliciosos enquanto o workload está em execução.
-
-Para image scanning vamos usar Trivy. Para runtime protection, o Falco. Ambos open-source e excelentes.
-
-**CIEM — Cloud Infrastructure Entitlement Management**
-
-*[Clique: aparece card CIEM]*
-
-Esse é o que mais pega as pessoas de surpresa. Em cloud, o problema de identidade é radicalmente diferente do on-premises. Em um datacenter tradicional, você tem um número gerenciável de usuários e serviços. Em cloud, você tem centenas de service accounts, instance profiles, Lambda execution roles, pod identities — cada uma com permissões que foram sendo acumuladas ao longo do tempo.
-
-O princípio de menor privilégio é quase impossível de manter manualmente nessa escala. E as consequências de permissões excessivas são enormes: um atacante que compromete qualquer uma dessas identidades pode se mover lateralmente ou escalar privilégios.
-
-CIEM automatiza o processo de identificar quem tem permissão para fazer o quê, comparar com o que realmente foi usado nos últimos 90 dias, e recomendar a redução para o mínimo necessário. A AWS tem o IAM Access Analyzer que faz parte disso de forma nativa. Vamos explorar no laboratório 6.
-
-**CASB — Cloud Access Security Broker**
-
-*[Clique: aparece card CASB]*
-
-CASB resolve um problema muito humano: as pessoas vão usar aplicações SaaS, aprovadas ou não. O CASB senta entre o usuário e as aplicações cloud, monitorando o que está sendo acessado e o que está sendo transferido.
-
-Shadow IT discovery — saber que seus colaboradores estão usando 340 aplicações SaaS, sendo que o TI aprovou apenas 40. Data Loss Prevention — detectar e bloquear quando alguém tenta fazer upload de um arquivo com dados de clientes para um repositório pessoal.
-
-As principais soluções são Netskope, Zscaler Internet Access, e Microsoft Defender for Cloud Apps.
-
-**SSE — Security Service Edge**
-
-*[Clique: aparece card SSE]*
-
-SSE é a evolução natural do CASB, convergindo com SWG e ZTNA. O problema que resolve: VPNs tradicionais são binárias — ou você está dentro da rede (e tem acesso a tudo) ou está fora. Isso não faz sentido em um mundo de cloud e trabalho remoto.
-
-SSE implementa Zero Trust Network Access: acesso baseado em identidade, dispositivo, aplicação específica e contexto — não em "estar dentro da rede". Um colaborador autentica, comprova que o dispositivo está saudável, e ganha acesso apenas à aplicação específica de que precisa, por aquela sessão.
-
-**KSPM — Kubernetes Security Posture Management**
-
-*[Clique: aparece card KSPM]*
-
-KSPM é CSPM especializado para Kubernetes. K8s tem uma superfície de ataque muito específica: API server exposto, pods com hostPath mounts, RBAC mal configurado, secrets em variáveis de ambiente, namespaces sem NetworkPolicy.
-
-O kube-bench executa os checks do CIS Kubernetes Benchmark e mostra exatamente o que está fora do padrão. O OPA Gatekeeper e o Kyverno atuam de forma preventiva, bloqueando recursos que violam políticas antes mesmo de serem criados.
-
-**DSPM — Data Security Posture Management**
-
-*[Clique: aparece card DSPM]*
-
-Mais novo do que os anteriores, o DSPM resolve um problema fundamental: você não pode proteger dados que não sabe que tem. O DSPM descobre automaticamente onde seus dados sensíveis estão espalhados em cloud — S3 buckets, Azure Blob Storage, BigQuery, bancos de dados — classifica o tipo de dado (PII, PCI, dados de saúde) e avalia o risco de cada repositório.
-
-Para instituições financeiras com LGPD, esse é cada vez mais crítico.
-
-**ASPM — Application Security Posture Management**
-
-*[Clique: aparece card ASPM]*
-
-Por último, ASPM agrega e normaliza findings de múltiplas ferramentas de AppSec — SAST, DAST, SCA, IaC scan, secrets scanning — dando uma visão unificada priorizada por risco de negócio, não por volume de vulnerabilidades. Se você tem 50.000 findings, ASPM te diz qual é realmente crítico no contexto de produção.
+*[Avança para CIEM, CASB, KSPM, DSPM]*
 
 ---
 
-**[25:00 – 35:00 | CONVERGÊNCIA PARA CNAPP | Slides + whiteboard | Tela cheia]**
+**[45:00 – 52:00 | CONVERGÊNCIA CNAPP | Slides]**
 
-*[Dica de edição: use um quadro branco virtual para desenhar a correlação ao vivo]*
+*[Dica de edição: animação mostrando 6 ferramentas se fundindo em uma plataforma CNAPP]*
 
-Agora que você conhece todas as categorias, vamos falar sobre por que o mercado está convergindo para o CNAPP.
+Agora vou te mostrar por que a convergência para CNAPP acontece — e por que com 50.000 findings você tem um problema de outra natureza.
 
-Imagine que você é o CISO do Banco Meridian. Você tem uma equipe de 4 analistas. Cada analista está olhando para um console diferente: um para Prowler, um para Trivy, um para IAM Access Analyzer, um para Falco. Cada ferramenta gera seus próprios alertas.
+*[Mostra o exemplo de toxic combination da seção 3.2]*
 
-Um dia, você recebe esses três alertas — em ferramentas diferentes, sem correlação:
+Imagine: o Wiz encontra uma EC2 no ambiente de produção do Banco Meridian. Ele faz a correlação no Security Graph e vê: essa EC2 tem uma porta exposta para 0.0.0.0/0 (CSPM). O OS tem Log4Shell não patchado (CWPP). A role IAM tem `s3:*` e `iam:CreateUser` (CIEM).
 
-*[Mostra slide com os três alertas separados]*
+Com ferramentas separadas: 1 finding MEDIUM + 2 findings HIGH. Na fila normal de backlog.
 
-- Prowler: EC2 instance i-0abc123 com porta 8080 exposta → MEDIUM
-- Trivy: imagem Docker na i-0abc123 tem CVE-2021-44228 Log4Shell → HIGH  
-- IAM Access Analyzer: role anexada à i-0abc123 tem permissão s3:* e iam:* → HIGH
+Com CNAPP: 1 alerta CRITICAL URGENTE — "toxic combination" — porque o Wiz conectou os três dots e calculou o caminho de ataque completo. Em minutos, um atacante pode entrar pela porta exposta, usar Log4Shell para RCE, roubar as credenciais IAM e exfiltrar todos os dados de clientes.
 
-Individualmente, cada um desses findings tem prioridade média ou alta. Mas a pergunta crítica é: esses três problemas estão na mesma instância?
-
-Se sim, você tem uma toxic combination: a instância está exposta, tem uma CVE exploitável remotamente, e se comprometida, dá ao atacante acesso a todos os S3 buckets e a capacidade de criar usuários IAM. Isso é crítico — precisa ser remediado hoje, antes do fim do dia.
-
-*[Mostra slide com as ferramentas conectadas]*
-
-Isso é o que o CNAPP faz: correlaciona automaticamente findings de múltiplas categorias para identificar essas combinações tóxicas. Sem correlação, você tem 50.000 findings. Com correlação, você tem 3 findings verdadeiramente críticos para remediar hoje.
+Isso é o valor central do CNAPP.
 
 ---
 
-**[35:00 – 45:00 | BUILD VS BUY | Slides com tabela | Tela cheia]**
+**[52:00 – 55:00 | RECAPITULAÇÃO | Talking head]**
 
-*[Dica de edição: use efeito de split-screen para comparar os dois lados]*
+Nesta aula construímos o mapa completo. Cada categoria de ferramenta existe para resolver um problema específico que surgiu em uma fase de maturidade diferente da adoção de cloud.
 
-Uma pergunta que todo arquiteto de segurança enfrenta: devo construir minha própria stack de ferramentas open-source ou comprar uma plataforma CNAPP comercial?
+Nas próximas aulas, vamos mergulhar fundo em cada categoria — começando pelo CSPM no Módulo 2, onde você vai executar o Prowler v4 na prática e aprender a apresentar um relatório de postura de segurança para o CISO.
 
-A resposta honesta é: depende do seu contexto. Mas vou te dar um framework para pensar nisso.
-
-*[Mostra tabela de critérios]*
-
-Se você tem uma auditoria do BACEN chegando em 6 meses, a resposta é quase sempre comprar — o time-to-value de uma plataforma comercial é de semanas, não meses. Você não tem tempo de montar um stack open-source, integrá-lo, treinar a equipe.
-
-Se você tem uma equipe de segurança com menos de 3 pessoas, a resposta também tende para comprar — você não tem capacidade operacional para manter um stack open-source complexo.
-
-Mas se você tem requisito de soberania de dados — dados que não podem sair da sua infraestrutura — a resposta pode ser construir, porque você não consegue usar um SaaS externo.
-
-E se você tem uma equipe madura e orçamento limitado, construir com open-source pode fazer sentido econômico. Mas cuidado: o custo de um engenheiro dedicado a manter a stack open-source pode superar o custo da licença comercial.
-
-Vou mostrar números reais de TCO mais adiante no módulo. Por ora, o ponto principal é: essa não é uma decisão técnica — é uma decisão de negócio que considera tempo, capacidade, orçamento e requisitos regulatórios.
-
----
-
-**[45:00 – 50:00 | CONTEXTO REGULATÓRIO BRASILEIRO | Slides | Tela cheia]**
-
-*[Dica de edição: destaque visual nos artigos da lei]*
-
-Para fechar, um ponto que não pode ser ignorado se você trabalha no setor financeiro brasileiro: a regulação.
-
-A Resolução BACEN 4.893 de 2021 é a referência principal para segurança de TI em Instituições Financeiras. Ela exige testes periódicos de vulnerabilidade — que é exatamente o que Prowler e Trivy entregam. Ela exige monitoramento contínuo — Falco e CSPM. Ela exige gestão de acessos privilegiados — CIEM.
-
-A CMN 4.658 de 2018 tem um artigo crítico para a seleção de ferramentas: dados de clientes não podem ser processados fora do Brasil sem aprovação prévia do BACEN. Isso significa que quando você escolher uma ferramenta CNAPP SaaS, precisa verificar se ela tem data center no Brasil ou se o contrato de processamento de dados está adequado para LGPD e BACEN.
-
-Não escolha uma ferramenta de segurança cloud sem verificar esses requisitos regulatórios. Essa é uma diferença importante entre o contexto brasileiro e o global.
-
----
-
-**[50:00 – 55:00 | RECAPITULAÇÃO E PRÓXIMOS PASSOS | Talking head]**
-
-*[Dica de edição: volte para talking head, tom mais relaxado]*
-
-Muito bem, vamos recapitular o que vimos hoje.
-
-Vimos a taxonomia completa de 9 categorias de ferramentas de cloud security — CNAPP, CSPM, CWPP, CIEM, CASB, SSE, KSPM, DSPM e ASPM — cada uma resolvendo um problema específico que foi surgindo à medida que a adoção de cloud evoluiu.
-
-Entendemos por que o mercado está convergindo para CNAPP: a correlação entre categorias é o que transforma 50.000 findings individuais em 3 toxic combinations verdadeiramente críticas.
-
-Discutimos o framework Build vs Buy, lembrando que é uma decisão de negócio, não apenas técnica.
-
-E vimos como a regulação brasileira — BACEN 4.893 e CMN 4.658 — influencia diretamente a seleção de ferramentas, especialmente em relação à localização de dados.
-
-No próximo módulo, vamos mergulhar fundo no CSPM — como funciona, como executar o Prowler v4 na prática, e como apresentar um relatório de postura de segurança para o CISO.
-
-Antes de ir, faça as atividades de fixação — são 5 questões que vão solidificar esses conceitos. E no laboratório prático, você vai mapear a taxonomia para o ambiente específico do Banco Meridian.
-
-Até o próximo módulo!
+Faça as atividades de fixação — são 5 questões de conceitos fundamentais. E nos vemos no Módulo 2!
 
 ---
 
@@ -719,119 +560,126 @@ Até o próximo módulo!
 
 ### Parte A — Múltipla Escolha (60 pontos)
 
-**Questão 1 (10 pts)**  
-Qual é a principal diferença entre CSPM e CWPP?
+**Questão 1 (10 pts)**
+Qual é a diferença fundamental entre CSPM e CWPP?
 
-**a)** CSPM monitora configurações de recursos cloud; CWPP protege workloads em execução  
-**b)** CSPM é mais caro que CWPP; por isso empresas pequenas escolhem CWPP  
-**c)** CSPM é open-source e CWPP é sempre comercial  
-**d)** CSPM funciona apenas na AWS; CWPP funciona em multi-cloud  
+**a)** CSPM é open-source e CWPP é apenas comercial
+**b)** CSPM monitora a configuração dos recursos cloud (plano de controle) — uma porta aberta, um bucket público; CWPP monitora vulnerabilidades e comportamentos dentro dos workloads (plano de dados) — CVEs em OS, shell malicioso em container
+**c)** CSPM suporta apenas AWS; CWPP suporta multi-cloud
+**d)** CSPM e CWPP são sinônimos com fornecedores diferentes
 
-**Gabarito: a)** CSPM = configuração (plano de controle). CWPP = conteúdo e comportamento do workload (plano de dados). A diferença é o objeto de análise: "como o recurso está configurado" vs "o que está acontecendo dentro do recurso".
-
----
-
-**Questão 2 (10 pts)**  
-Uma organização quer identificar automaticamente quais service accounts AWS têm permissões que não foram usadas nos últimos 90 dias para aplicar o princípio de menor privilégio. Qual categoria de ferramenta resolve isso?
-
-**a)** CASB  
-**b)** DSPM  
-**c)** CIEM  
-**d)** KSPM  
-
-**Gabarito: c)** CIEM — Cloud Infrastructure Entitlement Management — é especificamente a categoria que gerencia identidades e entitlements em cloud, incluindo a análise de permissões não utilizadas (unused access analysis) para implementação de least privilege.
+**Gabarito: b)**
+Justificativa: A diferença é o objeto de análise. CSPM analisa a configuração dos serviços cloud via API — o plano de controle. "Esse S3 bucket está configurado com acesso público?" — chamada de API para S3. CWPP analisa o conteúdo e comportamento dentro dos workloads — o plano de dados. "Que CVEs existem nesse container?" — requer acesso ao filesystem da imagem ou monitoramento de syscalls.
 
 ---
 
-**Questão 3 (10 pts)**  
-O conceito de "toxic combination" é um diferencial central das plataformas CNAPP. O que esse conceito significa?
+**Questão 2 (10 pts)**
+O Banco Meridian tem orçamento limitado, equipe de 2 engenheiros de segurança, auditoria do BACEN em 30 dias e ambiente apenas na AWS. Qual abordagem de seleção de ferramentas faz mais sentido?
 
-**a)** Uma vulnerabilidade com score CVSS acima de 9.0 em um sistema de produção crítico  
-**b)** A correlação de múltiplos findings individuais de baixo/médio risco que juntos formam um caminho de ataque crítico  
-**c)** Uma misconfiguration que afeta simultaneamente mais de um provedor de cloud  
-**d)** A combinação de ferramentas open-source que substituem uma plataforma CNAPP comercial  
+**a)** Contratar plataforma CNAPP comercial — o time-to-value é crítico para uma auditoria em 30 dias
+**b)** Construir stack open-source — Prowler + Trivy + Falco para economizar orçamento
+**c)** Não fazer nada até depois da auditoria
+**d)** Usar apenas AWS Security Hub nativo, sem ferramentas adicionais
 
-**Gabarito: b)** Toxic combination é a correlação entre findings de diferentes categorias (ex: misconfiguration + CVE + permissão excessiva na mesma instância) que individualmente seriam médios/altos mas juntos formam um caminho de ataque crítico que requer remediação imediata.
-
----
-
-**Questão 4 (10 pts)**  
-Qual artigo da Resolução CMN 4.658/2018 é mais relevante para a seleção de ferramentas CNAPP SaaS por instituições financeiras brasileiras?
-
-**a)** Art. 3º — define os tipos de serviços de processamento em nuvem  
-**b)** Art. 16 — restringe o armazenamento e processamento de dados de clientes fora do território nacional sem autorização prévia do BACEN  
-**c)** Art. 7º — estabelece os requisitos mínimos de autenticação  
-**d)** Art. 12 — define os SLAs mínimos de disponibilidade  
-
-**Gabarito: b)** Art. 16 da CMN 4.658 é o artigo que impacta diretamente a escolha de ferramentas: qualquer CNAPP SaaS que processe dados de clientes precisa ter data center no Brasil ou aprovação prévia do BACEN. Isso elimina ou complica o uso de várias ferramentas estrangeiras que não têm região no Brasil.
+**Gabarito: a)**
+Justificativa: Com auditoria em 30 dias, o time-to-value de uma plataforma CNAPP comercial é decisivo. Setup em dias vs semanas para open-source. Uma plataforma comercial entrega relatórios de conformidade BACEN prontos para apresentação. Com equipe pequena de 2 pessoas, a manutenção de uma stack open-source consumiria uma parcela grande do tempo disponível, comprometendo a capacidade de remediação.
 
 ---
 
-**Questão 5 (10 pts)**  
-Um banco brasileiro com equipe de segurança de 2 pessoas e auditoria BACEN programada para 4 meses precisa implementar cloud security tooling. Qual decisão Build vs Buy é mais adequada?
+**Questão 3 (10 pts)**
+No contexto da CNAPP, o que é uma "toxic combination"?
 
-**a)** Build — montar stack completo open-source (Prowler + Trivy + Falco + OPA) porque é gratuito  
-**b)** Buy — adquirir plataforma CNAPP comercial porque o time-to-value é compatível com o prazo da auditoria e a equipe pequena não suporta operação de stack open-source  
-**c)** Híbrido — comprar CSPM comercial e usar Falco open-source para runtime  
-**d)** Nenhuma — esperar a auditoria passar antes de investir em ferramentas  
+**a)** Combinação de ferramentas de segurança incompatíveis no mesmo ambiente
+**b)** Correlação de múltiplos findings isolados que, juntos, criam um caminho de ataque completo e crítico — ex: misconfiguration + CVE + permissão IAM excessiva no mesmo recurso
+**c)** Configuração de Security Group com múltiplas portas abertas simultaneamente
+**d)** Uso de múltiplos provedores cloud sem uma estratégia unificada de segurança
 
-**Gabarito: b)** Com equipe de 2 pessoas, prazo de 4 meses e auditoria do BACEN, a decisão correta é Buy. Uma plataforma CNAPP comercial tem time-to-value de semanas (não meses), equipe pequena não consegue operar e manter stack open-source de 5+ ferramentas, e a auditoria exige evidências de monitoramento contínuo que a plataforma comercial entrega mais rapidamente.
+**Gabarito: b)**
+Justificativa: Toxic combination é o conceito central que justifica o CNAPP. Individualmente: um Security Group aberto (MEDIUM), uma CVE HIGH, uma role IAM excessiva (HIGH). Juntos, no mesmo recurso: o atacante pode entrar pela porta exposta, usar a CVE para RCE, e usar a role IAM para comprometimento total. CNAPP correlaciona os três para gerar um único alerta CRITICAL com o caminho de ataque.
 
 ---
 
-**Questão 6 (10 pts)**  
-KSPM (Kubernetes Security Posture Management) é melhor descrito como:
+**Questão 4 (10 pts)**
+A auditoria do BACEN avalia conformidade com a Resolução 4.893. Qual combinação de categorias de ferramentas cobre os artigos 5º (testes de vulnerabilidade), 6º (monitoramento contínuo) e 8º (gestão de acessos)?
 
-**a)** Uma ferramenta de monitoramento de performance de clusters Kubernetes  
-**b)** Um CSPM especializado que avalia configurações de clusters K8s contra benchmarks como CIS Kubernetes Benchmark  
-**c)** Uma solução de runtime protection exclusiva para containers  
-**d)** Um gerenciador de segredos integrado ao Kubernetes  
+**a)** CASB (Art. 5) + SSE (Art. 6) + DSPM (Art. 8)
+**b)** CSPM/CWPP (Art. 5) + CSPM com alertas contínuos (Art. 6) + CIEM (Art. 8)
+**c)** IaC Security (Art. 5) + CASB (Art. 6) + CSPM (Art. 8)
+**d)** KSPM (Art. 5) + DSPM (Art. 6) + CWPP (Art. 8)
 
-**Gabarito: b)** KSPM é CSPM especializado para K8s. Enquanto CSPM geral avalia recursos AWS/Azure/GCP, KSPM avalia especificamente recursos Kubernetes — configuração de API server, RBAC, PSS, NetworkPolicy — contra benchmarks como CIS Kubernetes Benchmark (executado pelo kube-bench).
+**Gabarito: b)**
+Justificativa: Art. 5 — testes de vulnerabilidade → CSPM (Prowler para misconfigurations) + CWPP (Trivy para CVEs em containers). Art. 6 — monitoramento contínuo → CSPM com scans periódicos e alertas, CloudWatch alarms, Security Hub. Art. 8 — gestão de acessos → CIEM (IAM Access Analyzer para identificar permissões excessivas e gerar política de menor privilégio).
+
+---
+
+**Questão 5 (10 pts)**
+Um banco digital brasileiro com 5 milhões de clientes e 1.200 microserviços tem 95% das suas roles IAM com permissões que nunca foram usadas nos últimos 180 dias. Qual categoria de ferramenta resolve esse problema?
+
+**a)** CSPM — porque monitora configurações de recursos cloud
+**b)** CWPP — porque monitora workloads em execução
+**c)** CIEM — porque analisa identidades, permissões efetivas e identifica entitlements excessivos em escala
+**d)** CASB — porque controla acesso a aplicações SaaS
+
+**Gabarito: c)**
+Justificativa: CIEM (Cloud Infrastructure Entitlement Management) é a categoria especificamente projetada para gerenciar entitlements em escala cloud. Em um ambiente com 1.200 microserviços, cada um com sua role IAM, o CIEM analisa quais permissões cada role realmente usou (via CloudTrail) e gera uma política de menor privilégio. IAM Access Analyzer da AWS, por exemplo, tem um módulo "Unused Access" que identifica permissões não usadas em 90 dias.
+
+---
+
+**Questão 6 (10 pts)**
+O que o KSPM (Kubernetes Security Posture Management) faz que um CSPM geral não faz?
+
+**a)** KSPM é uma ferramenta de runtime security usando eBPF, diferente do CSPM que é estático
+**b)** KSPM é um CSPM especializado que avalia configurações específicas de recursos Kubernetes — RBAC, PSS (Pod Security Standards), NetworkPolicy, hostPath mounts — contra o CIS Kubernetes Benchmark, que CSPM geral não cobre
+**c)** KSPM é exclusivamente uma solução de runtime protection para containers
+**d)** KSPM gerencia segredos integrado ao Kubernetes via Vault
+
+**Gabarito: b)**
+Justificativa: KSPM é um CSPM especializado para K8s. Enquanto CSPM geral avalia recursos AWS/Azure/GCP (S3, EC2, Security Groups), KSPM avalia especificamente recursos Kubernetes — se pods estão rodando como root, se há NetworkPolicy de default-deny, se RBAC tem ClusterRoles com wildcards, se PSS está configurado no nível correto para cada namespace. Ferramentas como kube-bench implementam os controles do CIS Kubernetes Benchmark que CSPM geral ignora.
 
 ---
 
 ### Parte B — Análise de Cenário (40 pontos)
 
-**Cenário:** O Banco Meridian acaba de fazer uma aquisição e incorporou uma empresa de pagamentos que opera 100% na AWS. Essa empresa nunca investiu formalmente em cloud security. A auditoria do BACEN está prevista para daqui a 8 meses.
+**Cenário:** O novo CISO do Banco Meridian foi contratado com o mandato de implementar uma estratégia de segurança cloud em 90 dias. O ambiente atual é: AWS (principal), Azure (M365 e serviços legados), GCP (BigQuery e analytics), 50+ microserviços em Kubernetes, 300+ IAM roles, auditoria BACEN programada para daqui a 6 meses.
 
-**Tarefa (4 perguntas, 10 pts cada):**
+**Tarefa (4 partes, 10 pts cada):**
 
-1. Mapeie as 5 categorias de ferramentas mais críticas para esse cenário específico e justifique cada escolha
-2. Para cada categoria, indique uma ferramenta open-source e uma comercial viável
-3. Dado o prazo de 8 meses e a necessidade de evidências para o BACEN, recomende Buy ou Build para cada categoria com justificativa
-4. Identifique pelo menos 2 requisitos da Resolução BACEN 4.893 que cada categoria de ferramenta ajudará a evidenciar
+1. Mapeie quais categorias de ferramentas são necessárias e por quê, considerando o ambiente do Banco Meridian
+2. Proponha a ordem de implementação (quick wins primeiro) com justificativa
+3. Indique se cada categoria deve ser open-source ou comercial, com justificativa de TCO
+4. Mapeie cada ferramenta selecionada para os artigos relevantes do BACEN 4.893
 
 **Gabarito:**
 
-1. **Categorias críticas:**
-   - **CSPM** — empresa nunca teve auditoria de configuração; buckets públicos, SGs abertos e não conformidades são prováveis
-   - **CWPP (image scan)** — workloads desconhecidos com CVEs acumuladas
-   - **CIEM** — permissões excessivas acumuladas ao longo do tempo sem revisão
-   - **IaC Security** — não há garantia de que a infraestrutura foi criada com segurança
-   - **Secrets Management** — hardcoded secrets são comuns em empresas sem processo formal
+1. **Categorias necessárias:**
+   - CSPM: multi-cloud (AWS + Azure + GCP) — Prowler ou plataforma comercial
+   - CWPP: 50+ microserviços em K8s com risco de CVEs — Trivy + Falco
+   - IaC Security: todos os recursos devem ser criados via IaC — Checkov/tfsec no pipeline
+   - CIEM: 300+ IAM roles, maioria com excesso de permissões — IAM Access Analyzer
+   - KSPM: cluster K8s necessita de controles específicos — kube-bench + Kyverno
 
-2. **Ferramentas:**
-   - CSPM: Prowler (open) / Wiz ou Orca (comercial)
-   - CWPP: Trivy (open) / Sysdig (comercial)
-   - CIEM: IAM Access Analyzer (open/nativo) / Wiz CIEM (comercial)
-   - IaC Security: Checkov (open) / Prisma Cloud Code Security (comercial)
-   - Secrets Mgmt: HashiCorp Vault (open) / AWS Secrets Manager (comercial)
+2. **Ordem de implementação (90 dias):**
+   - Dias 1–15: CSPM com Prowler (quick win, evidência para BACEN Art. 5 e 6)
+   - Dias 15–30: IaC Security no pipeline CI/CD (Checkov — prevenção futura)
+   - Dias 30–45: CWPP — Trivy no pipeline de containers (scan de imagens)
+   - Dias 45–60: CIEM — IAM Access Analyzer (BACEN Art. 8 — gestão de acessos)
+   - Dias 60–75: KSPM — kube-bench + Kyverno (BACEN Art. 5 — testes de vulnerabilidade)
+   - Dias 75–90: Falco runtime (BACEN Art. 9 — detecção de incidentes)
 
-3. **Buy ou Build:**
-   - Prazo de 8 meses é viável para Build se a equipe for ≥ 3 pessoas
-   - Para evidências de auditoria: CSPM e CIEM devem ser priorizados (podem ser open-source com configuração inicial em 2–3 semanas)
-   - Se equipe for pequena: Buy plataforma CNAPP (Wiz ou Orca) cobre CSPM + CWPP + CIEM em uma solução
+3. **Open-source vs comercial:**
+   Com auditoria em 6 meses e ambiente multi-cloud complexo, recomendação híbrida:
+   - Plataforma CNAPP comercial (Wiz ou Prisma Cloud) para CSPM multi-cloud + CIEM — TCO justificado pela cobertura AWS+Azure+GCP em um console e pelo time-to-value
+   - Ferramentas open-source no pipeline: Checkov, Trivy, Falco — custo zero, integração nativa com CI/CD
 
 4. **Mapeamento BACEN 4.893:**
-   - CSPM → Art. 5º (testes de vulnerabilidade periódicos) + Art. 6º (monitoramento contínuo)
-   - CWPP → Art. 5º (testes) + Art. 9º (registro de incidentes com evidência de detecção)
-   - CIEM → Art. 8º (gestão de acessos privilegiados)
-   - IaC Security → Art. 10º (plano de continuidade — infraestrutura como código revisada)
-   - Secrets Mgmt → Art. 8º (gestão de credenciais e acessos)
+   - CSPM → Art. 5 (testes de vulnerabilidade) + Art. 6 (monitoramento contínuo)
+   - CWPP → Art. 5 (avaliação de controles — CVE scanning) + Art. 9 (detecção de incidentes — Falco)
+   - CIEM → Art. 8 (gestão de acessos com menor privilégio)
+   - IaC Security → Art. 10 (plano de continuidade — infraestrutura como código)
+   - Secrets Management → Art. 8 (gestão de credenciais privilegiadas)
 
 ---
 
-*Módulo 01 — Panorama e Taxonomia das Ferramentas de Cloud Security*  
-*Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps*  
+*Módulo 01 — Panorama e Taxonomia das Ferramentas de Cloud Security*
+*Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps*
 *CECyber — Educação Corporativa em Cibersegurança*

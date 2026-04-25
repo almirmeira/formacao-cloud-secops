@@ -96,8 +96,9 @@ o UDM do Google SecOps, permitindo busca, correlação e detecção via YARA-L.
 
 #### Passo 1: Acessar o arquivo de amostra de log do Tópus Banking
 
-**Ação:** No servidor de logs do laboratório (ou usando o arquivo fornecido no repositório),
-examine o conteúdo do arquivo de amostra.
+**O que este passo faz:** Conecta ao servidor de logs do laboratório e examina o formato CSV proprietário do Tópus Banking. Esta análise é a base para todo o parser — sem entender a estrutura exata dos dados, não é possível criar regras de extração corretas. O Tópus Banking usa um formato CSV de 8 colunas não documentado, pois a empresa fornecedora encerrou atividades em 2018.
+
+**Por que agora:** O mapeamento de campos deve ser feito antes de abrir o editor de parser. Analistas que pulam esta etapa cometem erros de indexação (ex: mapear a coluna 3 quando o campo desejado está na coluna 4), o que gera logs normalizados incorretamente — um problema silencioso que só aparece durante incidentes reais.
 
 ```bash
 # Acessar o servidor de logs via SSH
@@ -121,11 +122,12 @@ TIMESTAMP,EVENTO,OPERADOR_ID,IP_ORIGEM,SISTEMA_DESTINO,ACAO,DETALHE,RESULTADO
 2026-04-24T21:33:45Z,LOGIN,OPR0099,203.45.12.89,TOPUS-CORE,AUTENTICAR,Segundo_acesso_bloqueado,FALHA
 ```
 
-**O que verificar:**
-- O formato CSV tem 8 colunas fixas separadas por vírgula
+**O que você deve ver:**
+- O formato CSV tem exatamente 8 colunas separadas por vírgula
 - O campo `EVENTO` pode ser: LOGIN, TRANSACAO, ADMIN, ERRO
 - O campo `RESULTADO` pode ser: SUCESSO, FALHA, BLOQUEADO
 - O separador de data/hora é ISO 8601 com 'Z' para UTC
+- A linha de cabeçalho (TIMESTAMP,EVENTO,...) deve ser ignorada pelo parser
 
 **O que fazer se der errado:**
 - Se o arquivo não existir, use o arquivo de amostra do repositório do curso em
@@ -136,7 +138,9 @@ TIMESTAMP,EVENTO,OPERADOR_ID,IP_ORIGEM,SISTEMA_DESTINO,ACAO,DETALHE,RESULTADO
 
 #### Passo 2: Verificar os logs chegando no Google SecOps sem normalização
 
-**Ação:** Acessar o UDM Search no console do Google SecOps e verificar os eventos raw.
+**O que este passo faz:** Confirma visualmente que os logs do Tópus Banking estão chegando no Google SecOps, mas sem qualquer normalização — campos críticos como `principal.user.userid` e `metadata.event_type` estão vazios ou com valores genéricos. Esta confirmação é necessária para estabelecer o "antes" que justifica o trabalho do parser.
+
+**Por que agora:** Antes de criar qualquer parser, é fundamental confirmar que os logs estão sendo ingeridos. Se o Bindplane Agent tiver problema, nenhum parser funcionará — e você descobrirá isso agora, com tempo para corrigir, não no final do lab.
 
 ```
 Navegação: Google SecOps Console → Search → UDM Search
@@ -150,18 +154,17 @@ campos do UDM estará vazia (sem normalização).
 
 ```
 Exemplo de evento raw (sem parser):
-─────────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────────────────────
 metadata.log_type:     TOPUS_BANKING
 metadata.event_type:   GENERIC_EVENT       ← não foi mapeado corretamente
 principal.hostname:    (vazio)             ← campo não extraído
 principal.user.userid: (vazio)             ← campo não extraído
 security_result.action: UNKNOWN_ACTION     ← não foi mapeado
 raw_log:               2026-04-24T08:17:03Z,LOGIN,OPR0089,...
-─────────────────────────────────────────────────────────────────
+─────────────────────────────────────────────────────────────────────────────
 ```
 
-**O que verificar:** Confirme que `principal.user.userid` está vazio e que `metadata.event_type`
-está como `GENERIC_EVENT`. Isso confirma que o parser CBN é necessário.
+**O que você deve ver:** `principal.user.userid` vazio e `metadata.event_type` como `GENERIC_EVENT`. Isso confirma que o parser CBN é necessário — sem ele, nenhuma regra YARA-L do Banco Meridian consegue correlacionar eventos do Tópus Banking com outras fontes.
 
 **O que fazer se der errado:**
 - Se não aparecer nenhum evento com `metadata.log_type = "TOPUS_BANKING"`, verifique se
@@ -172,7 +175,9 @@ está como `GENERIC_EVENT`. Isso confirma que o parser CBN é necessário.
 
 #### Passo 3: Documentar o mapeamento campo a campo
 
-**Ação:** Antes de escrever o YAML do parser, documente o mapeamento em uma tabela.
+**O que este passo faz:** Cria a tabela de mapeamento que será o guia de construção do parser YAML. Este documento transforma o conhecimento do formato Tópus em uma especificação técnica clara para o parser CBN. Cada linha da tabela corresponde diretamente a um bloco `mapping` no YAML.
+
+**Por que agora:** O parser CBN é escrito em YAML e requer conhecimento preciso de qual campo do CSV vai para qual campo do UDM. Sem esta tabela, o desenvolvimento do parser é tentativa e erro — o que dobra o tempo e aumenta a chance de erros de mapeamento que passam despercebidos.
 
 | Campo Tópus CSV  | Posição | Valor exemplo          | Campo UDM                          | Transformação necessária         |
 |:-----------------|:-------:|:-----------------------|:-----------------------------------|:---------------------------------|
@@ -185,7 +190,7 @@ está como `GENERIC_EVENT`. Isso confirma que o parser CBN é necessário.
 | DETALHE          | 7       | `Sessao_iniciada`      | `security_result.description`      | Substituir _ por espaço          |
 | RESULTADO        | 8       | `SUCESSO`, `FALHA`     | `security_result.action`           | Lookup: SUCESSO→ALLOW, FALHA→BLOCK|
 
-**O que verificar:** Certifique-se de que todos os 8 campos foram mapeados antes de escrever o YAML.
+**O que você deve ver:** Todos os 8 campos do CSV mapeados antes de avançar para a escrita do YAML. Se algum campo não tiver destino UDM claro, consulte a referência do UDM no Módulo 02 antes de continuar.
 
 ---
 
@@ -195,7 +200,9 @@ está como `GENERIC_EVENT`. Isso confirma que o parser CBN é necessário.
 
 #### Passo 4: Acessar o Parser Editor no Google SecOps
 
-**Ação:** Navegar para o editor de parsers no console do Google SecOps.
+**O que este passo faz:** Abre o editor de parsers CBN no console do Google SecOps, onde o YAML do parser será escrito e testado. Este é o ponto de entrada para o trabalho técnico central do lab — criar a lógica de normalização que transformará logs raw em eventos UDM pesquisáveis.
+
+**Por que agora:** O acesso ao editor de parsers requer permissões específicas (`chronicle.parsers.create`). Verificar o acesso antes de escrever o YAML evita perder tempo desenvolvendo código que não pode ser salvo por falta de permissão.
 
 ```
 Navegação:
@@ -207,21 +214,21 @@ Preencher os campos iniciais:
 - **Display Name:** Tópus Banking Core System
 - **Description:** Parser CBN para logs do sistema de core banking Tópus do Banco Meridian
 
-**Resultado esperado:** Editor YAML em branco aguardando o código do parser.
-
-**O que verificar:** Confirme que o log type `TOPUS_BANKING` está selecionado corretamente.
-Se aparecer "Log type not found", crie o log type customizado primeiro em Settings → Log Types.
+**O que você deve ver:** Editor YAML em branco aguardando o código do parser, com o log type `TOPUS_BANKING` selecionado no topo.
 
 **O que fazer se der errado:**
 - Se não encontrar "Parser Management" no menu, verifique se seu usuário tem permissão
   `chronicle.parsers.create` no IAM do Google Cloud
 - Se a opção não existir, consulte o instrutor — o tenant pode requerer configuração adicional
+- Se aparecer "Log type not found", crie o log type customizado primeiro em Settings → Log Types
 
 ---
 
 #### Passo 5: Escrever a seção `meta` do parser CBN
 
-**Ação:** Adicionar a seção de metadados ao editor YAML.
+**O que este passo faz:** Define os metadados do parser — nome, versão, autor e o log type ao qual ele se aplica. O campo `log_type` é o elo entre o parser e os logs ingeridos: o Google SecOps usa este campo para aplicar o parser correto a cada log recebido.
+
+**Por que agora:** A seção `meta` deve ser a primeira escrita no YAML porque define o contexto do parser. Um `log_type` incorreto aqui significa que o parser nunca será aplicado aos logs do Tópus Banking — mesmo que todo o restante esteja correto.
 
 ```yaml
 meta:
@@ -234,16 +241,15 @@ meta:
   default_log_type: TOPUS_BANKING
 ```
 
-**Resultado esperado:** Nenhum erro de validação ao salvar a seção meta.
-
-**O que verificar:** O campo `log_type` deve corresponder exatamente ao log type configurado
-no feed. Case-sensitive: `TOPUS_BANKING` (maiúsculas, underscore).
+**O que você deve ver:** Nenhum erro de validação ao salvar a seção meta. O campo `log_type` deve corresponder exatamente ao log type configurado no feed — case-sensitive: `TOPUS_BANKING` (maiúsculas, underscore).
 
 ---
 
 #### Passo 6: Escrever a seção `filter` para validar o formato do log
 
-**Ação:** Adicionar a seção de filtros que valida o formato do log antes de processar.
+**O que este passo faz:** Define os critérios de validação que o parser aplica a cada log antes de processá-lo. A regex verifica se o log começa com uma data ISO 8601 seguida de um tipo de evento válido. Logs que não passam no filtro são descartados silenciosamente — sem erro, sem consumo de recursos de parsing.
+
+**Por que agora:** O filtro é a primeira linha de defesa do parser. Sem ele, o parser tentará processar linhas de cabeçalho CSV (TIMESTAMP,EVENTO,...) e logs de sistema do Tópus que não são eventos de segurança — gerando entradas UDM inválidas que poluem a base de dados do SOC.
 
 ```yaml
 filter:
@@ -252,10 +258,7 @@ filter:
       regex: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z,(LOGIN|TRANSACAO|ADMIN|ERRO),'
 ```
 
-**Resultado esperado:** O parser vai ignorar silenciosamente logs que não seguem o formato
-esperado (ex: linhas de cabeçalho do CSV, logs de sistema do Tópus que não são eventos de segurança).
-
-**O que verificar:** Teste a regex no seu editor favorito com uma linha de log válida e uma inválida.
+**O que você deve ver:** O parser ignorará silenciosamente logs que não seguem o formato esperado. Para confirmar, teste a regex com uma linha de log válida e depois com a linha de cabeçalho — apenas a linha válida deve passar.
 
 **O que fazer se der errado:**
 - Se a regex rejeitar logs válidos, verifique se o separador de campos é realmente vírgula
@@ -271,7 +274,9 @@ esperado (ex: linhas de cabeçalho do CSV, logs de sistema do Tópus que não s�
 
 #### Passo 7: Escrever a seção `extraction` com regex de captura dos campos
 
-**Ação:** Adicionar a extração dos campos CSV usando regex com grupos nomeados.
+**O que este passo faz:** Define como os campos do CSV serão extraídos e nomeados como variáveis internas do parser. O método `csv` é a forma mais eficiente para logs com delimitador fixo — ele mapeia cada coluna para uma variável nomeada que será usada na seção `mapping`.
+
+**Por que agora:** A extração vem antes do mapeamento porque as variáveis extraídas aqui são o input do mapeamento UDM. Sem extrair corretamente os campos do CSV, não há dados para mapear.
 
 ```yaml
 extraction:
@@ -298,13 +303,7 @@ extraction:
       pattern: '^(?P<topus_timestamp>[^,]+),(?P<topus_evento>[^,]+),(?P<topus_operador_id>[^,]+),(?P<topus_ip_origem>[^,]+),(?P<topus_sistema_destino>[^,]+),(?P<topus_acao>[^,]+),(?P<topus_detalhe>[^,]+),(?P<topus_resultado>[^,]+)$'
 ```
 
-**Resultado esperado:** Após a extração, as variáveis `topus_timestamp`, `topus_evento` etc.
-estarão disponíveis para uso na seção de mapeamento.
-
-**O que verificar:**
-- No editor de parsers, use o botão "Test" com uma linha de log real para verificar se
-  os grupos foram extraídos corretamente
-- Cada campo deve aparecer na lista de variáveis extraídas com o valor correto
+**O que você deve ver:** Após a extração, as variáveis `topus_timestamp`, `topus_evento` etc. estarão disponíveis para uso na seção de mapeamento. No editor de parsers, use o botão "Test" com uma linha de log real para verificar se os grupos foram extraídos corretamente — cada campo deve aparecer na lista de variáveis extraídas com o valor correto.
 
 **O que fazer se der errado:**
 - Erro "Group not found": verifique se o nome do grupo na regex corresponde ao campo
@@ -315,7 +314,9 @@ estarão disponíveis para uso na seção de mapeamento.
 
 #### Passo 8: Escrever a seção `mapping` — campos obrigatórios
 
-**Ação:** Adicionar o mapeamento dos campos básicos obrigatórios do UDM.
+**O que este passo faz:** Mapeia as variáveis extraídas do CSV para os campos do UDM (Unified Data Model) do Google SecOps. Este é o coração do parser — é aqui que os dados proprietários do Tópus Banking se tornam eventos pesquisáveis e correlacionáveis com qualquer outra fonte de log.
+
+**Por que agora:** O mapeamento UDM só pode ser escrito depois da extração estar validada. Mapear campos não existentes gera erros silenciosos — o parser salva, mas os eventos ficam com campos vazios.
 
 ```yaml
 mapping:
@@ -333,14 +334,15 @@ mapping:
   target.hostname: topus_sistema_destino
 ```
 
-**Resultado esperado:** Campos básicos mapeados. Ao testar com o botão "Test", o evento
-deve mostrar `principal.user.userid = "OPR0042"` e `principal.ip = "192.168.10.45"`.
+**O que você deve ver:** Campos básicos mapeados. Ao testar com o botão "Test", o evento deve mostrar `principal.user.userid = "OPR0042"` e `principal.ip = "192.168.10.45"`. Se esses campos aparecerem vazios, o problema está na extração do Passo 7.
 
 ---
 
 #### Passo 9: Mapear o event_type com lookup condicional
 
-**Ação:** Adicionar o mapeamento condicional do `metadata.event_type` baseado no campo `topus_evento`.
+**O que este passo faz:** Traduz os tipos de evento proprietários do Tópus Banking (`LOGIN`, `TRANSACAO`, `ADMIN`, `ERRO`) para os tipos UDM padronizados do Google SecOps. Esta tradução é o que permite que regras YARA-L escritas para qualquer sistema detectem eventos do Tópus Banking — o YARA-L usa `metadata.event_type = "USER_LOGIN"` e funciona para Tópus, Azure AD e qualquer outra fonte normalizada.
+
+**Por que agora:** O `event_type` é o campo mais crítico para correlação. Sem ele mapeado corretamente, o UEBA não consegue identificar padrões de comportamento do operador e as regras de detecção de credential stuffing não funcionam para o Tópus Banking.
 
 ```yaml
   # Tipo de evento — mapeamento condicional
@@ -357,24 +359,20 @@ deve mostrar `principal.user.userid = "OPR0042"` e `principal.ip = "192.168.10.4
       - else: GENERIC_EVENT
 ```
 
-**Resultado esperado:** Eventos de `LOGIN` aparecem com `metadata.event_type = USER_LOGIN`
-na UDM Search. Eventos de `TRANSACAO` aparecem com `NETWORK_CONNECTION`.
-
-**O que verificar:**
-- No editor de parsers, teste com uma linha de evento tipo LOGIN e verifique se `USER_LOGIN` aparece
-- Teste também com TRANSACAO e verifique se `NETWORK_CONNECTION` aparece
-- Se aparecer `GENERIC_EVENT` em vez do tipo correto, verifique a capitalização (TOPUS usa maiúsculas)
+**O que você deve ver:** Eventos de `LOGIN` aparecem com `metadata.event_type = USER_LOGIN` na UDM Search. Eventos de `TRANSACAO` aparecem com `NETWORK_CONNECTION`. Teste com uma linha de evento tipo LOGIN e verifique se `USER_LOGIN` aparece; teste também com TRANSACAO.
 
 **O que fazer se der errado:**
+- Se aparecer `GENERIC_EVENT` em vez do tipo correto, verifique a capitalização — o Tópus usa MAIÚSCULAS
 - Se o condicional não funcionar, verifique se está usando `==` (dois iguais) e não apenas `=`
-- Se o valor for case-sensitive, adicione `.upper()` ou use regex insensível a maiúsculas:
-  `if: "topus_evento.lower() == 'login'"`
+- Se o valor for case-sensitive, adicione `.upper()` ou use: `if: "topus_evento.lower() == 'login'"`
 
 ---
 
 #### Passo 10: Mapear o security_result.action com lookup condicional
 
-**Ação:** Mapear o resultado (SUCESSO/FALHA/BLOQUEADO) para os valores UDM de `security_result.action`.
+**O que este passo faz:** Traduz os resultados de operação do Tópus Banking (`SUCESSO`, `FALHA`, `BLOQUEADO`) para os valores padronizados do UDM (`ALLOW`, `BLOCK`). Esta tradução é fundamental para a detecção de ataques — a regra de password spray do Banco Meridian busca por `security_result.action = "BLOCK"` e precisa capturar falhas de autenticação de TODAS as fontes, incluindo o Tópus Banking.
+
+**Por que agora:** Sem este mapeamento, tentativas de invasão ao core banking do Banco Meridian são invisíveis para o SIEM. O incidente relatado pelo Rodrigo Saraiva — operador externo fora do horário — não geraria alerta algum, pois o RESULTADO=FALHA do Tópus não se tornaria BLOCK no UDM.
 
 ```yaml
   # Resultado de segurança — ação
@@ -393,36 +391,35 @@ na UDM Search. Eventos de `TRANSACAO` aparecem com `NETWORK_CONNECTION`.
   security_result.description: topus_detalhe
 ```
 
-**Resultado esperado:** Eventos com `RESULTADO = FALHA` agora aparecem com
-`security_result.action = BLOCK` na UDM Search. Isso permitirá que regras YARA-L
-como a de password spray do Lab 02 detectem também falhas de login do Tópus Banking.
-
-**O que verificar:**
+**O que você deve ver:**
 - Na UDM Search: `metadata.log_type = "TOPUS_BANKING" AND security_result.action = "BLOCK"`
   deve retornar os eventos de LOGIN com FALHA
-- `security_result.description` deve conter o texto do campo `DETALHE` (substituindo _ por espaço)
+- `security_result.description` deve conter o texto do campo `DETALHE` (ex: "Senha_incorreta_tentativa_1")
+
+**O que fazer se der errado:** Se `UNKNOWN_ACTION` aparecer em eventos que deveriam ser BLOCK, verifique se o campo `RESULTADO` no CSV tem espaço extra ou capitalização diferente (ex: `falha` em vez de `FALHA`). Use `.upper()` no condicional para normalizar.
 
 ---
 
 #### Passo 11: Adicionar o product_event_type para rastreabilidade
 
-**Ação:** Mapear o tipo de evento original do Tópus para `metadata.product_event_type`,
-mantendo o valor original para fins de forensics e auditoria.
+**O que este passo faz:** Preserva o valor original do tipo de evento do Tópus Banking no campo `metadata.product_event_type`. Enquanto o `event_type` é normalizado para o padrão UDM (USER_LOGIN), o `product_event_type` mantém o valor original (LOGIN) — essencial para forensics e auditoria BACEN, onde o auditor pode questionar a fidelidade dos dados normalizados.
+
+**Por que agora:** Este campo deve ser adicionado junto com os demais campos de metadados. Uma vez que o parser está salvo e os logs reprocessados, adicionar campos posteriormente requer um novo ciclo de reprocessamento.
 
 ```yaml
   # Evento original — mantém o valor do sistema de origem para auditoria
   metadata.product_event_type: topus_evento
 ```
 
-**Resultado esperado:** O campo `metadata.product_event_type` contém o valor original
-do Tópus (ex: `LOGIN`, `TRANSACAO`, `ADMIN`), permitindo que analistas vejam o código
-original do evento mesmo após a normalização UDM.
+**O que você deve ver:** O campo `metadata.product_event_type` contém o valor original do Tópus (ex: `LOGIN`, `TRANSACAO`, `ADMIN`), permitindo que analistas vejam o código original do evento mesmo após a normalização UDM.
 
 ---
 
 #### Passo 12: Parser CBN completo — código final
 
-**Ação:** Verificar o parser completo consolidado antes de salvar.
+**O que este passo faz:** Consolida todas as seções desenvolvidas nos passos anteriores em um único bloco YAML coeso. Este é o parser completo que será validado e salvo. O botão "Validate" verifica a sintaxe YAML antes do save — use-o SEMPRE antes de salvar para evitar erros de sintaxe que podem corromper parsers existentes.
+
+**Por que agora:** A consolidação e validação final garantem que não há conflitos entre as seções. YAML é sensível à indentação — um erro de espaçamento pode quebrar toda a lógica de parsing sem mensagem de erro óbvia.
 
 ```yaml
 # ============================================================
@@ -503,11 +500,7 @@ mapping:
 
 **Ação:** Clicar em "Validate" para verificar a sintaxe YAML, depois em "Save".
 
-**Resultado esperado:** Mensagem "Parser saved successfully" sem erros de validação.
-
-**O que verificar:** Se aparecer erro de validação, o editor indica a linha com o problema.
-Erros comuns: indentação incorreta (YAML é case-sensitive para indentação com espaços),
-vírgulas faltando, aspas desbalanceadas.
+**O que você deve ver:** Mensagem "Parser saved successfully" sem erros de validação. Se aparecer erro de validação, o editor indica a linha com o problema. Erros comuns: indentação incorreta (YAML é sensível a espaços — não use tabs), vírgulas faltando, aspas desbalanceadas.
 
 ---
 
@@ -517,30 +510,30 @@ vírgulas faltando, aspas desbalanceadas.
 
 #### Passo 13: Aguardar a re-ingestão dos logs com o novo parser
 
-**Ação:** Após salvar o parser, aguardar 5–10 minutos para que o Google SecOps reprocesse
-os logs com o novo parser CBN.
+**O que este passo faz:** Aguarda o Google SecOps reprocessar os logs com o parser recém-criado. O sistema não reparseia automaticamente logs históricos — apenas os novos logs ingeridos após o save do parser são processados imediatamente. Para dados históricos, é necessário aguardar a função de re-parse.
+
+**Por que agora:** Tentar validar imediatamente após salvar o parser retornará resultados inconsistentes — alguns logs já reprocessados, outros ainda como raw. Aguardar os 5–10 minutos garante que a validação subsequente seja confiável.
 
 ```
-Navigação: Settings → Ingestion → Parser Management → TOPUS_BANKING
+Navegação: Settings → Ingestion → Parser Management → TOPUS_BANKING
 Status: "Active" com timestamp de última atualização
 ```
 
-**Resultado esperado:** Status do parser como "Active". Os próximos logs ingeridos serão
-automaticamente processados com o novo parser.
+**O que você deve ver:** Status do parser como "Active". Os próximos logs ingeridos serão automaticamente processados com o novo parser.
 
-**Observação:** Os logs já ingeridos antes da criação do parser **não são** automaticamente
-re-processados. Para re-normalizar dados históricos, é necessário usar a função de
-"Re-parse" disponível no painel de parser management (disponível em alguns tenants).
+**Observação:** Os logs já ingeridos antes da criação do parser **não são** automaticamente re-processados. Para re-normalizar dados históricos, é necessário usar a função de "Re-parse" disponível no painel de parser management (disponível em alguns tenants).
 
 ---
 
 #### Passo 14: Validar os campos principais via UDM Search
 
-**Ação:** Executar as queries de validação na UDM Search.
+**O que este passo faz:** Executa 4 queries de validação que confirmam, de forma sistemática, que cada aspecto crítico do parser está funcionando: presença de dados normalizados (Q1), mapeamento de identidade (Q2), mapeamento de falhas de segurança (Q3) e distribuição de event_types (Q4). Esta validação é a entrega formal da Etapa C do lab.
+
+**Por que agora:** A validação sequencial das 4 queries permite identificar exatamente qual componente do parser está com problema, caso algum campo esteja incorreto. Sem essa estrutura, uma falha é difícil de diagnosticar.
 
 ```
 Query 1 — Verificar chegada dos logs normalizados:
-───────────────────────────────────────────────────
+───────────────────────────────────────────────────────────────────
 metadata.log_type = "TOPUS_BANKING"
 
 Resultado esperado: Eventos com campos preenchidos (não mais vazios)
@@ -579,8 +572,7 @@ NETWORK_CONNECTION  → 1 evento (TRANSACAO)
 USER_CHANGE_PERMISSIONS → 1 evento (ADMIN)
 ```
 
-**O que verificar:** Todos os quatro queries devem retornar resultados não-vazios. Se algum
-campo ainda aparecer vazio, revise o mapeamento correspondente no parser CBN.
+**O que você deve ver:** Todos os quatro queries retornando resultados não-vazios com os contadores esperados. Se algum campo ainda aparecer vazio, revise o mapeamento correspondente no parser CBN.
 
 **O que fazer se der errado:**
 - `UNKNOWN_ACTION` ainda aparece: verifique o mapeamento `security_result.action` — provavelmente
@@ -592,8 +584,9 @@ campo ainda aparecer vazio, revise o mapeamento correspondente no parser CBN.
 
 #### Passo 15: Correlação cruzada com Azure AD — teste de integração
 
-**Ação:** Executar uma query cruzada entre eventos do Tópus Banking e do Azure AD para
-o mesmo operador, demonstrando o valor da normalização UDM.
+**O que este passo faz:** Demonstra o valor central do UDM executando uma query que correlaciona eventos de falha de login de DUAS fontes diferentes (Tópus Banking e Azure AD) em uma única busca. Esta é a justificativa de negócio para todo o trabalho do parser — sem normalização UDM, esta correlação não seria possível.
+
+**Por que agora:** A correlação cruzada é a validação final do lab — prova que o parser não apenas normaliza campos corretamente, mas habilita o caso de uso crítico para o CISO: ver o comportamento de um mesmo atacante em múltiplos sistemas simultaneamente.
 
 **Contexto:** OPR0099 é o operador externo que tentou acesso fora do horário. O mesmo
 usuário (`marcos.terceiro@parceiro.com.br`, cujo login corporativo é `OPR0099`) pode
@@ -601,7 +594,7 @@ ter tentado login no Azure AD do Banco Meridian também.
 
 ```
 Query — Busca cruzada por usuário que falhou em múltiplas fontes:
-──────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────────────
 security_result.action = "BLOCK" AND
 metadata.event_type = "USER_LOGIN" AND
 (
@@ -612,12 +605,7 @@ metadata.event_type = "USER_LOGIN" AND
 | order_by count() desc
 ```
 
-**Resultado esperado:** Se os dados de amostra incluírem falhas no Azure AD do mesmo IP
-(`203.45.12.89`), a query retornará o IP com eventos de AMBAS as fontes.
-
-**O que verificar:** Este é o benefício central do UDM: a mesma query funciona para
-múltiplas fontes de log sem modificação. Se o resultado mostrar o IP `203.45.12.89` em
-eventos de ambos os log types, o parser está funcionando perfeitamente.
+**O que você deve ver:** Se os dados de amostra incluírem falhas no Azure AD do mesmo IP (`203.45.12.89`), a query retornará o IP com eventos de AMBAS as fontes. Este é o benefício central do UDM: a mesma query funciona para múltiplas fontes de log sem modificação. Se o resultado mostrar o IP `203.45.12.89` em eventos de ambos os log types, o parser está funcionando perfeitamente.
 
 ---
 
@@ -641,19 +629,34 @@ do CSV do Tópus Banking é mapeado para o campo UDM correspondente, com as segu
 decisões de design:
 
 **Por que `principal.user.userid` e não `target.user.userid` para o operador?**
-No Tópus Banking, o operador (`OPERADOR_ID`) é **quem executa** a ação. Ele é o `principal`
-(originador). O sistema alvo (`SISTEMA_DESTINO`) é o `target.hostname`. Esta semântica é
-diferente do Windows Event 4625, onde o usuário alvo vai para `target.user.userid`.
+
+O código correto é mapear `OPERADOR_ID` para `principal.user.userid`. No Tópus Banking, o operador é **quem executa** a ação — ele é o `principal` (originador). O sistema alvo (`SISTEMA_DESTINO`) é o `target.hostname`. Esta semântica é diferente do Windows Event 4625, onde o usuário alvo vai para `target.user.userid`.
+
+**Por que esta é a resposta correta:** O campo `principal` no UDM representa o agente iniciador da ação. Em logs de autenticação, quem tenta o login é o principal. Inverter essa lógica quebra todas as regras YARA-L que buscam por `principal.user.userid` — elas não encontrariam os operadores do Tópus Banking.
+
+**Erro mais comum neste passo:** Mapear `OPERADOR_ID` para `target.user.userid` por confusão com o log do Windows (onde o target é o usuário sendo autenticado). No Tópus, o sistema não distingue target de principal dessa forma — o operador é sempre o principal.
+
+---
 
 **Por que `NETWORK_CONNECTION` para eventos de TRANSACAO?**
-Eventos de `TRANSACAO` no Tópus Banking representam chamadas de API entre o operador e
-o core banking — essencialmente uma conexão de rede aplicacional. `NETWORK_CONNECTION` é
-o tipo UDM mais adequado para representar esse padrão.
+
+Eventos de `TRANSACAO` no Tópus Banking representam chamadas de API entre o operador e o core banking — essencialmente uma conexão de rede aplicacional. `NETWORK_CONNECTION` é o tipo UDM mais adequado para representar esse padrão.
+
+**Por que esta é a resposta correta:** O UDM `NETWORK_CONNECTION` é usado para eventos de comunicação entre sistemas. Uma transação bancária no Tópus é uma requisição HTTP/API ao core banking — tecnicamente uma conexão de rede. Usar `GENERIC_EVENT` perderia a capacidade de correlacionar transações com eventos de rede em outras fontes.
+
+**Erro mais comum neste passo:** Usar `USER_LOGIN` para TRANSACAO (confundir autenticação com transação) ou `GENERIC_EVENT` (usar o fallback em vez de escolher o tipo mais específico disponível).
+
+---
 
 **Por que mapear `security_result.description` com o campo `DETALHE`?**
-O campo `DETALHE` do Tópus contém informações críticas para forensics (ex: "Conta_bloqueada_3_tentativas",
-"IP_externo_fora_horario"). Mapeá-lo para `security_result.description` permite que analistas
-vejam esse contexto diretamente no alerta, sem precisar consultar o log bruto.
+
+O campo `DETALHE` do Tópus contém informações críticas para forensics (ex: "Conta_bloqueada_3_tentativas", "IP_externo_fora_horario"). Mapeá-lo para `security_result.description` permite que analistas vejam esse contexto diretamente no alerta, sem precisar consultar o log bruto.
+
+**Por que esta é a resposta correta:** O campo `security_result.description` é exibido nos alertas e incidentes do Google SecOps. Colocar o contexto operacional aqui reduz o tempo de triagem — o analista não precisa abrir o raw log para entender o que aconteceu. Para auditorias BACEN, este campo é evidência direta de que o sistema registrou a razão do bloqueio.
+
+**Erro mais comum neste passo:** Deixar `security_result.description` vazio ou mapear o campo `ACAO` (que contém o tipo de ação, não o detalhe). O campo `ACAO` deve ir para `security_result.category_details`, não para `description`.
+
+---
 
 ### Gabarito — Queries de Validação Esperadas
 
@@ -666,13 +669,13 @@ vejam esse contexto diretamente no alerta, sem precisar consultar o log bruto.
 
 ### Gabarito — Erros Comuns e Soluções
 
-| Erro Comum                               | Causa                                    | Solução                                              |
-|:-----------------------------------------|:-----------------------------------------|:-----------------------------------------------------|
-| `UNKNOWN_ACTION` em todos os eventos     | Capitalização diferente em `RESULTADO`   | Verificar valores exatos no CSV; usar `.upper()`     |
-| `GENERIC_EVENT` em todos os eventos      | Capitalização diferente em `EVENTO`      | Verificar CSV; ajustar condicionais para maiúsculas  |
-| Parser status "Error" ao salvar          | Erro de indentação YAML                  | Verificar que cada nível usa 2 espaços; não usar tabs|
-| `principal.user.userid` vazio            | Nome do campo no CSV errado              | Verificar coluna 3 do CSV = `OPERADOR_ID`            |
-| Logs não aparecem após criar o parser    | Re-ingestão ainda pendente               | Aguardar 10 min; verificar status do Bindplane Agent |
+| Erro Comum                               | Causa                                    | Diagnóstico e Solução                                              |
+|:-----------------------------------------|:-----------------------------------------|:-----------------------------------------------------:|
+| `UNKNOWN_ACTION` em todos os eventos     | Capitalização diferente em `RESULTADO`   | **Causa:** o CSV pode ter `Sucesso` em vez de `SUCESSO`. Verificar valores exatos: `head -5 /var/log/topus/sample_topus.csv \| cut -d, -f8`. Solução: usar `.upper()` no condicional |
+| `GENERIC_EVENT` em todos os eventos      | Capitalização diferente em `EVENTO`      | **Causa:** variação de capitalização no campo EVENTO. Verificar: `cut -d, -f2`. Ajustar condicionais para maiúsculas ou adicionar `.lower()` |
+| Parser status "Error" ao salvar          | Erro de indentação YAML                  | **Causa:** YAML não aceita tabs — apenas espaços. Verificar que cada nível usa 2 espaços. Copiar o YAML para um validador online (yamllint.com) antes de salvar |
+| `principal.user.userid` vazio            | Nome do campo no CSV errado              | **Causa:** o campo pode ser `OPERADOR` em vez de `OPERADOR_ID` em algumas versões do Tópus. Verificar coluna 3: `cut -d, -f3` |
+| Logs não aparecem após criar o parser    | Re-ingestão ainda pendente               | **Causa:** o Google SecOps processa novos logs imediatamente, mas não reparseia logs antigos automaticamente. Aguardar 10 min; verificar status do Bindplane Agent com `systemctl status bindplane-agent` |
 
 ---
 

@@ -155,6 +155,10 @@ LOGIC APP EXECUTA:
 
 ### 3.1 Revogar Sessões via Microsoft Graph API
 
+Revogar sessões é a ação de contenção mais importante em casos de conta comprometida. Quando um attacker rouba um token OAuth ou uma senha, ele tem acesso contínuo mesmo se a senha for trocada — os tokens ativos continuam válidos até expirar naturalmente (normalmente 1-24 horas). A revogação de sessão invalida todos os tokens imediatamente, cortando o acesso do attacker em segundos.
+
+**Por que fazer isso via API em vez de clicar no portal:** No cenário do Banco Meridian com 8 incidentes simultâneos, um analista que precisa manualmente abrir o portal, navegar até o usuário, clicar em "Revoke Sessions" para cada usuário comprometido está levando 3-5 minutos por usuário. Com o playbook automatizado, a mesma ação acontece em menos de 5 segundos do momento em que o incidente é criado — antes mesmo do analista ser notificado.
+
 ```json
 // HTTP Action no Logic App
 {
@@ -172,6 +176,13 @@ LOGIC APP EXECUTA:
 **Pré-requisito**: O Logic App precisa de uma Managed Identity com permissão `User.ReadWrite.All` no Microsoft Graph.
 
 ### 3.2 Bloquear Usuário (Disable Account)
+
+Bloquear o usuário (desabilitar a conta) é uma ação mais drástica que revogar sessões. Use quando:
+- A investigação confirma que a conta foi definitivamente comprometida
+- O usuário pode ser um insider threat ativo
+- O attacker pode ter alterado a senha ou métodos de MFA, o que neutralizaria a revogação de sessões
+
+**Impacto operacional no Banco Meridian:** Bloquear uma conta imediatamente paralisa o trabalho do funcionário. Para o analista financeiro que está no meio de um fechamento de balanço, isso pode causar impacto de negócio significativo. Por isso, em muitos SOCs, o playbook automático executa apenas a revogação de sessões (menos impactante) e adiciona um comentário no incidente solicitando que um analista humano decida sobre o bloqueio completo. Automatize o bloqueio apenas para contas de alto risco (contas técnicas, service accounts, usuários com acesso privilegiado).
 
 ```json
 // HTTP PATCH para desabilitar o usuário no Entra ID

@@ -7,9 +7,122 @@
 
 ---
 
-## Contexto
+## Seção 1 — Contexto Situacional
 
-O Banco Meridian ainda não tem logging centralizado. Cada conta gera seus próprios logs sem entrega centralizada. Você vai implementar o CloudTrail Organization Trail com S3 na conta Log Archive, configurar o CloudTrail Lake com retenção de 7 anos, e executar as 5 queries SQL de segurança críticas.
+O Banco Meridian opera quatro contas AWS há três anos. Durante esse tempo, o CloudTrail foi habilitado de forma independente em cada conta — cada uma com seu próprio bucket S3, sem padronização. O resultado é um ambiente de logging fragmentado onde:
+
+- A conta Production tem CloudTrail ativo, mas os logs ficam no S3 da própria Production — o mesmo time que opera produção pode excluir seus próprios logs
+- A conta de Desenvolvimento não tem CloudTrail habilitado
+- A conta de Auditoria não tem acesso aos logs das outras contas
+- O time de segurança precisa fazer login em cada conta separadamente para investigar incidentes
+
+Durante uma investigação de incidente real no mês passado, levou 4 horas para o time de segurança coletar logs de 3 contas diferentes — tempo crítico perdido enquanto o incidente estava em andamento.
+
+O BACEN (Resolução 4.893, Art. 10) exige que logs de auditoria sejam imutáveis, centralizados e com retenção mínima de 5 anos para dados financeiros. O Banco Meridian está em não conformidade com esse requisito.
+
+---
+
+## Seção 2 — Situação Inicial
+
+É terça-feira, 15 de abril de 2026, 10h30. Mariana acabou de concluir a reunião semanal com o CISO e chega até você:
+
+> "Bom dia. O CISO pediu para priorizar a implementação de logging centralizado esta semana. Na semana passada, o Carlos tentou investigar aquela atividade suspeita na conta de Dev e ficou 3 horas sem conseguir acessar os logs — simplesmente não existiam. Se o BACEN fizer uma auditoria surpresa agora, tomamos uma multa."
+
+Você abre o console AWS e verifica o estado atual:
+
+**Estado atual do CloudTrail:**
+
+```
+CLOUDTRAIL — BANCO MERIDIAN (Estado Atual — 15/04/2026)
+─────────────────────────────────────────────────────────────
+Conta: Meridian-Mgmt (111111111111)
+  CloudTrail: DESABILITADO
+  Logs: Nenhum
+
+Conta: Meridian-Audit (222222222222)
+  CloudTrail: DESABILITADO
+  Logs: Nenhum
+
+Conta: Meridian-Logs (333333333333)
+  CloudTrail: DESABILITADO
+  Logs: Nenhum (esta conta é o Log Archive — irônico)
+
+Conta: Meridian-Prod (444444444444)
+  CloudTrail: HABILITADO (Management Events apenas)
+  Logs: s3://prod-trail-logs-444 (na própria conta Production)
+  Retenção: Indefinida (sem Object Lock)
+  Criptografia: Nenhuma
+  Data Events: DESABILITADOS
+─────────────────────────────────────────────────────────────
+Conformidade BACEN 4.893 Art.10: NÃO CONFORME
+```
+
+Carlos envia uma mensagem no Slack às 10h47:
+
+> "Cara, encontrei uma nova instância EC2 em us-east-2 que ninguém reconhece. Tentei verificar quem criou no CloudTrail mas não tenho acesso ao bucket de logs da Production. Precisa de alguém com permissão de S3 na Production para investigar — vai demorar."
+
+Este é exatamente o problema. O objetivo deste laboratório é construir a solução.
+
+---
+
+## Seção 3 — Problema Identificado
+
+**11h05 — Você identifica o escopo completo do problema:**
+
+A investigação rápida que você faz no console confirma que a situação é pior do que parecia:
+
+1. **Ausência de Organization Trail:** cada conta ou não tem CloudTrail, ou tem um trail local. Não há visibilidade centralizada
+2. **Data Events desabilitados na Production:** se alguém acessou dados sensíveis no S3, não há registro do `GetObject` ou `PutObject` — apenas das operações de controle
+3. **Logs na mesma conta dos recursos:** os logs da Production estão num bucket da própria Production — se um atacante comprometer a conta, pode excluir os logs
+4. **Sem retenção definida:** os logs da Production não têm Object Lock — podem ser excluídos a qualquer momento, por qualquer admin
+5. **Sem Log File Validation:** não há como provar que os logs existentes não foram adulterados
+
+**Impacto do problema identificado (MITRE ATT&CK T1562.008 — Disable Cloud Logs):**
+
+```
+Risco atual: Um atacante que comprometa a conta Production pode:
+1. StopLogging → desabilitar o CloudTrail imediatamente
+2. DeleteObject → excluir os logs existentes do S3
+3. Operar durante dias sem qualquer registro
+
+Com o logging centralizado na conta Log Archive:
+1. SCP bloqueia StopLogging nas member accounts
+2. Logs no Log Archive têm Object Lock — imutáveis mesmo para root
+3. Qualquer tentativa de modificar o trail gera alerta imediato
+```
+
+Você abre o ticket **SECOPS-2048 — Implementar CloudTrail Organization Trail com logging centralizado** e começa a trabalhar.
+
+---
+
+## Seção 4 — Roteiro de Atividades
+
+**Objetivo geral:** Implementar o CloudTrail Organization Trail com entrega centralizada na conta Log Archive, configurar o CloudTrail Lake para análise SQL, e estabelecer alertas em tempo real para eventos críticos de segurança.
+
+**Atividades deste laboratório:**
+
+1. Preparar a conta Log Archive: criar bucket S3 com segurança máxima (SSE-KMS, Block Public Access, Versioning)
+2. Aplicar Bucket Policy que permite ao CloudTrail entregar logs de toda a organização
+3. Criar o CloudTrail Organization Trail com Data Events habilitados
+4. Criar log group no CloudWatch e conectar ao trail
+5. Criar Metric Filter para detecção de uso de root account
+6. Criar o CloudTrail Lake Event Data Store com retenção de 7 anos
+7. Executar as 5 queries SQL de segurança críticas
+8. Habilitar VPC Flow Logs na conta Production
+9. Validar integridade dos logs com Log File Validation
+10. Gerar relatório de conformidade para o ticket SECOPS-2048
+
+---
+
+## Seção 5 — Proposição do Desafio
+
+Ao final do laboratório, você apresentará para Mariana uma demonstração de 5 minutos mostrando:
+
+1. No CloudTrail Lake, a query que identifica quem criou a instância EC2 suspeita em us-east-2
+2. Um alarme CloudWatch disparando quando o root é usado em qualquer conta
+3. O relatório de conformidade mostrando Score 100% nos 10 itens verificados
+
+**Critério de aprovação:** o relatório de conformidade gerado pelo script Python deve mostrar todos os checks como `true` e score de 100%.
 
 ---
 
@@ -516,9 +629,216 @@ verificar_conformidade_logging()
 
 ---
 
-## Gabarito
+## Seção 8 — Gabarito Completo
 
-### Verificação Final — Todos os Itens Devem Estar Presentes:
+### Passo 1 — Gabarito: Bucket S3 do Log Archive
+
+**Configuração correta do bucket:**
+```bash
+aws s3api create-bucket \
+  --bucket meridian-logs-333333333333 \
+  --region sa-east-1 \
+  --create-bucket-configuration LocationConstraint=sa-east-1
+
+aws s3api put-public-access-block \
+  --bucket meridian-logs-333333333333 \
+  --public-access-block-configuration \
+  "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+aws s3api put-bucket-versioning \
+  --bucket meridian-logs-333333333333 \
+  --versioning-configuration Status=Enabled
+
+aws s3api put-bucket-encryption \
+  --bucket meridian-logs-333333333333 \
+  --server-side-encryption-configuration \
+  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+```
+
+**Por que esta é a resposta correta:** O bucket precisa de quatro controles independentes: Block Public Access (impede acesso público acidental), Versioning (requisito para Object Lock e recuperação de versões), Encriptação (BACEN 4.893 exige dados em repouso criptografados) e Bucket Policy restritiva (permite apenas o CloudTrail escrever, impede escrita de outras fontes).
+
+**Output esperado de verificação:**
+```bash
+aws s3api get-bucket-versioning --bucket meridian-logs-333333333333
+# {"Status": "Enabled"}   ← Versioning ativo — pré-requisito para Object Lock
+
+aws s3api get-public-access-block --bucket meridian-logs-333333333333
+# Todos os quatro campos devem ser true
+```
+
+**Erros comuns neste passo:**
+- Criar bucket sem Versioning antes de tentar habilitar Object Lock: Object Lock exige Versioning ativo no momento da criação do bucket — não pode ser habilitado depois
+- Esquecer o `LocationConstraint` para sa-east-1: sem isso, o bucket vai para us-east-1 por padrão
+
+---
+
+### Passo 2 — Gabarito: Bucket Policy para CloudTrail Organization Trail
+
+**Configuração correta da Bucket Policy:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AWSCloudTrailAclCheck",
+      "Effect": "Allow",
+      "Principal": {"Service": "cloudtrail.amazonaws.com"},
+      "Action": "s3:GetBucketAcl",
+      "Resource": "arn:aws:s3:::meridian-logs-333333333333",
+      "Condition": {
+        "StringEquals": {"aws:SourceOrgID": "o-abc123xyz"}
+      }
+    },
+    {
+      "Sid": "AWSCloudTrailWrite",
+      "Effect": "Allow",
+      "Principal": {"Service": "cloudtrail.amazonaws.com"},
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::meridian-logs-333333333333/AWSLogs/*",
+      "Condition": {
+        "StringEquals": {
+          "s3:x-amz-acl": "bucket-owner-full-control",
+          "aws:SourceOrgID": "o-abc123xyz"
+        }
+      }
+    },
+    {
+      "Sid": "DenyDeleteAndModify",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": ["s3:DeleteObject", "s3:DeleteBucket", "s3:PutBucketPolicy"],
+      "Resource": [
+        "arn:aws:s3:::meridian-logs-333333333333",
+        "arn:aws:s3:::meridian-logs-333333333333/*"
+      ]
+    }
+  ]
+}
+```
+
+**Por que esta é a resposta correta:** A condição `aws:SourceOrgID` é crítica — sem ela, qualquer conta AWS poderia escrever no bucket de logs do Banco Meridian, corrompendo a trilha de auditoria. O `DenyDeleteAndModify` é a segunda camada de proteção além do Object Lock.
+
+**Erros comuns neste passo:**
+- Esquecer `aws:SourceOrgID`: o CloudTrail funciona, mas qualquer conta AWS pode gravar no bucket — risco de poluição de logs
+- Usar `aws:SourceAccount` em vez de `aws:SourceOrgID`: `SourceAccount` cobre apenas uma conta; `SourceOrgID` cobre toda a organização
+- Esquecer o `GetBucketAcl`: o CloudTrail verifica o ACL do bucket antes de escrever — sem essa permissão, a entrega de logs falha silenciosamente
+
+---
+
+### Passo 3 — Gabarito: Criação do CloudTrail Organization Trail
+
+**Configuração correta:**
+```bash
+aws cloudtrail create-trail \
+  --name "meridian-org-trail" \
+  --s3-bucket-name "meridian-logs-333333333333" \
+  --is-organization-trail \
+  --is-multi-region-trail \
+  --enable-log-file-validation \
+  --cloud-watch-logs-log-group-arn "arn:aws:logs:sa-east-1:111111111111:log-group:/meridian/cloudtrail/org-trail:*" \
+  --cloud-watch-logs-role-arn "arn:aws:iam::111111111111:role/CloudTrail_CloudWatchLogs_Role" \
+  --region sa-east-1
+```
+
+**Por que esta é a resposta correta:** Os três flags são obrigatórios para o cenário do Banco Meridian:
+- `--is-organization-trail`: cobre todas as contas da organização com um único trail
+- `--is-multi-region-trail`: captura eventos de todas as regiões — sem isso, atividade em us-east-1 não seria registrada
+- `--enable-log-file-validation`: gera digest SHA-256 de cada arquivo de log, permitindo provar que os logs não foram adulterados — requisito forense e de compliance
+
+**Output esperado:**
+```json
+{
+  "TrailARN": "arn:aws:cloudtrail:sa-east-1:111111111111:trail/meridian-org-trail",
+  "IsOrganizationTrail": true,
+  "LogFileValidationEnabled": true,
+  "IsMultiRegionTrail": true
+}
+```
+
+**Erros comuns neste passo:**
+- `InsufficientSnsTopicPolicyException`: a role CloudTrail_CloudWatchLogs_Role não tem permissão de criar log streams no CloudWatch — verificar a trust policy da role
+- `S3BucketDoesNotExistException`: bucket criado em região diferente — verificar com `aws s3 ls | grep meridian-logs`
+- Trail criado mas sem entregas: verificar se o `start-logging` foi executado após a criação
+
+---
+
+### Passo 4 — Gabarito: CloudWatch Metric Filter
+
+**Configuração correta:**
+```bash
+aws logs put-metric-filter \
+  --log-group-name "/meridian/cloudtrail/org-trail" \
+  --filter-name "RootAccountUsage" \
+  --filter-pattern '{$.userIdentity.type = "Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != "AwsServiceEvent"}' \
+  --metric-transformations \
+    "metricName=RootAccountUsageCount,metricNamespace=MeridianSecurity,metricValue=1,defaultValue=0"
+```
+
+**Por que esta é a resposta correta:** O filtro tem três condições compostas com `&&`:
+1. `userIdentity.type = "Root"`: identifica a conta root
+2. `invokedBy NOT EXISTS`: exclui ações iniciadas por serviços AWS (que podem usar root internamente)
+3. `eventType != "AwsServiceEvent"`: exclui eventos gerados automaticamente pela AWS
+
+Sem as condições 2 e 3, o alarme dispara falsos positivos para operações legítimas de serviços AWS, gerando fadiga de alertas.
+
+**Output esperado:**
+```json
+{
+  "metricName": "RootAccountUsageCount",
+  "metricNamespace": "MeridianSecurity",
+  "metricValue": "1",
+  "defaultValue": 0
+}
+```
+
+**Erros comuns neste passo:**
+- `InvalidParameterException` no filter-pattern: o padrão usa sintaxe especial de CloudWatch — verificar aspas e colchetes
+- Alarme não dispara em testes: verificar se o trail está entregando logs ao CloudWatch Logs (pode haver delay de até 15 minutos)
+
+---
+
+### Passo 5 — Gabarito: Query CloudTrail Lake para Instância Suspeita
+
+**Query correta para identificar quem criou a instância em us-east-2:**
+```sql
+SELECT
+    eventTime,
+    userIdentity.arn,
+    userIdentity.type,
+    sourceIPAddress,
+    awsRegion,
+    requestParameters.instancesSet.items[0].imageId AS ami_id,
+    responseElements.instancesSet.items[0].instanceId AS instance_id
+FROM <EDS_ID>
+WHERE
+    eventName = 'RunInstances'
+    AND awsRegion = 'us-east-2'
+    AND eventTime > timestamp '2026-04-14 00:00:00'
+ORDER BY eventTime DESC
+LIMIT 10
+```
+
+**Por que esta é a resposta correta:** `RunInstances` é o evento gerado quando uma instância EC2 é criada. Os campos `requestParameters.instancesSet` e `responseElements.instancesSet` permitem identificar a AMI usada e o ID da instância criada. O filtro por `awsRegion = 'us-east-2'` e período recente confirma o evento específico investigado.
+
+**Output esperado com anotações:**
+```json
+[{
+  "eventTime": "2026-04-14T23:47:32Z",    // Hora UTC — coincide com alerta
+  "userIdentity.arn": "arn:aws:iam::444444444444:user/dev-pipeline-ci",  // Quem criou
+  "sourceIPAddress": "172.16.10.5",        // IP interno do pipeline CI
+  "awsRegion": "us-east-2",               // Região não aprovada — confirmado
+  "ami_id": "ami-0123456789abcdef0",      // AMI usada
+  "instance_id": "i-0prod456xyz"          // ID da instância encontrada
+}]
+```
+
+**Erros comuns neste passo:**
+- `QueryRunning` por mais de 10 minutos: o Event Data Store pode ainda estar indexando logs novos — aguardar ou reduzir o período da query
+- Sem resultados: verificar se o EDS inclui a conta Production (444444444444) e se Data Events estão habilitados
+
+---
+
+### Verificação Final — Checklist de Conformidade
 
 | Item | Comando de Verificação | Resultado Esperado |
 |---|---|---|

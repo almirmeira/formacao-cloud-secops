@@ -126,7 +126,9 @@ se é C2 beaconing (Cobalt Strike) ou falso positivo, extraindo IOCs e documenta
 
 #### Passo 1: Acessar o Risk Analytics e verificar o contexto do host
 
-**Ação:** Navegar para o painel de Risk Analytics e examinar o perfil do host WRK-RODRIGO-011.
+**O que este passo faz:** Examina o painel de Risk Analytics do Google SecOps para entender o histórico comportamental do host WRK-RODRIGO-011. O Risk Score de 89 (CRITICAL) não é um alerta isolado — ele acumula evidências comportamentais ao longo do tempo que as regras de detecção point-in-time não capturam. O timestamp de início da anomalia identifica a provável data de comprometimento.
+
+**Por que agora:** O Risk Analytics fornece o contexto temporal do incidente — quando o comportamento anômalo começou — o que direciona toda a investigação seguinte. Sem saber quando o score começou a subir, a análise de UDM Search pode usar um período de tempo errado e perder os primeiros eventos do comprometimento.
 
 ```
 Navegação: Detection → Risk Analytics → Risky Hosts → WRK-RODRIGO-011
@@ -138,13 +140,12 @@ Campos a observar:
 - Associated users: quais usuários estão logados neste host?
 ```
 
-**Resultado esperado:** Você verá que:
+**O que você deve ver:**
 - O Risk Score começou a subir há exatamente 5 dias (um sábado às 23:17 — fora do horário comercial)
 - A maior contribuição é "Volume anômalo de conexões para IP externo único"
 - O usuário associado é `rodrigo.andrade`
 
-**O que verificar:** Anotar o timestamp exato em que o score começou a subir — isso é
-a provável data/hora de comprometimento inicial.
+Anote o timestamp exato em que o score começou a subir — isso é a provável data/hora de comprometimento inicial. Este timestamp será o ponto de partida para a Timeline no Passo 11.
 
 **O que fazer se der errado:**
 - Se WRK-RODRIGO-011 não aparecer no Risk Analytics, verifique se o período selecionado
@@ -156,7 +157,9 @@ a provável data/hora de comprometimento inicial.
 
 #### Passo 2: Analisar as conexões de rede do host via UDM Search
 
-**Ação:** Executar query UDM para ver todas as conexões de saída do host nos últimos 7 dias.
+**O que este passo faz:** Executa a primeira query de UDM Search para mapear todas as conexões de saída do host nos últimos 7 dias. Esta visão inicial revela o volume total de comunicações e identifica o IP suspeito que o UEBA flagou — 91.234.55.172.
+
+**Por que agora:** A análise de conexões de rede é o primeiro passo de threat hunting após identificar um host anômalo pelo UEBA. O volume e os destinos das conexões fornecem a evidência bruta necessária para confirmar ou descartar o beaconing.
 
 ```
 Navegação: Search → UDM Search
@@ -169,20 +172,15 @@ network.direction = "OUTBOUND"
 
 Selecionar período: "Last 7 days"
 
-**Resultado esperado:** Lista de conexões de saída. Você verá um volume alto de conexões
-para o IP `91.234.55.172`, com timestamps distribuídos ao longo de todos os dias, incluindo
-finais de semana e madrugadas.
-
-**O que verificar:**
-- O IP `91.234.55.172` aparece com quantas conexões?
-- Esse IP aparece também em madrugadas e finais de semana?
-- Quais outras conexões existem? São para domínios reconhecíveis (Microsoft, Google)?
+**O que você deve ver:** Lista de conexões de saída com o IP `91.234.55.172` aparecendo com volume muito acima dos demais, com timestamps distribuídos ao longo de todos os dias, incluindo finais de semana e madrugadas. Verifique se o IP aparece também em madrugadas e finais de semana — tráfego legítimo de backup geralmente ocorre em janelas específicas, não 24x7.
 
 ---
 
 #### Passo 3: Agrupar conexões por IP de destino para identificar o padrão
 
-**Ação:** Usar agregação para encontrar os IPs com maior volume de conexões.
+**O que este passo faz:** Agrega as conexões por IP de destino e calcula o total de conexões e bytes enviados. Esta visão comparativa é essencial: o IP de C2 deve ter um volume de conexões desproporcional em relação aos outros destinos externos, mas com bytes por conexão muito menores (pacotes de heartbeat, não transferências de dados).
+
+**Por que agora:** A comparação quantitativa entre IPs é o que distingue C2 beaconing de uso legítimo intenso de rede. Um software de backup legítimo teria bytes altos; C2 beaconing tem conexões frequentes com bytes mínimos.
 
 ```
 Query:
@@ -198,7 +196,7 @@ NOT target.ip = "192.168.0.0/16"
 | head 20
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 IP destino          | total_conexoes | bytes_enviados
@@ -210,10 +208,7 @@ IP destino          | total_conexoes | bytes_enviados
 13.107.21.200       |        15      |    307.200    ← Microsoft (Teams)
 ```
 
-**O que verificar:**
-- O IP `91.234.55.172` deve ter um volume de conexões MUITO acima dos demais
-- Os bytes enviados por conexão para `91.234.55.172` devem ser muito pequenos (pacotes de heartbeat)
-- Os IPs da Microsoft/Cloudflare são legítimos e têm bytes variados (comportamento humano)
+Calcule o ratio bytes/conexão para o IP suspeito: 472.576 / 1847 = ~255 bytes por conexão. Compare com os IPs da Microsoft: ~22.000 bytes/conexão. Este ratio extremamente baixo é um indicador forte de pacotes de heartbeat de C2.
 
 **O que fazer se der errado:**
 - Se `91.234.55.172` não aparecer, ajuste o período para "Last 30 days"
@@ -224,8 +219,9 @@ IP destino          | total_conexoes | bytes_enviados
 
 #### Passo 4: Calcular as conexões por hora para identificar o padrão 24x7
 
-**Ação:** Agrupar as conexões para `91.234.55.172` por hora do dia para verificar
-se ocorrem 24x7 (sinal de C2) ou apenas durante o horário comercial (legítimo).
+**O que este passo faz:** Distribui as conexões ao IP suspeito pelas 24 horas do dia. C2 beaconing automatizado ocorre de forma uniforme 24x7 — o malware não dorme. Comportamento humano legítimo (backup, atualização) tem picos em horários específicos e zero atividade em outros.
+
+**Por que agora:** A uniformidade horária é um dos indicadores mais confiáveis de automação maliciosa. Este passo transforma a suspeita de beaconing em evidência estatística — ~77 conexões por hora, uniformemente distribuídas, não é comportamento humano.
 
 ```
 Query:
@@ -236,7 +232,7 @@ metadata.event_type = "NETWORK_CONNECTION"
 | order_by metadata.event_timestamp.hours asc
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 Hora (UTC-3)  | count
@@ -255,9 +251,7 @@ Hora (UTC-3)  | count
 23            |   77    ← conexões à meia-noite!
 ```
 
-**O que verificar:** O volume de conexões por hora deve ser MUITO UNIFORME ao longo das
-24 horas — isso é a periodicidade mecânica do malware. Se fosse um software legítimo de
-backup ou atualização, as conexões estariam concentradas em janelas específicas.
+O volume de conexões por hora deve ser MUITO UNIFORME ao longo das 24 horas — a periodicidade mecânica do malware. Se fosse um software legítimo de backup ou atualização, as conexões estariam concentradas em janelas específicas (ex: 02h-04h) e zeradas durante o horário comercial.
 
 ---
 
@@ -267,7 +261,9 @@ backup ou atualização, as conexões estariam concentradas em janelas específi
 
 #### Passo 5: Extrair os timestamps das conexões para análise de intervalo
 
-**Ação:** Obter a lista de timestamps das conexões em ordem cronológica.
+**O que este passo faz:** Obtém a lista ordenada cronologicamente de todos os timestamps das 1.847 conexões. Este export é o dado bruto necessário para o cálculo estatístico do Passo 6 — o coeficiente de variação dos intervalos é a prova matemática de beaconing.
+
+**Por que agora:** O cálculo estatístico de periodicidade é o padrão de ouro para confirmar C2 beaconing — ele prova que as conexões seguem um padrão mecânico com variação mínima, impossível de ser gerado por comportamento humano ou por maioria dos softwares legítimos.
 
 ```
 Query:
@@ -277,14 +273,15 @@ metadata.event_type = "NETWORK_CONNECTION"
 | order_by metadata.event_timestamp asc
 ```
 
-**Resultado esperado:** Lista de 1.847 conexões em ordem cronológica. Exportar para CSV
-clicando no botão "Export" no canto superior direito da tabela de resultados.
+**O que você deve ver:** Lista de 1.847 conexões em ordem cronológica. Exportar para CSV clicando no botão "Export" no canto superior direito da tabela de resultados. O arquivo será usado no Passo 6.
 
 ---
 
 #### Passo 6: Calcular o intervalo médio entre conexões
 
-**Ação:** Usando os timestamps exportados, calcular a análise estatística dos intervalos.
+**O que este passo faz:** Calcula as estatísticas dos intervalos entre conexões consecutivas — média, mediana, desvio padrão e coeficiente de variação (CV). O CV é o indicador decisivo: valores abaixo de 15% indicam automação mecânica (C2 beaconing com jitter mínimo); acima de 50% indica comportamento humano ou software com scheduling variável.
+
+**Por que agora:** A análise estatística transforma a observação visual de "muitas conexões" em evidência técnica documentável — exatamente o que o CISO precisará apresentar ao board e o que o time jurídico precisará em caso de investigação formal. Um CV de 7.7% é matematicamente incompatível com comportamento humano ou software de backup legítimo.
 
 Se você tem acesso a Python no ambiente de lab, use o seguinte script:
 
@@ -328,15 +325,15 @@ print(f"Desvio padrão:         {desvio_padrao:.1f} segundos")
 print(f"Coeficiente de variação: {coef_variacao:.1f}%")
 print(f"\n=== DIAGNÓSTICO ===")
 if coef_variacao < 15:
-    print("⚠️  ALTA PERIODICIDADE DETECTADA — Muito provável C2 beaconing")
+    print("ALTA PERIODICIDADE DETECTADA — Muito provável C2 beaconing")
     print(f"   Intervalo mecânico de {media:.0f}s ± {desvio_padrao:.0f}s")
 elif coef_variacao < 30:
-    print("⚠️  PERIODICIDADE MODERADA — Possível C2 beaconing com jitter")
+    print("PERIODICIDADE MODERADA — Possível C2 beaconing com jitter")
 else:
-    print("✓  Baixa periodicidade — Padrão consistente com tráfego legítimo")
+    print("Baixa periodicidade — Padrão consistente com tráfego legítimo")
 ```
 
-**Resultado esperado da análise:**
+**O que você deve ver:**
 
 ```
 Total de conexões analisadas: 1847
@@ -349,13 +346,11 @@ Desvio padrão:         4.7 segundos
 Coeficiente de variação: 7.7%
 
 === DIAGNÓSTICO ===
-⚠️  ALTA PERIODICIDADE DETECTADA — Muito provável C2 beaconing
+ALTA PERIODICIDADE DETECTADA — Muito provável C2 beaconing
    Intervalo mecânico de 61s ± 5s
 ```
 
-**O que verificar:** Coeficiente de Variação (CV) < 15% é um indicador FORTE de C2
-beaconing. Tráfego humano legítimo geralmente tem CV > 50%. Um intervalo de ~60 segundos
-é consistente com o check-in padrão do Cobalt Strike Beacon.
+Coeficiente de Variação (CV) < 15% é um indicador FORTE de C2 beaconing. Tráfego humano legítimo geralmente tem CV > 50%. Um intervalo de ~60 segundos é consistente com o check-in padrão do Cobalt Strike Beacon (configuração padrão: `sleep 60`).
 
 **O que fazer se der errado:**
 - Se não tiver Python disponível, calcule manualmente com os primeiros 20 intervalos:
@@ -366,7 +361,9 @@ beaconing. Tráfego humano legítimo geralmente tem CV > 50%. Um intervalo de ~6
 
 #### Passo 7: Verificar a variação do tamanho dos pacotes
 
-**Ação:** Analisar se o tamanho dos pacotes (bytes) é consistente entre as conexões.
+**O que este passo faz:** Analisa se os bytes enviados e recebidos por conexão são consistentes (sinal de automação) ou variáveis (sinal de comportamento humano). C2 beaconing usa pacotes de check-in de tamanho fixo — o malware envia o mesmo "heartbeat" repetidamente. Softwares legítimos têm variação de KB a MB dependendo da atividade do usuário.
+
+**Por que agora:** A combinação de intervalos uniformes (Passo 6) com tamanho de pacotes uniforme (este passo) é a prova definitiva de beaconing automatizado. Cada indicador individualmente pode ter explicação alternativa; juntos, formam uma evidência robusta para o relatório ao CISO.
 
 ```
 Query:
@@ -380,7 +377,7 @@ metadata.event_type = "NETWORK_CONNECTION"
     min(network.received_bytes) as min_recv
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 max_sent:  312 bytes
@@ -389,9 +386,7 @@ max_recv:  192 bytes
 min_recv:  128 bytes    ← variação de apenas 64 bytes
 ```
 
-**O que verificar:** Variação < 100 bytes nos tamanhos de pacote é um indicador de
-C2 beaconing. O malware envia pacotes de check-in de tamanho fixo. Compare com os
-pacotes para os IPs da Microsoft: eles têm variação de KB a MB.
+Variação < 100 bytes nos tamanhos de pacote é um indicador de C2 beaconing. Compare com os pacotes para os IPs da Microsoft: eles têm variação de KB a MB. O ratio de variação do Cobalt Strike Beacon é determinístico — o jitter configurado afeta apenas o intervalo, não o tamanho do payload.
 
 ---
 
@@ -401,7 +396,9 @@ pacotes para os IPs da Microsoft: eles têm variação de KB a MB.
 
 #### Passo 8: Identificar o processo responsável pelas conexões
 
-**Ação:** Pivotar do IP de destino para o processo que está iniciando as conexões.
+**O que este passo faz:** Pivota da perspectiva de rede (IP de destino) para a perspectiva de endpoint (processo iniciador). Esta é a técnica central de threat hunting — correlacionar eventos de rede com eventos de processo para identificar qual executável está gerando o tráfego suspeito.
+
+**Por que agora:** Saber o IP do C2 não é suficiente para contenção — o analista precisa saber qual processo matar e qual executável remover. O processo é também a evidência que liga o tráfego de rede ao comprometimento do endpoint.
 
 ```
 Query:
@@ -412,7 +409,7 @@ metadata.event_type = "NETWORK_CONNECTION"
 | order_by count() desc
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 Processo                                           | count
@@ -420,15 +417,15 @@ Processo                                           | count
 C:\Windows\System32\svchost.exe                   |  1847
 ```
 
-**Análise:** `svchost.exe` é um processo legítimo do Windows, mas é frequentemente usado
-por malware como "host" para injeção de código. Todas as 1.847 conexões de beaconing
-partem do mesmo processo `svchost.exe`.
+`svchost.exe` é um processo legítimo do Windows, mas é frequentemente usado por malware como "host" para injeção de código. Todas as 1.847 conexões de beaconing partem do mesmo processo `svchost.exe`. Um svchost legítimo raramente mantém conexões com um único IP externo por dias seguidos — isso exige investigação do processo pai no próximo passo.
 
 ---
 
 #### Passo 9: Verificar o processo pai do svchost suspeito
 
-**Ação:** Investigar quem lançou este processo `svchost.exe` específico (processo pai).
+**O que este passo faz:** Investiga qual processo lançou o `svchost.exe` que está gerando o beaconing. O `svchost.exe` legítimo é sempre lançado pelo `services.exe` (Service Control Manager). Um svchost lançado por qualquer outro processo é um indicador forte de process hollowing ou injeção de código — técnicas comuns do Cobalt Strike.
+
+**Por que agora:** Identificar o processo pai é o pivô que conecta o tráfego C2 ao vetor de comprometimento inicial. O processo pai do svchost suspeito será o dropper — o arquivo malicioso que foi executado na máquina de Rodrigo.
 
 ```
 Query:
@@ -437,7 +434,7 @@ metadata.event_type = "PROCESS_LAUNCH" AND
 target.process.file.full_path = "C:\\Windows\\System32\\svchost.exe"
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 Evento:
@@ -450,9 +447,7 @@ Evento:
   target.process.command_line:   svchost.exe -k netsvcs -p
 ```
 
-**O que verificar:** O processo pai do `svchost.exe` suspeito é `update_cfg.exe`, localizado
-em `%TEMP%` — não é uma localização padrão para lançar processos do sistema. Isso é um
-indicador claro de injeção/hollowing de processo pelo malware.
+O processo pai do `svchost.exe` suspeito é `update_cfg.exe`, localizado em `%TEMP%` — não é uma localização padrão para lançar processos do sistema. Isso é um indicador claro de injeção/hollowing de processo pelo malware. Anote o PID 9921 — ele será usado para confirmar que este é o mesmo svchost que gera o beaconing.
 
 **O que fazer se der errado:**
 - Se a query não retornar resultados, tente buscar por PID:
@@ -462,7 +457,9 @@ indicador claro de injeção/hollowing de processo pelo malware.
 
 #### Passo 10: Investigar o arquivo suspeito update_cfg.exe
 
-**Ação:** Verificar se o `update_cfg.exe` foi visto anteriormente e obter o hash para enriquecimento.
+**O que este passo faz:** Rastreia a criação do arquivo `update_cfg.exe` para identificar qual processo o criou — revelando o vetor de comprometimento inicial. Este pivô completa a cadeia de ataque: vetor inicial → dropper → processo C2.
+
+**Por que agora:** Conhecer o processo que criou o dropper identifica o vetor de comprometimento (ex: Adobe Reader → exploit → dropper). Essa informação é crítica para: (1) determinar o escopo do incidente — quantos outros hosts abriram o mesmo arquivo, e (2) identificar a técnica MITRE ATT&CK correta para o relatório.
 
 ```
 Query:
@@ -471,7 +468,7 @@ metadata.event_type = "FILE_CREATION" AND
 target.file.full_path = /.*update_cfg\.exe.*/
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 Evento FILE_CREATION:
@@ -482,15 +479,15 @@ Evento FILE_CREATION:
   target.file.size:            892416  (872 KB)
 ```
 
-**O que verificar:** O arquivo foi criado por `AcroRd32.exe` (Adobe Reader)! Isso confirma
-o vetor de comprometimento: exploit no Adobe Reader → dropper → Cobalt Strike Beacon.
+O arquivo foi criado por `AcroRd32.exe` (Adobe Reader)! Isso confirma o vetor de comprometimento: exploit no Adobe Reader → dropper → Cobalt Strike Beacon. Anote o hash SHA256 — ele será verificado no VirusTotal no Passo 13.
 
 ---
 
 #### Passo 11: Pivotar do usuário para o Timeline View completo
 
-**Ação:** Usar o Timeline View do Google SecOps para ver toda a atividade do usuário
-`rodrigo.andrade` a partir da data de comprometimento.
+**O que este passo faz:** Usa o Timeline View do Google SecOps para consolidar toda a atividade do usuário `rodrigo.andrade` em uma visão cronológica única — desde o comprometimento inicial até o alerta do UEBA. Este é o entregável de investigação central: a timeline do incidente.
+
+**Por que agora:** A timeline não pode ser construída antes de todos os passos anteriores, pois depende dos timestamps e entidades identificados nas investigações de rede (Passos 2-4), processo (Passos 8-9) e arquivo (Passo 10). Esta é a síntese de toda a investigação.
 
 ```
 Navegação: Search → Entities → buscar "rodrigo.andrade"
@@ -498,7 +495,7 @@ Navegação: Search → Entities → buscar "rodrigo.andrade"
            Aba "Timeline" → período: últimos 7 dias
 ```
 
-**Resultado esperado:** Timeline completa mostrando:
+**O que você deve ver:** Timeline completa mostrando:
 
 | Timestamp (UTC)     | Evento                                            | Fonte         |
 |:--------------------|:--------------------------------------------------|:--------------|
@@ -517,13 +514,15 @@ Navegação: Search → Entities → buscar "rodrigo.andrade"
 
 #### Passo 12: Consultar o Mandiant sobre o IP de C2
 
-**Ação:** Verificar o IP `91.234.55.172` na Threat Intelligence da Mandiant.
+**O que este passo faz:** Verifica o IP `91.234.55.172` na base de inteligência de ameaças da Mandiant integrada ao Google SecOps. A confirmação da Mandiant eleva a confiança do diagnóstico de "suspeito" para "confirmado" — transformando evidências circunstanciais em atribuição técnica formal.
+
+**Por que agora:** O enriquecimento com TI é feito após a investigação local porque confirma ou nega as hipóteses formadas durante o hunting. Verificar o IP antes de investigar o contexto local pode levar a conclusões precipitadas — um IP que a Mandiant não conhece pode ainda ser C2, como este caso demonstra (o IP era novo e não estava na base do VirusTotal no início).
 
 ```
 Navegação: Threat Intelligence → Indicators → buscar 91.234.55.172
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 IP: 91.234.55.172
@@ -537,21 +536,22 @@ Associated TTPs:
   - T1573.001 (Encrypted Channel: Symmetric Cryptography)
 ```
 
-**O que verificar:** Confirmação da Mandiant de que o IP é infraestrutura C2 do Cobalt Strike.
-Isso eleva a confiança do diagnóstico de CONFIRMADO para CERTO.
+A confirmação da Mandiant de que o IP é infraestrutura C2 do Cobalt Strike eleva a confiança do diagnóstico de CONFIRMADO para CERTO. Documente o número de referência da Mandiant — ele deve constar no relatório ao CISO.
 
 ---
 
 #### Passo 13: Consultar o VirusTotal para o hash do dropper
 
-**Ação:** Verificar o hash do `update_cfg.exe` no VirusTotal.
+**O que este passo faz:** Verifica o hash SHA256 do `update_cfg.exe` no VirusTotal para confirmar que é o Cobalt Strike Beacon e obter informações sobre a campanha — família de malware, primeira observação, comportamento em sandbox. Estas informações completam o perfil técnico do ataque para o relatório de incidente.
+
+**Por que agora:** O hash do dropper foi obtido no Passo 10. Verificar no VirusTotal é o passo final de enriquecimento — confirma a família de malware e fornece dados sobre a campanaha em andamento, que podem indicar se outros bancos estão sendo atacados.
 
 ```
 Navegação: Threat Intelligence → VirusTotal → buscar hash
   4a7bc3d9e2f1508b6c3a2d8e9f0b1e4c7a8d2f5e3b4c6a9d1e2f3b5c7d9e0f1
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 File: update_cfg.exe
@@ -564,15 +564,15 @@ Last seen:  2026-04-23
 Family: CobaltStrike
 ```
 
-**O que verificar:** 51/72 engines confirmam que é o Cobalt Strike Beacon. O dropper foi
-visto pela primeira vez há 9 dias — a campanha é recente.
+51/72 engines confirmam que é o Cobalt Strike Beacon. O dropper foi visto pela primeira vez há 9 dias — a campanha é recente, o que explica por que o IP ainda não estava indexado no VirusTotal no início da investigação.
 
 ---
 
 #### Passo 14: Ajustar a regra YARA-L para cobrir este caso
 
-**Ação:** A regra `c2_beaconing_periodicidade` existente NÃO detectou este beaconing.
-Analise por que e proponha o ajuste.
+**O que este passo faz:** Analisa por que a regra `c2_beaconing_periodicidade` não detectou este beaconing e propõe o ajuste necessário. Este passo fecha o ciclo de threat hunting → detecção: a investigação manual identificou o incidente; agora a regra é melhorada para detectar automaticamente casos similares no futuro.
+
+**Por que agora:** O ajuste da regra deve ser feito antes da documentação final, pois o gap identificado é parte dos entregáveis do lab e deve estar documentado no relatório ao CISO.
 
 **Análise do gap:**
 A regra do Módulo 03 tinha condição:
@@ -617,8 +617,9 @@ $e2.principal.hostname = $hostname_origem
 
 #### Passo 15: Documentar os IOCs extraídos na investigação
 
-**Ação:** Criar a lista de IOCs para incluir nas listas customizadas do Google SecOps
-e compartilhar com o time de IR.
+**O que este passo faz:** Consolida todos os indicadores de comprometimento (IOCs) identificados durante a investigação em um documento formal para compartilhamento com o time de IR, outros SOCs e feeds de inteligência. Este documento é o entregável formal da investigação e a base para as ações de contenção.
+
+**Por que agora:** A documentação de IOCs deve ser feita imediatamente após a conclusão da investigação, enquanto todos os dados estão presentes no contexto. IOCs documentados tardiamente perdem precisão — o analista pode esquecer detalhes como o PID exato ou o timestamp preciso do comprometimento.
 
 ```bash
 # Criar documento de IOCs no diretório do lab
@@ -654,7 +655,7 @@ Host WRK-RODRIGO-011 deve ser isolado e forenses coletados.
 EOF
 ```
 
-**Resultado esperado:** Arquivo de IOCs criado e pronto para compartilhamento com o CISO.
+**O que você deve ver:** Arquivo de IOCs criado e pronto para compartilhamento com o CISO, time de IR e para inclusão no feed de TI interno do Banco Meridian.
 
 ---
 
@@ -686,6 +687,12 @@ EOF
 7. Hash do dropper: 51/72 engines VT = Cobalt Strike Beacon
 8. IP confirmado pela Mandiant: C2 ativo do APT-FIN-BR
 
+**Por que esta é a resposta correta:** A convergência de 8 indicadores independentes — cada um com explicação alternativa possível, mas impossíveis de coexistir acidentalmente — constitui evidência conclusiva. O CV de 7.7% é matematicamente incompatível com qualquer software de backup ou atualização legítimo conhecido; a combinação com processo pai em %TEMP% e hash confirmado por 51/72 engines elimina qualquer hipótese de falso positivo.
+
+**Erro mais comum neste passo:** Concluir "provavelmente beaconing" sem documentar a evidência estatística. O CISO do Banco Meridian precisa de evidências formais — a análise estatística de CV é o que diferencia um relatório de segurança de uma suspeita informal.
+
+---
+
 ### Gabarito — IOCs
 
 | Tipo   | Indicador                                                                     |
@@ -695,6 +702,12 @@ EOF
 | Path   | `C:\Users\%USER%\AppData\Local\Temp\update_cfg.exe`                          |
 | Process| `svchost.exe` (lançado por processo em %TEMP%, não pelo SCM legítimo)        |
 
+**Por que esta é a resposta correta:** IOCs sem contexto são dados brutos — IOCs com contexto são inteligência acionável. O campo "Contexto" em cada IOC informa ao analista de outro SOC exatamente o que esse indicador significa, sem precisar reler o relatório inteiro. O formato estruturado permite importação direta em feeds de TI (MISP, Mandiant Threat Feed).
+
+**Erro mais comum neste passo:** Documentar apenas o IP do C2 e ignorar os IOCs de host (hash, path, PID). Os IOCs de host são os mais acionáveis para contenção — o analista de IR precisa do path para encontrar e remover o dropper, e do hash para criar regra de quarentena no EDR.
+
+---
+
 ### Gabarito — Gap na Regra YARA-L
 
 A regra `c2_beaconing_periodicidade` tinha `svchost.exe` na Watchlist de processos legítimos,
@@ -702,14 +715,20 @@ o que preveniu a detecção. A solução é adicionar uma segunda variável de e
 verifica se o `svchost.exe` foi lançado por um processo em `%TEMP%` ou `%APPDATA%` — padrão
 de injeção de processo típico do Cobalt Strike.
 
+**Por que esta é a resposta correta:** O erro original da regra foi uma exclusão excessivamente ampla — toda instância de `svchost.exe` foi excluída da detecção porque o processo é legítimo. A solução correta não é remover a exclusão completamente (o que geraria falsos positivos), mas torná-la condicional ao processo pai. Um `svchost.exe` lançado pelo `services.exe` é legítimo; lançado por um processo em `%TEMP%` é comprometido.
+
+**Erro mais comum neste passo:** Propor simplesmente remover `svchost.exe` da watchlist. Isso causaria alertas de C2 beaconing para TODOS os processos svchost.exe legítimos do Windows — dezenas de alertas por hora por host, tornando o SOC inoperante em minutos. A exclusão condicional por processo pai é a abordagem correta.
+
+---
+
 ### Gabarito — Erros Comuns e Soluções
 
-| Erro                                         | Causa                           | Solução                                              |
+| Erro                                         | Causa                           | Diagnóstico e Solução                                              |
 |:---------------------------------------------|:--------------------------------|:-----------------------------------------------------|
-| IP não encontrado na Mandiant                | IP recente, ainda não indexado  | Verificar VirusTotal + pesquisa manual em Shodan    |
-| Python script retorna erro de CSV            | Formato do export diferente     | Verificar se o campo de timestamp foi exportado     |
-| svchost.exe não aparece na query             | Normalização diferente do campo | Tentar `principal.process.file.full_path = /.*svchost.*/` |
-| Timeline não mostra events pré-comprometimento | Período muito curto            | Ampliar para "Last 14 days"                         |
+| IP não encontrado na Mandiant                | IP recente, ainda não indexado  | **Diagnóstico:** IP novo em campanha ativa. Verificar VirusTotal + pesquisa manual em Shodan (buscar por banner Cobalt Strike no IP). A ausência na Mandiant não descarta o C2 — o CV < 15% ainda é evidência suficiente |
+| Python script retorna erro de CSV            | Formato do export diferente     | **Diagnóstico:** O Google SecOps pode exportar com aspas ou com header diferente. Verificar se o campo de timestamp foi exportado com o nome exato `metadata.event_timestamp`. Alternativa: usar planilha Excel para calcular diferenças entre timestamps |
+| svchost.exe não aparece na query             | Normalização diferente do campo | **Diagnóstico:** Alguns parsers normalizam o nome do processo sem o path completo. Tentar `principal.process.file.full_path = /.*svchost.*/` (regex) em vez de match exato |
+| Timeline não mostra events pré-comprometimento | Período muito curto            | **Diagnóstico:** O lab usa timestamps de 5 dias atrás. Se o período selecionado for "Last 3 days", o evento de comprometimento (2026-04-19) fica fora. Ampliar para "Last 14 days" |
 
 ---
 

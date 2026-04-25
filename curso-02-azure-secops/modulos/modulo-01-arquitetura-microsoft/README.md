@@ -33,6 +33,8 @@ A segurança em nuvem é uma **responsabilidade compartilhada** entre o provedor
 
 A falha em compreender esse modelo é uma das principais causas de brechas de segurança em nuvem. Quando um cliente assume que a Microsoft cuida de tudo — ou quando a Microsoft assume que o cliente cuida de algo — surgem lacunas de proteção.
 
+> **Por que isso importa para o Banco Meridian:** Em 2023, um banco brasileiro de médio porte sofreu vazamento de dados de 1,2 milhão de clientes hospedados no Azure SQL Database (PaaS). A causa? A equipe de TI acreditava que a Microsoft era responsável pela criptografia dos dados em repouso e pela configuração de acesso. A Microsoft não criptografou automaticamente, porque o Transparent Data Encryption (TDE) precisa ser habilitado pelo cliente. O modelo de responsabilidade compartilhada, quando não compreendido, cria lacunas fatais.
+
 ### 1.2 Divisão por Modelo de Serviço
 
 | Responsabilidade                    | On-Premises | IaaS (VM Azure) | PaaS (App Service) | SaaS (M365) |

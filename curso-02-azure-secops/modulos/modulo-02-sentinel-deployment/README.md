@@ -141,6 +141,10 @@ AzureActivity         │ 90 dias     │ 4 anos  │ 5 anos
 
 ### 2.1 Via Portal Azure (Manual)
 
+O Portal Azure é o método mais indicado para uma primeira implantação, pois permite visualizar cada opção e entender o que está sendo configurado. Em produção, utilize Infrastructure as Code (seções 2.2 a 2.4) para garantir reprodutibilidade e rastreabilidade.
+
+**Por que este passo é necessário:** Antes de configurar qualquer regra de detecção ou data connector, o workspace Log Analytics precisa existir como repositório central de dados. O Microsoft Sentinel é habilitado *sobre* um workspace existente — ele é a camada analítica; o workspace é o banco de dados. Sem workspace, não há onde armazenar os logs. A escolha da região Brazil South é especialmente importante: a LGPD exige que dados pessoais de cidadãos brasileiros sejam processados preferencialmente em território nacional.
+
 ```
 1. Portal Azure → "Create a resource" → "Microsoft Sentinel"
 2. "Create a new workspace" (ou selecionar existente)
@@ -154,7 +158,19 @@ AzureActivity         │ 90 dias     │ 4 anos  │ 5 anos
 6. Selecionar o workspace → "Add"
 ```
 
+**Interpretando o resultado:** Após a conclusão, o portal redireciona para a página de Overview do Sentinel. Um workspace recém-criado mostra todos os contadores zerados (0 incidents, 0 alerts, 0 data connectors). Isso é esperado — os dados só aparecem após a conexão de fontes (Seção 3). Se a página de Overview exibir um erro de permissão, verifique se a conta usada tem papel de *Microsoft Sentinel Contributor* ou superior no resource group.
+
+> **Por que isso importa para o Banco Meridian:** O workspace `meridian-secops-prod` na região Brazil South é o coração do SOC. Todos os 2.800 funcionários do banco terão seus logs de autenticação e atividade indexados aqui. A escolha de região não é apenas técnica: um BACEN auditor pode perguntar "onde os logs de acesso a dados de clientes são processados?". Brazil South é a resposta que encerra a pergunta.
+
 ### 2.2 Via ARM Template
+
+O ARM Template (Azure Resource Manager Template) é o padrão nativo de Infrastructure as Code da Microsoft. Ele descreve a infraestrutura desejada em JSON e o Azure garante que o estado real corresponda ao template — o chamado modelo declarativo.
+
+**Por que usar ARM em vez do portal:** O portal é excelente para aprender e explorar, mas em produção queremos auditabilidade. Com um ARM Template, qualquer mudança na configuração do Sentinel fica registrada no repositório Git, revisada via pull request e aplicada de forma reproduzível. Se precisarmos criar um segundo workspace em outra região (por exemplo, para disaster recovery), basta executar o mesmo template com parâmetros diferentes.
+
+**O que cada bloco do template abaixo faz:**
+- `Microsoft.OperationalInsights/workspaces`: cria o workspace Log Analytics com retenção configurável. O parâmetro `retentionInDays: 90` define a retenção interativa (dados consultáveis em tempo real). Para compliance BACEN de 5 anos, a retenção de arquivo é configurada separadamente por tabela.
+- `Microsoft.SecurityInsights/onboardingStates`: habilita o Microsoft Sentinel sobre o workspace criado. O `dependsOn` garante que o workspace existe antes de tentar habilitar o Sentinel.
 
 ```json
 {
@@ -262,6 +278,17 @@ output sentinelWorkspaceResourceId string = workspace.id
 ```
 
 ### 2.4 Via Terraform
+
+O Terraform é a ferramenta de Infrastructure as Code mais utilizada no mercado, com suporte multi-cloud. Para equipes que gerenciam Azure e AWS simultaneamente — como o Banco Meridian — o Terraform é frequentemente preferível ao Bicep, pois permite usar a mesma ferramenta para ambas as nuvens.
+
+**O que o código abaixo cria:**
+- Um Resource Group dedicado ao SOC com tags de rastreamento de custo e propriedade
+- Um workspace Log Analytics com limite diário de 50 GB (proteção contra spikes de custo inesperados)
+- Habilitação do Sentinel sobre o workspace
+- Configuração de retenção de 5 anos para a tabela SigninLogs, como exigido pela Resolução BACEN 4.893
+- Um alerta de custo que notifica quando a ingestão ultrapassa 80% do limite diário
+
+> **⚠️ Atenção:** O atributo `daily_quota_gb` é uma proteção de custo, não de compliance. Se o SOC atingir o limite às 14h, o workspace para de ingerir logs pelo resto do dia. Para produção, este limite deve ser calculado com base no volume médio de ingestão + 30% de margem. Para o Banco Meridian, com 2.800 usuários, a estimativa inicial é de 8-15 GB/dia para logs de identidade e endpoint.
 
 ```hcl
 # sentinel.tf

@@ -652,6 +652,21 @@ EOF
 | IP de C2 (sandbox VT)    | `45.77.123.89:443`                                             |
 | Ação necessária          | Isolamento do host WRK-LUCIANA-003 + revogação de sessões      |
 
+**Por que esse resultado confirma que deu certo:**
+- 38/72 detecções no VT é uma confirmação inequívoca de arquivo malicioso. O threshold do
+  playbook (>= 10 detecções) garante que não haverá falsos positivos por arquivos com 1 ou
+  2 detecções duvidosas — que frequentemente são FPs de engines pouco confiáveis.
+- O dropper em `%TEMP%` é o comportamento mais característico de phishing com exploit:
+  o payload é sempre depositado em diretório temporário para evitar necessidade de
+  privilégios administrativos. Essa localização é um IoC por si só.
+- O AcroRd32.exe lançando um executável em %TEMP% é a assinatura do exploit Adobe Reader
+  — processo legítimo gerando processo filho em localização anômala.
+
+**Variações aceitáveis:**
+- O número de detecções VT pode variar (30–45) dependendo de quando o hash foi submetido ao VT
+- O dropper pode ter nome diferente em variantes da campanha (`cert_helper.exe`, `bcb_attach.exe`)
+- O IP de C2 pode ter mudado — o hash do dropper é o IOC mais estável para IOC customizado
+
 ### Gabarito — Playbook Completo (Pseudocódigo)
 
 O playbook completo está descrito nos passos 5–12 deste lab. A estrutura final deve ter:

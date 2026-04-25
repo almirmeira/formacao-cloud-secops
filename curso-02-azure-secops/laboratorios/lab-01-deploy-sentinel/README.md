@@ -21,14 +21,38 @@ Você foi designado como **Security Engineer** responsável pela implantação i
 
 ## Seção 2 — Situação Inicial
 
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SOC BANCO MERIDIAN — SEGUNDA-FEIRA, 07:45                       │
+│  Analistas em turno: Felipe Andrade (L2), Patricia Souza (L1)    │
+│                                                                   │
+│  PAINEL DE ALERTAS:                                              │
+│  [—] Nenhum alerta ativo — 0 incidentes abertos                 │
+│                                                                   │
+│  DATA CONNECTORS ATIVOS:  0 / 4 esperados                       │
+│  ANALYTICS RULES ATIVAS:  0                                      │
+│  ÚLTIMA INGESTÃO:         nunca                                  │
+│                                                                   │
+│  STATUS DO SENTINEL:      NÃO HABILITADO                         │
+└─────────────────────────────────────────────────────────────────┘
+
+"Felipe, o CISO acabou de encaminhar um relatório do FS-ISAC. Três bancos
+ tier-2 foram comprometidos por AiTM phishing na última semana. Nosso Sentinel
+ ainda não está em ar. O board aprovou o orçamento há dois dias — precisamos
+ estar operacionais hoje." — Patricia Souza, Analista L1
+```
+
 **Estado do ambiente ao iniciar o lab**:
 - Subscription Azure disponível: `Banco-Meridian-Sandbox`
 - Resource Group vazio: `rg-meridian-secops`
 - Tenant M365 E5 ativo com 5 usuários de teste pré-criados
 - Domínio: `bancomeridian-lab.onmicrosoft.com`
-- Sem Sentinel habilitado
-- Sem data connectors configurados
-- Sem analytics rules ativas
+- Microsoft Sentinel: **NÃO habilitado**
+- Data connectors: **NENHUM configurado** — os logs existem no Entra ID, mas não chegam ao Sentinel
+- Analytics rules: **ZERO ativas** — sem detecção automática de qualquer ataque
+- Alertas automáticos: **NENHUM**
+
+O ambiente é um blank slate. Tudo que existe é a subscription Azure com permissões para criar recursos. Os próximos 2 horas determinarão se o banco tem ou não visibilidade sobre o que acontece em seus sistemas Microsoft.
 
 **Credenciais de acesso ao ambiente**:
 Fornecidas pelo instrutor via portal CECyber Labs.
@@ -37,9 +61,34 @@ Fornecidas pelo instrutor via portal CECyber Labs.
 
 ## Seção 3 — Problema Identificado
 
-O banco não tem **visibilidade** sobre o que acontece nos sistemas Microsoft 365. Os logs de autenticação (quem logou, de onde, quando) existem no Entra ID mas ninguém os consulta sistematicamente. Não há alertas automáticos para atividades suspeitas como logins de países estrangeiros ou tentativas de autenticação incomuns.
+```
+Patricia Souza recebe um e-mail às 08:12 do CISO:
 
-O CISO recebeu um relatório do FS-ISAC alertando que bancos tier-2 brasileiros estão sendo alvo de ataques de password spray e AiTM phishing. Sem um SIEM operacional, o banco não teria como detectar esses ataques.
+"Patricia, Felipe — recebi do FS-ISAC um relatório classificado indicando que
+o Grupo Lazarus-BR está executando ataques AiTM (Adversary-in-the-Middle) e
+password spray contra bancos tier-2 brasileiros. Banco Ipê, Banco Caiçara e
+Banco Litoral foram comprometidos nas últimas 2 semanas. Todos usam M365.
+
+Precisamos saber: se esse grupo tentar nos atacar agora, nós detectaríamos?
+
+A resposta honesta, infelizmente, é NÃO. Não temos como saber.
+
+Quero o Sentinel em operação hoje. Quero um relatório de status às 17h."
+```
+
+**Diagnóstico técnico do problema:**
+
+O Banco Meridian tem, neste momento, **zero visibilidade** operacional sobre atividades suspeitas em seus sistemas Microsoft 365. Isso significa:
+
+1. **Logs existem mas não são monitorados**: O Entra ID gera automaticamente logs de autenticação (SigninLogs) para todos os 2.800 funcionários. Esses logs registram cada login, o IP de origem, o país, o dispositivo. Mas sem o Sentinel, esses logs ficam no Entra ID por 30 dias e são deletados — ninguém os consulta em tempo real.
+
+2. **Ataques em andamento são invisíveis**: Um attacker fazendo password spray agora — tentando a senha `Banco2024!` em 200 contas — não geraria nenhum alerta. Os logs existiriam, mas sem regra de detecção, ninguém saberia.
+
+3. **Risco BACEN**: A Resolução 4.893 exige que bancos mantenham registros de acesso por 5 anos e reportem incidentes ao BACEN em até 1 dia útil. Sem um SIEM, o banco não consegue cumprir nenhum desses requisitos de forma eficiente.
+
+4. **Janela de oportunidade do attacker**: Cada hora sem monitoramento é uma hora em que um attacker pode entrar, se mover lateralmente e extrair dados sem ser detectado. O relatório do FS-ISAC indica que o Grupo Lazarus-BR leva em média 4 horas do phishing inicial até o acesso a dados sensíveis.
+
+**O que precisamos criar nas próximas 2 horas para mudar esse cenário.**
 
 ---
 
@@ -387,6 +436,21 @@ union withsource=TableName (
 ---
 
 ## Seção 8 — Gabarito Completo
+
+### Como Interpretar os Resultados de Cada Passo
+
+**Passo 1 (Workspace + Sentinel):** O workspace `meridian-secops-prod` na região Brazil South é confirmado quando o portal exibe o painel Overview do Sentinel sem erros. O fato de estar em Brazil South é confirmado na URL do workspace: `https://portal.azure.com/#resource/subscriptions/.../resourceGroups/rg-meridian-secops/providers/Microsoft.OperationalInsights/workspaces/meridian-secops-prod/overview` — a região está no campo Location da resource. Este passo confirma que o repositório de dados existe e o Sentinel está habilitado para analisá-lo.
+
+**Passo 3 (Retenção BACEN):** O comando PowerShell `$ws.RetentionInDays` retornar `90` confirma a retenção interativa. A retenção de 1825 dias (5 anos) para SigninLogs é confirmada na interface Portal → workspace → Tables → SigninLogs → Total retention period. Este número é crítico para compliance: um auditor do BACEN pedirá logs de um incidente ocorrido há 18 meses. Se a retenção for de 90 dias (padrão), você não terá esses logs.
+
+**Passo 4 (Entra ID Connector):** A confirmação de sucesso não é apenas "Connected" no portal — é a presença de dados reais. Execute `SigninLogs | count` no Log Analytics. Se retornar 0, o connector está conectado mas sem dados (possível problema de permissão ou ausência de logins). Cada login que ocorrer no tenant a partir deste momento gerará um registro em SigninLogs dentro de 5-15 minutos.
+
+**Passo 9 (Analytics Rules):** A analytics rule está funcionando corretamente quando aparece em `Analytics → Active rules` com Status = `Enabled`. A confirmação definitiva vem 24-48 horas depois, quando a rule executa sua primeira avaliação com dados reais e ou gera alertas ou fica em silêncio (comportamento normal quando não há atividade suspeita).
+
+**Variações aceitáveis:**
+- OfficeActivity pode demorar 24-48h para começar a aparecer após a conexão — isso é comportamento normal da Microsoft, não um erro
+- SecurityEvent pode estar vazia se não houver VMs no resource group — isso é esperado
+- A query de validação do Passo 10 pode mostrar contagens baixas (1-5 eventos) nas primeiras horas — o volume aumenta conforme atividade normal do tenant ocorre
 
 ### Verificação Final — Estado Esperado do Ambiente
 

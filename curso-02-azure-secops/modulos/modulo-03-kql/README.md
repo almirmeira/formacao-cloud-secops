@@ -39,6 +39,12 @@ No contexto do SOC, o KQL é a ferramenta principal para:
 - Realizar threat hunting proativo
 - Gerar relatórios e workbooks
 
+**Por que o analista SOC precisa dominar KQL antes de qualquer outra habilidade técnica no Sentinel:** No Microsoft Sentinel, as analytics rules que detectam ataques são escritas em KQL. As queries de threat hunting são KQL. Os workbooks de dashboard são KQL. Os alertas que disparam playbooks são definidos por KQL. Sem KQL, o profissional consegue usar templates prontos da Microsoft — mas não consegue criar detecções personalizadas para o ambiente específico do Banco Meridian, adaptar regras existentes para eliminar falsos positivos, ou investigar um incidente de forma eficiente. O KQL é o "SQL do SOC Microsoft".
+
+**Como o KQL se compara ao SQL que você já conhece:** Se você tem experiência com SQL, o KQL será familiar no conceito mas diferente na sintaxe. No SQL escreve-se `SELECT ... FROM ... WHERE ... GROUP BY`; no KQL, começa-se com a tabela e encadeiam-se transformações com `|` (pipe). Cada operador recebe um conjunto de linhas e produz um conjunto de linhas modificado. Pense em cada linha KQL como um passo de um pipeline de processamento de dados.
+
+> **Por que isso importa para o Banco Meridian:** O SOC do banco recebe, em média, 380 alertas por dia após a implantação inicial do Sentinel. Um analista L2 que domina KQL leva 8 minutos para investigar um alerta de impossible travel — verificar o IP, o país, os logins anteriores do usuário, se há outros alertas correlacionados. Sem KQL, o mesmo analista leva 35-45 minutos clicando em interfaces gráficas e exportando para Excel. A diferença de eficiência é o que determina se o SOC consegue processar todos os alertas críticos no turno ou se ataques passam despercebidos por falta de tempo analítico.
+
 #### Estrutura básica de uma query KQL
 
 ```kql
@@ -105,6 +111,8 @@ AzureActivity
 ---
 
 ##### Operador `project` — Seleção e renomeação de colunas
+
+O operador `project` é mais do que estética. Ao selecionar apenas as colunas necessárias, você reduz o volume de dados que o Sentinel processa nas etapas seguintes do pipeline — o que tem impacto direto na velocidade da query e, em analytics rules com alta frequência de execução, no custo de computação. Em queries de hunting sobre semanas de dados, um `project` bem posicionado pode reduzir o tempo de execução de minutos para segundos.
 
 ```kql
 // Selecionar apenas colunas necessárias (melhora performance)
@@ -200,6 +208,10 @@ SigninLogs
 ---
 
 ##### Operador `join` — Correlacionar tabelas
+
+O `join` é o operador mais poderoso do KQL para detecção de ataques multi-etapa. Ele permite combinar duas tabelas com base em um campo comum, encontrando eventos relacionados que, sozinhos, seriam benignos. Por exemplo: um alerta de "login fora do horário" (SigninLogs) combinado com "download massivo de arquivos" (OfficeActivity) no mesmo usuário pode revelar um insider threat que nenhuma das regras individuais detectaria sozinha.
+
+> **⚠️ Atenção ao custo do join:** O `join` é computacionalmente caro. Em analytics rules de alta frequência (rodando a cada 5 minutos), um join mal otimizado pode aumentar significativamente o custo de computação. Sempre aplique filtros (`where`) nas duas tabelas antes do join, reduzindo o conjunto de dados ao mínimo necessário. Use `project` para selecionar apenas as colunas que serão usadas.
 
 ```kql
 // Inner join: alertas com detalhes de usuário
