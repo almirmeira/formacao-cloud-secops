@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1000" height="580" viewBox="0 0 1000 580" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <rect width="1000" height="580" fill="#08101c" rx="16"/>
+
+  <!-- Título -->
+  <text x="500" y="34" text-anchor="middle" font-size="17" font-weight="bold" fill="#f1f5f9">Kill Chain — Capstone: Ataque APT contra o Banco Meridian</text>
+  <text x="500" y="54" text-anchor="middle" font-size="10" fill="#64748b">Cenário fictício para fins de treinamento · CECyber · Mapeamento MITRE ATT&amp;CK for Cloud</text>
+  <line x1="20" y1="66" x2="980" y2="66" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Linha do tempo -->
+  <line x1="50" y1="300" x2="950" y2="300" stroke="#1e293b" stroke-width="3"/>
+  <text x="50" y="320" font-size="9" fill="#64748b">T+0</text>
+  <text x="200" y="320" font-size="9" fill="#64748b">T+8min</text>
+  <text x="350" y="320" font-size="9" fill="#64748b">T+25min</text>
+  <text x="510" y="320" font-size="9" fill="#64748b">T+47min</text>
+  <text x="680" y="320" font-size="9" fill="#64748b">T+1h12</text>
+  <text x="840" y="320" font-size="9" fill="#64748b">T+1h38</text>
+
+  <!-- FASE 1: RECONHECIMENTO + ACESSO INICIAL -->
+  <circle cx="80" cy="300" r="12" fill="#ef4444"/>
+  <text x="80" y="304" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">1</text>
+  <!-- Box acima -->
+  <rect x="20" y="100" width="170" height="180" rx="10" fill="#1a0a0a" stroke="#ef4444" stroke-width="2"/>
+  <rect x="20" y="100" width="170" height="26" rx="10" fill="#b91c1c"/>
+  <rect x="20" y="114" width="170" height="12" fill="#b91c1c"/>
+  <text x="105" y="118" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">ACESSO INICIAL</text>
+  <text x="30" y="142" font-size="8" fill="#fca5a5">📧 Spearphishing com anexo</text>
+  <text x="30" y="156" font-size="8" fill="#fca5a5">   PDF malicioso</text>
+  <text x="30" y="172" font-size="8" fill="#fca5a5">🎯 Alvo: gerente de contas</text>
+  <text x="30" y="186" font-size="8" fill="#fca5a5">   (Luciana Alves)</text>
+  <text x="30" y="202" font-size="8" fill="#fca5a5">⬇️ Macro VBA executa</text>
+  <text x="30" y="216" font-size="8" fill="#fca5a5">   Cobalt Strike beacon</text>
+  <text x="30" y="232" font-size="8" fill="#fca5a5">🌐 C2: 185.220.101.x</text>
+  <text x="30" y="248" font-size="8" font-weight="bold" fill="#ef4444">T1566.001 · T1204.002</text>
+  <text x="30" y="264" font-size="8" fill="#7f1d1d">TA0001 Initial Access</text>
+  <!-- Linha conectora -->
+  <line x1="105" y1="280" x2="80" y2="288" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <!-- FASE 2: EXECUÇÃO + PERSISTÊNCIA -->
+  <circle cx="230" cy="300" r="12" fill="#f97316"/>
+  <text x="230" y="304" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">2</text>
+  <rect x="165" y="100" width="175" height="180" rx="10" fill="#1f0a00" stroke="#f97316" stroke-width="2"/>
+  <rect x="165" y="100" width="175" height="26" rx="10" fill="#c2410c"/>
+  <rect x="165" y="114" width="175" height="12" fill="#c2410c"/>
+  <text x="253" y="118" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">EXECUÇÃO</text>
+  <text x="175" y="142" font-size="8" fill="#fed7aa">⚡ PowerShell encoded cmd</text>
+  <text x="175" y="156" font-size="8" fill="#fed7aa">🔧 WMI persistence</text>
+  <text x="175" y="170" font-size="8" fill="#fed7aa">   (scheduled task)</text>
+  <text x="175" y="186" font-size="8" fill="#fed7aa">📦 Download de payload</text>
+  <text x="175" y="200" font-size="8" fill="#fed7aa">   adicional via HTTPS</text>
+  <text x="175" y="216" font-size="8" fill="#fed7aa">🔒 Desabilita EDR logging</text>
+  <text x="175" y="232" font-size="8" fill="#fed7aa">💤 Sleep 4h (evasão)</text>
+  <text x="175" y="248" font-size="8" font-weight="bold" fill="#f97316">T1059.001 · T1053.005</text>
+  <text x="175" y="264" font-size="8" fill="#7c2d12">TA0002 · TA0003</text>
+  <line x1="253" y1="280" x2="230" y2="288" stroke="#f97316" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <!-- FASE 3: CREDENTIAL ACCESS + LATERAL MOVEMENT -->
+  <circle cx="390" cy="300" r="12" fill="#eab308"/>
+  <text x="390" y="304" text-anchor="middle" font-size="9" font-weight="bold" fill="#000">3</text>
+  <rect x="325" y="100" width="175" height="180" rx="10" fill="#1a1600" stroke="#eab308" stroke-width="2"/>
+  <rect x="325" y="100" width="175" height="26" rx="10" fill="#a16207"/>
+  <rect x="325" y="114" width="175" height="12" fill="#a16207"/>
+  <text x="413" y="118" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">CREDENTIAL ACCESS</text>
+  <text x="335" y="142" font-size="8" fill="#fef08a">🔑 Mimikatz dump LSASS</text>
+  <text x="335" y="156" font-size="8" fill="#fef08a">   (T1003.001)</text>
+  <text x="335" y="172" font-size="8" fill="#fef08a">🪪 Pass-the-Hash para</text>
+  <text x="335" y="186" font-size="8" fill="#fef08a">   servidor de arquivos</text>
+  <text x="335" y="202" font-size="8" fill="#fef08a">🔐 Kerberoasting</text>
+  <text x="335" y="216" font-size="8" fill="#fef08a">   (conta de serviço SQL)</text>
+  <text x="335" y="232" font-size="8" fill="#fef08a">👤 Acesso ao AD com</text>
+  <text x="335" y="246" font-size="8" fill="#fef08a">   conta de suporte TI</text>
+  <text x="335" y="262" font-size="8" font-weight="bold" fill="#eab308">T1003 · T1550 · T1558</text>
+  <text x="335" y="276" font-size="8" fill="#713f12">TA0006 Credential Access</text>
+  <line x1="413" y1="280" x2="390" y2="288" stroke="#eab308" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <!-- FASE 4: PRIVILEGE ESCALATION + DISCOVERY -->
+  <circle cx="550" cy="300" r="12" fill="#22c55e"/>
+  <text x="550" y="304" text-anchor="middle" font-size="9" font-weight="bold" fill="#000">4</text>
+  <rect x="485" y="100" width="175" height="180" rx="10" fill="#0a1f0a" stroke="#22c55e" stroke-width="2"/>
+  <rect x="485" y="100" width="175" height="26" rx="10" fill="#15803d"/>
+  <rect x="485" y="114" width="175" height="12" fill="#15803d"/>
+  <text x="573" y="118" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">ESCAL. PRIVILÉGIO</text>
+  <text x="495" y="142" font-size="8" fill="#bbf7d0">👑 Adição a grupo</text>
+  <text x="495" y="156" font-size="8" fill="#bbf7d0">   Domain Admins</text>
+  <text x="495" y="172" font-size="8" fill="#bbf7d0">🔎 BloodHound recon</text>
+  <text x="495" y="186" font-size="8" fill="#bbf7d0">   do AD (paths)</text>
+  <text x="495" y="202" font-size="8" fill="#bbf7d0">☁️ AWS: AssumeRole</text>
+  <text x="495" y="216" font-size="8" fill="#bbf7d0">   para conta de Audit</text>
+  <text x="495" y="232" font-size="8" fill="#bbf7d0">🗑️ Desabilita CloudTrail</text>
+  <text x="495" y="246" font-size="8" fill="#bbf7d0">   na conta Audit</text>
+  <text x="495" y="262" font-size="8" font-weight="bold" fill="#22c55e">T1484 · T1548 · T1562</text>
+  <text x="495" y="276" font-size="8" fill="#14532d">TA0004 · TA0005</text>
+  <line x1="573" y1="280" x2="550" y2="288" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <!-- FASE 5: COLLECTION -->
+  <circle cx="710" cy="300" r="12" fill="#3b82f6"/>
+  <text x="710" y="304" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">5</text>
+  <rect x="645" y="100" width="175" height="180" rx="10" fill="#0a1535" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="645" y="100" width="175" height="26" rx="10" fill="#1d4ed8"/>
+  <rect x="645" y="114" width="175" height="12" fill="#1d4ed8"/>
+  <text x="733" y="118" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">COLETA DE DADOS</text>
+  <text x="655" y="142" font-size="8" fill="#bfdbfe">📁 SharePoint: relatórios</text>
+  <text x="655" y="156" font-size="8" fill="#bfdbfe">   financeiros Q4 (4.7 GB)</text>
+  <text x="655" y="172" font-size="8" fill="#bfdbfe">🪣 S3: dados de clientes</text>
+  <text x="655" y="186" font-size="8" fill="#bfdbfe">   corporativos (2.1 GB)</text>
+  <text x="655" y="202" font-size="8" fill="#bfdbfe">📧 Caixa de e-mail do</text>
+  <text x="655" y="216" font-size="8" fill="#bfdbfe">   CFO (últimos 6 meses)</text>
+  <text x="655" y="232" font-size="8" fill="#bfdbfe">📊 Planilhas de projeção</text>
+  <text x="655" y="246" font-size="8" fill="#bfdbfe">   estratégica 2026</text>
+  <text x="655" y="262" font-size="8" font-weight="bold" fill="#3b82f6">T1213 · T1530 · T1114</text>
+  <text x="655" y="276" font-size="8" fill="#1e3a8a">TA0009 Collection</text>
+  <line x1="733" y1="280" x2="710" y2="288" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <!-- FASE 6: EXFILTRAÇÃO -->
+  <circle cx="880" cy="300" r="12" fill="#9333ea"/>
+  <text x="880" y="304" text-anchor="middle" font-size="9" font-weight="bold" fill="#fff">6</text>
+  <rect x="815" y="100" width="175" height="180" rx="10" fill="#1a0a35" stroke="#9333ea" stroke-width="2"/>
+  <rect x="815" y="100" width="175" height="26" rx="10" fill="#7e22ce"/>
+  <rect x="815" y="114" width="175" height="12" fill="#7e22ce"/>
+  <text x="903" y="118" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">EXFILTRAÇÃO</text>
+  <text x="825" y="142" font-size="8" fill="#ddd6fe">📤 6.8 GB via HTTPS</text>
+  <text x="825" y="156" font-size="8" fill="#ddd6fe">   para 82.194.67.x</text>
+  <text x="825" y="172" font-size="8" fill="#ddd6fe">   (Moldova — AS MivoCloud)</text>
+  <text x="825" y="188" font-size="8" fill="#ddd6fe">📨 E-mail para conta</text>
+  <text x="825" y="202" font-size="8" fill="#ddd6fe">   @protonmail.com</text>
+  <text x="825" y="218" font-size="8" fill="#ddd6fe">⏰ Exfil em horário</text>
+  <text x="825" y="232" font-size="8" fill="#ddd6fe">   de baixo tráfego</text>
+  <text x="825" y="248" font-size="8" fill="#ddd6fe">   (01h–05h, domingo)</text>
+  <text x="825" y="264" font-size="8" font-weight="bold" fill="#9333ea">T1048 · T1041 · T1567</text>
+  <text x="825" y="278" font-size="8" fill="#4c1d95">TA0010 Exfiltration</text>
+  <line x1="903" y1="280" x2="880" y2="288" stroke="#9333ea" stroke-width="1.5" stroke-dasharray="4,3"/>
+
+  <!-- DETECÇÃO (abaixo da linha do tempo) -->
+  <rect x="20" y="336" width="960" height="110" rx="10" fill="#0c1628" stroke="#22c55e" stroke-width="2"/>
+  <text x="500" y="356" text-anchor="middle" font-size="12" font-weight="bold" fill="#4ade80">PONTOS DE DETECÇÃO (o que os alunos devem identificar)</text>
+
+  <!-- Pontos de detecção por fase -->
+  <rect x="30" y="364" width="140" height="72" rx="6" fill="#1e293b" stroke="#ef4444" stroke-width="1"/>
+  <text x="100" y="380" text-anchor="middle" font-size="8" font-weight="bold" fill="#ef4444">Fase 1</text>
+  <text x="100" y="394" text-anchor="middle" font-size="8" fill="#cbd5e1">• EDR: macro suspeita</text>
+  <text x="100" y="407" text-anchor="middle" font-size="8" fill="#cbd5e1">• Email gateway: PDF</text>
+  <text x="100" y="420" text-anchor="middle" font-size="8" fill="#cbd5e1">• DNS: domínio C2</text>
+  <text x="100" y="433" text-anchor="middle" font-size="8" fill="#64748b">YARA-L · MDO · Falco</text>
+
+  <rect x="180" y="364" width="140" height="72" rx="6" fill="#1e293b" stroke="#f97316" stroke-width="1"/>
+  <text x="250" y="380" text-anchor="middle" font-size="8" font-weight="bold" fill="#f97316">Fase 2</text>
+  <text x="250" y="394" text-anchor="middle" font-size="8" fill="#cbd5e1">• PowerShell encoded</text>
+  <text x="250" y="407" text-anchor="middle" font-size="8" fill="#cbd5e1">• WMI persistência</text>
+  <text x="250" y="420" text-anchor="middle" font-size="8" fill="#cbd5e1">• EDR: process injection</text>
+  <text x="250" y="433" text-anchor="middle" font-size="8" fill="#64748b">MDE · Falco · UEBA</text>
+
+  <rect x="330" y="364" width="140" height="72" rx="6" fill="#1e293b" stroke="#eab308" stroke-width="1"/>
+  <text x="400" y="380" text-anchor="middle" font-size="8" font-weight="bold" fill="#eab308">Fase 3</text>
+  <text x="400" y="394" text-anchor="middle" font-size="8" fill="#cbd5e1">• LSASS access attempt</text>
+  <text x="400" y="407" text-anchor="middle" font-size="8" fill="#cbd5e1">• Kerberos ticket T23</text>
+  <text x="400" y="420" text-anchor="middle" font-size="8" fill="#cbd5e1">• MDI: lateral move</text>
+  <text x="400" y="433" text-anchor="middle" font-size="8" fill="#64748b">MDI · YARA-L · GuardDuty</text>
+
+  <rect x="480" y="364" width="140" height="72" rx="6" fill="#1e293b" stroke="#22c55e" stroke-width="1"/>
+  <text x="550" y="380" text-anchor="middle" font-size="8" font-weight="bold" fill="#22c55e">Fase 4</text>
+  <text x="550" y="394" text-anchor="middle" font-size="8" fill="#cbd5e1">• Domain Admin change</text>
+  <text x="550" y="407" text-anchor="middle" font-size="8" fill="#cbd5e1">• CloudTrail disabled!</text>
+  <text x="550" y="420" text-anchor="middle" font-size="8" fill="#cbd5e1">• GuardDuty: AssumeRole</text>
+  <text x="550" y="433" text-anchor="middle" font-size="8" fill="#64748b">MDI · Sentinel · GuardDuty</text>
+
+  <rect x="630" y="364" width="140" height="72" rx="6" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="700" y="380" text-anchor="middle" font-size="8" font-weight="bold" fill="#3b82f6">Fase 5</text>
+  <text x="700" y="394" text-anchor="middle" font-size="8" fill="#cbd5e1">• Macie: PII accessed</text>
+  <text x="700" y="407" text-anchor="middle" font-size="8" fill="#cbd5e1">• S3 exfil anomaly</text>
+  <text x="700" y="420" text-anchor="middle" font-size="8" fill="#cbd5e1">• SharePoint: mass DL</text>
+  <text x="700" y="433" text-anchor="middle" font-size="8" fill="#64748b">GuardDuty · Purview · UEBA</text>
+
+  <rect x="780" y="364" width="190" height="72" rx="6" fill="#1e293b" stroke="#9333ea" stroke-width="1"/>
+  <text x="875" y="380" text-anchor="middle" font-size="8" font-weight="bold" fill="#9333ea">Fase 6</text>
+  <text x="875" y="394" text-anchor="middle" font-size="8" fill="#cbd5e1">• GD: S3 unusual transfer</text>
+  <text x="875" y="407" text-anchor="middle" font-size="8" fill="#cbd5e1">• VPC Flow: 6.8GB saída</text>
+  <text x="875" y="420" text-anchor="middle" font-size="8" fill="#cbd5e1">• Email: externa noturno</text>
+  <text x="875" y="433" text-anchor="middle" font-size="8" fill="#64748b">GuardDuty · Chronicle · Sentinel</text>
+
+  <!-- Nota BACEN -->
+  <rect x="20" y="460" width="960" height="100" rx="8" fill="#150d2a" stroke="#9333ea" stroke-width="1"/>
+  <text x="500" y="480" text-anchor="middle" font-size="11" font-weight="bold" fill="#c084fc">Obrigações Regulatórias Acionadas (BACEN 4.893 + LGPD)</text>
+  <text x="200" y="502" text-anchor="middle" font-size="9" fill="#a78bfa">Incidente Relevante?</text>
+  <text x="200" y="517" text-anchor="middle" font-size="9" fill="#94a3b8">SIM — 6,8 GB de dados financeiros</text>
+  <text x="200" y="530" text-anchor="middle" font-size="9" fill="#94a3b8">e informações de clientes expostos</text>
+  <text x="200" y="543" text-anchor="middle" font-size="9" fill="#94a3b8">Notificação BACEN: ≤72 horas</text>
+  <text x="500" y="502" text-anchor="middle" font-size="9" fill="#a78bfa">Notificação Interna</text>
+  <text x="500" y="517" text-anchor="middle" font-size="9" fill="#94a3b8">SOC → CISO → DPO → CEO → Board</text>
+  <text x="500" y="530" text-anchor="middle" font-size="9" fill="#94a3b8">Jurídico → Relações Regulatórias</text>
+  <text x="500" y="543" text-anchor="middle" font-size="9" fill="#94a3b8">Comunicação de crise preparada</text>
+  <text x="800" y="502" text-anchor="middle" font-size="9" fill="#a78bfa">LGPD (Art. 48)</text>
+  <text x="800" y="517" text-anchor="middle" font-size="9" fill="#94a3b8">Notificar ANPD: prazo razoável</text>
+  <text x="800" y="530" text-anchor="middle" font-size="9" fill="#94a3b8">Notificar titulares afetados</text>
+  <text x="800" y="543" text-anchor="middle" font-size="9" fill="#94a3b8">Relatório de impacto à proteção</text>
+</svg>
