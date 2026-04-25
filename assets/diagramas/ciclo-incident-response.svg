@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="860" height="620" viewBox="0 0 860 620" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <rect width="860" height="620" fill="#08101c" rx="16"/>
+
+  <!-- Título -->
+  <text x="430" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#f1f5f9">Ciclo de Incident Response em Cloud</text>
+  <text x="430" y="56" text-anchor="middle" font-size="11" fill="#64748b">NIST SP 800-61 · Adaptado para Ambientes Multi-Cloud · CECyber</text>
+  <line x1="20" y1="68" x2="840" y2="68" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Círculo central do ciclo -->
+  <circle cx="430" cy="330" r="80" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+  <text x="430" y="322" text-anchor="middle" font-size="13" font-weight="bold" fill="#94a3b8">CICLO DE</text>
+  <text x="430" y="340" text-anchor="middle" font-size="13" font-weight="bold" fill="#94a3b8">INCIDENT</text>
+  <text x="430" y="358" text-anchor="middle" font-size="13" font-weight="bold" fill="#94a3b8">RESPONSE</text>
+
+  <!-- FASE 1: PREPARAÇÃO (topo) -->
+  <rect x="310" y="80" width="240" height="100" rx="12" fill="#0f1f3a" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="310" y="80" width="240" height="28" rx="12" fill="#2563eb"/>
+  <rect x="310" y="96" width="240" height="12" fill="#2563eb"/>
+  <text x="430" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">FASE 1 — PREPARAÇÃO</text>
+  <text x="320" y="124" font-size="9" fill="#93c5fd">• Runbooks e playbooks documentados</text>
+  <text x="320" y="138" font-size="9" fill="#93c5fd">• GuardDuty/Sentinel/Chronicle configurados</text>
+  <text x="320" y="152" font-size="9" fill="#93c5fd">• Tenants de lab isolados para treino</text>
+  <text x="320" y="166" font-size="9" fill="#93c5fd">• Comunicação: CISO, DPO, Jurídico, BACEN</text>
+
+  <!-- Seta Preparação → Detecção -->
+  <line x1="550" y1="180" x2="595" y2="230" stroke="#3b82f6" stroke-width="2" marker-end="url(#arr-blue3)"/>
+
+  <!-- FASE 2: DETECÇÃO E ANÁLISE (direita superior) -->
+  <rect x="600" y="190" width="230" height="110" rx="12" fill="#0f291a" stroke="#22c55e" stroke-width="2"/>
+  <rect x="600" y="190" width="230" height="28" rx="12" fill="#16a34a"/>
+  <rect x="600" y="206" width="230" height="12" fill="#16a34a"/>
+  <text x="715" y="210" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">FASE 2 — DETECÇÃO</text>
+  <text x="610" y="234" font-size="9" fill="#86efac">• SIEM alert / GuardDuty finding</text>
+  <text x="610" y="249" font-size="9" fill="#86efac">• YARA-L rule / KQL analytics</text>
+  <text x="610" y="264" font-size="9" fill="#86efac">• UEBA anomaly / Risk Score HIGH</text>
+  <text x="610" y="279" font-size="9" fill="#86efac">• Análise: severidade, escopo, vetor</text>
+
+  <!-- Seta Detecção → Contenção -->
+  <line x1="715" y1="300" x2="645" y2="350" stroke="#22c55e" stroke-width="2" marker-end="url(#arr-green3)"/>
+
+  <!-- FASE 3: CONTENÇÃO (direita inferior) -->
+  <rect x="600" y="360" width="230" height="110" rx="12" fill="#1f1000" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="600" y="360" width="230" height="28" rx="12" fill="#d97706"/>
+  <rect x="600" y="376" width="230" height="12" fill="#d97706"/>
+  <text x="715" y="380" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">FASE 3 — CONTENÇÃO</text>
+  <text x="610" y="404" font-size="9" fill="#fcd34d">• Isolamento do recurso (SG, NSG)</text>
+  <text x="610" y="419" font-size="9" fill="#fcd34d">• Revogação de credenciais IAM/Entra</text>
+  <text x="610" y="434" font-size="9" fill="#fcd34d">• Bloqueio de IP no WAF/Firewall</text>
+  <text x="610" y="449" font-size="9" fill="#fcd34d">• Snapshot forense (evidências)</text>
+
+  <!-- Seta Contenção → Erradicação -->
+  <line x1="600" y1="430" x2="550" y2="450" stroke="#f59e0b" stroke-width="2" marker-end="url(#arr-amber3)"/>
+
+  <!-- FASE 4: ERRADICAÇÃO (baixo) -->
+  <rect x="310" y="460" width="240" height="110" rx="12" fill="#120a1a" stroke="#9333ea" stroke-width="2"/>
+  <rect x="310" y="460" width="240" height="28" rx="12" fill="#7e22ce"/>
+  <rect x="310" y="476" width="240" height="12" fill="#7e22ce"/>
+  <text x="430" y="480" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">FASE 4 — ERRADICAÇÃO</text>
+  <text x="320" y="504" font-size="9" fill="#d8b4fe">• Remover malware / artefatos</text>
+  <text x="320" y="519" font-size="9" fill="#d8b4fe">• Corrigir misconfigurações</text>
+  <text x="320" y="534" font-size="9" fill="#d8b4fe">• Revogar acessos não autorizados</text>
+  <text x="320" y="549" font-size="9" fill="#d8b4fe">• Patch de vulnerabilidades exploradas</text>
+
+  <!-- Seta Erradicação → Recuperação -->
+  <line x1="310" y1="500" x2="265" y2="460" stroke="#9333ea" stroke-width="2" marker-end="url(#arr-purple3)"/>
+
+  <!-- FASE 5: RECUPERAÇÃO (esquerda inferior) -->
+  <rect x="30" y="360" width="230" height="110" rx="12" fill="#1a1000" stroke="#ef4444" stroke-width="2"/>
+  <rect x="30" y="360" width="230" height="28" rx="12" fill="#dc2626"/>
+  <rect x="30" y="376" width="230" height="12" fill="#dc2626"/>
+  <text x="145" y="380" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">FASE 5 — RECUPERAÇÃO</text>
+  <text x="40" y="404" font-size="9" fill="#fca5a5">• Restauração de backups validados</text>
+  <text x="40" y="419" font-size="9" fill="#fca5a5">• Rebuild de instâncias comprometidas</text>
+  <text x="40" y="434" font-size="9" fill="#fca5a5">• Reativação monitorada de serviços</text>
+  <text x="40" y="449" font-size="9" fill="#fca5a5">• Validação de integridade pós-IR</text>
+
+  <!-- Seta Recuperação → Pós-Incidente -->
+  <line x1="145" y1="360" x2="200" y2="300" stroke="#ef4444" stroke-width="2" marker-end="url(#arr-red3)"/>
+
+  <!-- FASE 6: PÓS-INCIDENTE (esquerda superior) -->
+  <rect x="30" y="190" width="230" height="110" rx="12" fill="#0a1a18" stroke="#14b8a6" stroke-width="2"/>
+  <rect x="30" y="190" width="230" height="28" rx="12" fill="#0f766e"/>
+  <rect x="30" y="206" width="230" height="12" fill="#0f766e"/>
+  <text x="145" y="210" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">FASE 6 — PÓS-INCIDENTE</text>
+  <text x="40" y="234" font-size="9" fill="#99f6e4">• Relatório NIST SP 800-61</text>
+  <text x="40" y="249" font-size="9" fill="#99f6e4">• Notificação BACEN 4.893 (se relevante)</text>
+  <text x="40" y="264" font-size="9" fill="#99f6e4">• Notificação LGPD (ANPD)</text>
+  <text x="40" y="279" font-size="9" fill="#99f6e4">• Lições aprendidas → melhoria contínua</text>
+
+  <!-- Seta Pós-Incidente → Preparação (fecha o ciclo) -->
+  <path d="M 260 200 Q 310 150 310 130" stroke="#14b8a6" stroke-width="2" fill="none" marker-end="url(#arr-teal3)"/>
+
+  <!-- SOAR no centro de tudo -->
+  <rect x="355" y="295" width="150" height="70" rx="8" fill="#1e1b4b" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="430" y="317" text-anchor="middle" font-size="10" font-weight="bold" fill="#a5b4fc">SOAR / Automação</text>
+  <text x="430" y="332" text-anchor="middle" font-size="8" fill="#818cf8">Playbooks automáticos</text>
+  <text x="430" y="345" text-anchor="middle" font-size="8" fill="#818cf8">Orquestração de response</text>
+  <text x="430" y="358" text-anchor="middle" font-size="8" fill="#818cf8">MTTD ↓ · MTTR ↓</text>
+
+  <!-- MITRE ATT&CK lateral -->
+  <rect x="745" y="80" width="100" height="440" rx="10" fill="#1a0a00" stroke="#f97316" stroke-width="1.5"/>
+  <text x="795" y="105" text-anchor="middle" font-size="10" font-weight="bold" fill="#fb923c">MITRE</text>
+  <text x="795" y="120" text-anchor="middle" font-size="10" font-weight="bold" fill="#fb923c">ATT&amp;CK</text>
+  <text x="795" y="148" text-anchor="middle" font-size="8" fill="#fdba74">Reconhecimento</text>
+  <line x1="755" y1="155" x2="835" y2="155" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="173" text-anchor="middle" font-size="8" fill="#fdba74">Acesso Inicial</text>
+  <line x1="755" y1="180" x2="835" y2="180" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="198" text-anchor="middle" font-size="8" fill="#fdba74">Execução</text>
+  <line x1="755" y1="205" x2="835" y2="205" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="223" text-anchor="middle" font-size="8" fill="#fdba74">Persistência</text>
+  <line x1="755" y1="230" x2="835" y2="230" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="248" text-anchor="middle" font-size="8" fill="#fdba74">Escal. Privilégio</text>
+  <line x1="755" y1="255" x2="835" y2="255" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="273" text-anchor="middle" font-size="8" fill="#fdba74">Evasão Defesa</text>
+  <line x1="755" y1="280" x2="835" y2="280" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="298" text-anchor="middle" font-size="8" fill="#fdba74">Acesso Cred.</text>
+  <line x1="755" y1="305" x2="835" y2="305" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="323" text-anchor="middle" font-size="8" fill="#fdba74">Descoberta</text>
+  <line x1="755" y1="330" x2="835" y2="330" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="348" text-anchor="middle" font-size="8" fill="#fdba74">Mov. Lateral</text>
+  <line x1="755" y1="355" x2="835" y2="355" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="373" text-anchor="middle" font-size="8" fill="#fdba74">Coleta</text>
+  <line x1="755" y1="380" x2="835" y2="380" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="398" text-anchor="middle" font-size="8" fill="#fdba74">C2</text>
+  <line x1="755" y1="405" x2="835" y2="405" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="423" text-anchor="middle" font-size="8" fill="#fdba74">Exfiltração</text>
+  <line x1="755" y1="430" x2="835" y2="430" stroke="#7c2d12" stroke-width="0.5"/>
+  <text x="795" y="448" text-anchor="middle" font-size="8" fill="#fdba74">Impacto</text>
+  <text x="795" y="490" text-anchor="middle" font-size="8" fill="#f97316">Toda detecção</text>
+  <text x="795" y="504" text-anchor="middle" font-size="8" fill="#f97316">mapeada a uma</text>
+  <text x="795" y="518" text-anchor="middle" font-size="8" fill="#f97316">tática/técnica</text>
+
+  <defs>
+    <marker id="arr-blue3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arr-green3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#22c55e"/>
+    </marker>
+    <marker id="arr-amber3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arr-purple3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#9333ea"/>
+    </marker>
+    <marker id="arr-red3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#ef4444"/>
+    </marker>
+    <marker id="arr-teal3" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#14b8a6"/>
+    </marker>
+  </defs>
+</svg>

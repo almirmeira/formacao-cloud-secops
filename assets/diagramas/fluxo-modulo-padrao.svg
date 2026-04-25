@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="960" height="480" viewBox="0 0 960 480" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <rect width="960" height="480" fill="#08101c" rx="16"/>
+  <text x="480" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#f1f5f9">Fluxo Pedagógico Padrão — Estrutura de Cada Módulo</text>
+  <text x="480" y="56" text-anchor="middle" font-size="11" fill="#64748b">CECyber · Modelo 40/40/20 · Aplicado a todos os módulos dos 4 cursos</text>
+  <line x1="20" y1="68" x2="940" y2="68" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Seta horizontal principal -->
+  <line x1="40" y1="200" x2="900" y2="200" stroke="#334155" stroke-width="2"/>
+  <polygon points="900,194 920,200 900,206" fill="#334155"/>
+  <text x="930" y="204" font-size="10" fill="#475569">Tempo</text>
+
+  <!-- ETAPA 1: Videoaula -->
+  <rect x="30" y="100" width="140" height="200" rx="12" fill="#0f1f3a" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="30" y="100" width="140" height="30" rx="12" fill="#2563eb"/>
+  <rect x="30" y="118" width="140" height="12" fill="#2563eb"/>
+  <text x="100" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">VIDEOAULA</text>
+  <text x="100" y="138" text-anchor="middle" font-size="9" fill="#bfdbfe">Assíncrona · 8–15 min</text>
+  <text x="100" y="158" text-anchor="middle" font-size="9" fill="#93c5fd">📹 Conteúdo conceitual</text>
+  <text x="100" y="173" text-anchor="middle" font-size="9" fill="#93c5fd">🎯 Objetivo da aula</text>
+  <text x="100" y="188" text-anchor="middle" font-size="9" fill="#93c5fd">💡 Exemplos práticos</text>
+  <text x="100" y="203" text-anchor="middle" font-size="9" fill="#93c5fd">🖥️ Demo em tela</text>
+  <text x="100" y="218" text-anchor="middle" font-size="9" fill="#93c5fd">📋 Recapitulação</text>
+  <text x="100" y="233" text-anchor="middle" font-size="9" fill="#3b82f6">→ Chamada ao lab</text>
+  <text x="100" y="284" text-anchor="middle" font-size="10" font-weight="bold" fill="#60a5fa">40% do tempo</text>
+  <!-- Seta -->
+  <line x1="170" y1="200" x2="200" y2="200" stroke="#3b82f6" stroke-width="2" marker-end="url(#arr-blue2)"/>
+
+  <!-- ETAPA 2: Quiz -->
+  <rect x="200" y="130" width="110" height="140" rx="10" fill="#1a1a2e" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="255" y="152" text-anchor="middle" font-size="10" font-weight="bold" fill="#a5b4fc">QUIZ</text>
+  <text x="255" y="167" text-anchor="middle" font-size="8" fill="#818cf8">Integrado ao LMS</text>
+  <text x="255" y="186" text-anchor="middle" font-size="8" fill="#c4b5fd">3–5 questões</text>
+  <text x="255" y="201" text-anchor="middle" font-size="8" fill="#c4b5fd">Múltipla escolha</text>
+  <text x="255" y="216" text-anchor="middle" font-size="8" fill="#c4b5fd">Feedback imediato</text>
+  <text x="255" y="231" text-anchor="middle" font-size="8" fill="#c4b5fd">Não-bloqueante</text>
+  <text x="255" y="258" text-anchor="middle" font-size="9" fill="#818cf8">Reforço do</text>
+  <text x="255" y="270" text-anchor="middle" font-size="9" fill="#818cf8">conteúdo</text>
+  <line x1="310" y1="200" x2="340" y2="200" stroke="#6366f1" stroke-width="2" marker-end="url(#arr-indigo2)"/>
+
+  <!-- ETAPA 3: Laboratório Guiado -->
+  <rect x="340" y="90" width="160" height="220" rx="12" fill="#0f2918" stroke="#22c55e" stroke-width="2.5"/>
+  <rect x="340" y="90" width="160" height="30" rx="12" fill="#16a34a"/>
+  <rect x="340" y="108" width="160" height="12" fill="#16a34a"/>
+  <text x="420" y="110" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">LAB GUIADO</text>
+  <text x="420" y="128" text-anchor="middle" font-size="9" fill="#bbf7d0">Ambiente real de nuvem</text>
+  <text x="350" y="150" font-size="9" fill="#86efac">① Contexto situacional</text>
+  <text x="350" y="165" font-size="9" fill="#86efac">② Situação inicial</text>
+  <text x="350" y="180" font-size="9" fill="#86efac">③ Problema identificado</text>
+  <text x="350" y="195" font-size="9" fill="#86efac">④ Roteiro de atividades</text>
+  <text x="350" y="210" font-size="9" fill="#86efac">⑤ Proposição detalhada</text>
+  <text x="350" y="225" font-size="9" fill="#86efac">⑥ Script passo a passo</text>
+  <text x="350" y="240" font-size="9" fill="#86efac">⑦ Objetivos por etapa</text>
+  <text x="350" y="255" font-size="9" fill="#86efac">⑧ Gabarito completo</text>
+  <text x="420" y="290" text-anchor="middle" font-size="10" font-weight="bold" fill="#4ade80">40% do tempo</text>
+  <line x1="500" y1="200" x2="530" y2="200" stroke="#22c55e" stroke-width="2" marker-end="url(#arr-green2)"/>
+
+  <!-- ETAPA 4: Lab Desafio (opcional) -->
+  <rect x="530" y="120" width="120" height="160" rx="10" fill="#0f2918" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="590" y="142" text-anchor="middle" font-size="10" font-weight="bold" fill="#4ade80">LAB DESAFIO</text>
+  <text x="590" y="157" text-anchor="middle" font-size="8" fill="#86efac">(opcional)</text>
+  <text x="590" y="175" text-anchor="middle" font-size="8" fill="#6ee7b7">Sem guia</text>
+  <text x="590" y="190" text-anchor="middle" font-size="8" fill="#6ee7b7">Critérios de</text>
+  <text x="590" y="203" text-anchor="middle" font-size="8" fill="#6ee7b7">aceitação claros</text>
+  <text x="590" y="220" text-anchor="middle" font-size="8" fill="#6ee7b7">Avaliado pelo</text>
+  <text x="590" y="233" text-anchor="middle" font-size="8" fill="#6ee7b7">gabarito</text>
+  <text x="590" y="268" text-anchor="middle" font-size="8" fill="#16a34a">Para alunos</text>
+  <text x="590" y="280" text-anchor="middle" font-size="8" fill="#16a34a">avançados</text>
+  <line x1="650" y1="200" x2="680" y2="200" stroke="#22c55e" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#arr-green2)"/>
+
+  <!-- ETAPA 5: Live Online -->
+  <rect x="680" y="100" width="150" height="200" rx="12" fill="#1a0f2e" stroke="#9333ea" stroke-width="2"/>
+  <rect x="680" y="100" width="150" height="30" rx="12" fill="#7e22ce"/>
+  <rect x="680" y="118" width="150" height="12" fill="#7e22ce"/>
+  <text x="755" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">LIVE ONLINE</text>
+  <text x="755" y="138" text-anchor="middle" font-size="9" fill="#e9d5ff">Síncrona · com instrutor</text>
+  <text x="690" y="158" font-size="9" fill="#d8b4fe">65% Lab ao vivo</text>
+  <text x="690" y="173" font-size="9" fill="#d8b4fe">15% Mentoria</text>
+  <text x="690" y="188" font-size="9" fill="#d8b4fe">10% Caso real</text>
+  <text x="690" y="203" font-size="9" fill="#d8b4fe">10% Capstone</text>
+  <text x="690" y="225" font-size="9" fill="#c084fc">Max 15–20 alunos</text>
+  <text x="690" y="240" font-size="9" fill="#c084fc">Gravado e disponível</text>
+  <text x="690" y="255" font-size="9" fill="#c084fc">no LMS em 24h</text>
+  <text x="755" y="284" text-anchor="middle" font-size="10" font-weight="bold" fill="#c084fc">20% do tempo</text>
+
+  <!-- ETAPA 6: Avaliação do Módulo -->
+  <rect x="840" y="130" width="100" height="140" rx="10" fill="#1a1200" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="890" y="152" text-anchor="middle" font-size="9" font-weight="bold" fill="#fbbf24">AVALIAÇÃO</text>
+  <text x="890" y="165" text-anchor="middle" font-size="8" fill="#fcd34d">DO MÓDULO</text>
+  <text x="890" y="184" text-anchor="middle" font-size="8" fill="#fde68a">5+ questões</text>
+  <text x="890" y="199" text-anchor="middle" font-size="8" fill="#fde68a">múltipla escolha</text>
+  <text x="890" y="214" text-anchor="middle" font-size="8" fill="#fde68a">1 questão</text>
+  <text x="890" y="229" text-anchor="middle" font-size="8" fill="#fde68a">dissertativa</text>
+  <text x="890" y="258" text-anchor="middle" font-size="8" fill="#f59e0b">Com gabarito</text>
+  <text x="890" y="270" text-anchor="middle" font-size="8" fill="#f59e0b">detalhado</text>
+
+  <!-- Linha de legenda inferior -->
+  <rect x="20" y="360" width="920" height="100" rx="10" fill="#0c1628" stroke="#1e293b" stroke-width="1"/>
+  <text x="480" y="383" text-anchor="middle" font-size="12" font-weight="bold" fill="#94a3b8">Composição do Roteiro de Gravação em Primeira Pessoa</text>
+
+  <!-- 5 blocos do roteiro -->
+  <rect x="30" y="392" width="158" height="58" rx="6" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="109" y="409" text-anchor="middle" font-size="9" font-weight="bold" fill="#93c5fd">ABERTURA (30s)</text>
+  <text x="109" y="424" text-anchor="middle" font-size="8" fill="#64748b">Nome + objetivo + "você</text>
+  <text x="109" y="436" text-anchor="middle" font-size="8" fill="#64748b">vai conseguir..."</text>
+
+  <rect x="197" y="392" width="158" height="58" rx="6" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="276" y="409" text-anchor="middle" font-size="9" font-weight="bold" fill="#93c5fd">CONTEÚDO (blocos 2–3min)</text>
+  <text x="276" y="424" text-anchor="middle" font-size="8" fill="#64748b">Slides → demo → animação</text>
+  <text x="276" y="436" text-anchor="middle" font-size="8" fill="#64748b">→ exemplos reais Brasil</text>
+
+  <rect x="364" y="392" width="158" height="58" rx="6" fill="#1e293b" stroke="#22c55e" stroke-width="1"/>
+  <text x="443" y="409" text-anchor="middle" font-size="9" font-weight="bold" fill="#86efac">DEMO PRÁTICA</text>
+  <text x="443" y="424" text-anchor="middle" font-size="8" fill="#64748b">"Agora vou clicar em...</text>
+  <text x="443" y="436" text-anchor="middle" font-size="8" fill="#64748b">note que..." + narração</text>
+
+  <rect x="531" y="392" width="158" height="58" rx="6" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="610" y="409" text-anchor="middle" font-size="9" font-weight="bold" fill="#93c5fd">RECAPITULAÇÃO</text>
+  <text x="610" y="424" text-anchor="middle" font-size="8" fill="#64748b">3 pontos principais</text>
+  <text x="610" y="436" text-anchor="middle" font-size="8" fill="#64748b">+ link próximo módulo</text>
+
+  <rect x="698" y="392" width="232" height="58" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1"/>
+  <text x="814" y="409" text-anchor="middle" font-size="9" font-weight="bold" fill="#fbbf24">DICAS DE PRODUÇÃO</text>
+  <text x="814" y="424" text-anchor="middle" font-size="8" fill="#64748b">Cortes sugeridos, zooms, lower-thirds,</text>
+  <text x="814" y="436" text-anchor="middle" font-size="8" fill="#64748b">tempo por bloco, inserção de quiz</text>
+
+  <defs>
+    <marker id="arr-blue2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arr-indigo2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#6366f1"/>
+    </marker>
+    <marker id="arr-green2" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#22c55e"/>
+    </marker>
+  </defs>
+</svg>
