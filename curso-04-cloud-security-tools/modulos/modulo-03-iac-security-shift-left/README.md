@@ -1,8 +1,8 @@
 # Módulo 03 — IaC Security e Shift-Left
 ## Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps · CECyber
 
-> **Duração:** 2h videoaulas + 2h laboratório + 1h live online  
-> **Certificação Alvo:** CCSP domínio 3 / CCSK domínio 7  
+> **Duração:** 2h videoaulas + 2h laboratório + 1h live online
+> **Certificação Alvo:** CCSP domínio 3 / CCSK domínio 7
 > **Cenário:** Time de DevOps do Banco Meridian implementando segurança no pipeline de IaC
 
 ---
@@ -11,11 +11,11 @@
 
 Ao concluir este módulo, você será capaz de:
 
-1. Explicar o conceito Shift-Left e quantificar a diferença de custo de encontrar vulnerabilidades cedo vs. tarde
-2. Executar Checkov, tfsec e Trivy (modo IaC) em projetos Terraform e CloudFormation
-3. Escrever políticas OPA/Rego para enforçar regras de segurança em arquivos de configuração
-4. Construir um workflow GitHub Actions completo com IaC scanning em pull requests
-5. Configurar fail on HIGH/CRITICAL e warn on MEDIUM em pipelines CI/CD
+1. Explicar o conceito de Shift-Left e quantificar o custo de encontrar vulnerabilidades em cada fase
+2. Executar Checkov, tfsec e Trivy em projetos Terraform e CloudFormation, interpretando cada flag e campo do output
+3. Escrever políticas OPA/Rego para verificar Terraform plans, explicando cada bloco da política
+4. Construir um workflow GitHub Actions completo para IaC scanning em pull requests, com comentários em cada job
+5. Configurar gates de falha diferenciados por severidade (CRITICAL bloqueia, MEDIUM avisa) nos pipelines CI/CD
 
 ---
 
@@ -23,66 +23,94 @@ Ao concluir este módulo, você será capaz de:
 
 ### 1.1 A Regra do 10x
 
-O custo de corrigir uma vulnerabilidade cresce drasticamente conforme avança no ciclo de vida do software:
+O princípio fundamental do Shift-Left é que o custo de corrigir um problema de segurança cresce dramaticamente conforme a fase em que é encontrado. Essa progressão é chamada de Regra do 10x:
 
 ```
-CUSTO RELATIVO DE CORREÇÃO POR FASE
-────────────────────────────────────────────────────────────────────
-Fase de desenvolvimento (IDE, pré-commit)           → R$ 1
-Fase de revisão (Pull Request, CI)                  → R$ 10
-Fase de teste (QA, staging)                         → R$ 100
-Fase de produção (pós-deploy)                       → R$ 1.000
-Após incidente de segurança                         → R$ 10.000+
-(inclui: resposta ao incidente, reputação, multas)
-────────────────────────────────────────────────────────────────────
+REGRA DO 10X — CUSTO DE CORREÇÃO POR FASE
+
+Fase de desenvolvimento (pre-commit)         → R$ 1
+  └── O desenvolvedor escreve código e o check é instantâneo
+      Correção: editar o arquivo. 5 minutos.
+
+Fase de revisão (Pull Request, CI)           → R$ 10
+  └── O pipeline detecta. O dev precisa fazer nova iteração.
+      Correção: nova branch, novo commit, rerun do pipeline. 30 minutos.
+
+Fase de teste (QA, staging)                 → R$ 100
+  └── QA encontra. Dev precisa revisar, reabrir a issue.
+      Correção: debug de ambiente, nova versão de staging. 4 horas.
+
+Fase de produção (pós-deploy)               → R$ 1.000
+  └── Produção com misconfiguration real.
+      Correção: change management, aprovação, manutenção programada. 8–40 horas.
+
+Pós-incidente de segurança                   → R$ 10.000+
+  └── S3 bucket público por 72h com dados de clientes.
+      Custo: notificação BACEN, análise forense, remediação de imagem,
+      comunicação a clientes afetados. Potencial multa de até 2% do faturamento.
 ```
 
-### 1.2 O Problema Específico de IaC Sem Segurança
+**O caso do Banco Meridian:**
+
+Sem Shift-Left: um desenvolvedor escreve `terraform apply` criando um S3 bucket sem criptografia. O bucket vai para produção na sexta-feira às 18h. A auditoria do Prowler (que roda semanalmente) detecta na quinta-feira seguinte. São 6 dias de exposição, 40+ horas de trabalho para remediação via change management e possível notificação ao BACEN.
+
+Com Shift-Left: o mesmo desenvolvedor escreve o recurso Terraform. O pre-commit hook executa Checkov em 3 segundos. Output: `CKV_AWS_145 FAILED — S3 bucket missing server-side encryption`. O desenvolvedor corrige em 15 minutos no mesmo terminal. Custo: zero exposição.
+
+### 1.2 O Fluxo Completo com Shift-Left
 
 ```
-FLUXO SEM SHIFT-LEFT (PROBLEMÁTICO)
-─────────────────────────────────────────────────────────────────
+FLUXO SEM SHIFT-LEFT (atual no Banco Meridian)
+
 Desenvolvedor escreve Terraform com S3 bucket público
-         │
-         ▼ (merge no main sem revisão de segurança)
-CI/CD executa terraform apply
-         │
-         ▼ (bucket criado em produção)
-S3 bucket público em produção com dados de clientes
-         │
-         ▼ (CSPM detecta 24h depois no próximo scan)
-Finding CSPM: "Bucket público detectado"
-         │
-         ▼ (alguém precisa modificar o Terraform, recriar o bucket, migrar dados)
-Custo: 40+ horas + risco de incidente durante janela de exposição
+           │
+           ▼
+     terraform apply (deploy direto)
+           │
+           ▼
+  S3 bucket público em PRODUÇÃO 6 dias
+           │
+           ▼
+  Prowler detecta na varredura semanal
+           │
+           ▼
+  Change management + aprovação + correção
+           │
+           ▼
+  Custo: 40+ horas + risco de exposição durante janela
 
-FLUXO COM SHIFT-LEFT (CORRETO)
-─────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────
+
+FLUXO COM SHIFT-LEFT (meta do Banco Meridian)
+
 Desenvolvedor escreve Terraform com S3 bucket público
-         │
-         ▼ (git commit → pre-commit hook executa Checkov)
-Checkov: FAILED — CKV_AWS_19: S3 bucket missing public access block
-         │
-         ▼ (desenvolvedor corrige antes de fazer push)
-Terraform corrigido: bucket com acesso público bloqueado
-         │
-         ▼ (PR criado → GitHub Actions executa Checkov + tfsec)
-CI: PASSED — sem findings CRITICAL/HIGH
-         │
-         ▼ (merge e deploy)
-S3 bucket seguro em produção desde o primeiro dia
-         │
-Custo: 15 minutos do desenvolvedor
+           │
+           ▼ pre-commit hook executa Checkov (3 segundos)
+           │
+  BLOCKED: CKV_AWS_19 FAILED — S3 bucket missing public access block
+           │
+           ▼ Desenvolvedor corrige no mesmo terminal
+           │
+           ▼ git commit → GitHub → GitHub Actions pipeline
+           │
+  CI executa: Checkov + tfsec + Trivy IaC + Conftest OPA
+  PASSED: sem findings CRITICAL/HIGH
+           │
+           ▼ PR aprovado, merge autorizado
+           │
+           ▼
+  S3 bucket seguro em produção desde o primeiro deploy
+           │
+  Custo: 15 minutos do desenvolvedor
 ```
 
-### 1.3 Shift-Left em IaC — O Que Escanear
+### 1.3 Ferramentas por Tipo de IaC
 
-| Tipo de Arquivo | Ferramenta Principal | O que Detecta |
-|:----------------|:--------------------:|:-------------|
-| Terraform (.tf) | Checkov, tfsec, Trivy IaC, Terrascan | Misconfigurations de recursos AWS/Azure/GCP |
+| Tipo de IaC | Ferramentas de Scan | O Que Detectam |
+|:-----------|:--------------------|:---------------|
+| Terraform (.tf) | Checkov, tfsec, Trivy IaC, Terrascan | Misconfigurations de AWS/Azure/GCP |
 | CloudFormation (.yaml/.json) | Checkov, cfn-lint | Misconfigs CloudFormation-específicas |
 | Kubernetes YAML | Checkov, Trivy IaC, Datree | PSS violations, RBAC issues, hostPath |
-| Dockerfile | Checkov, Trivy, Hadolint | Root user, latest tag, secrets em ENV |
+| Dockerfile | Checkov, Trivy, Hadolint | Root user, ENV secrets, latest tag |
 | Helm Charts | Checkov, Trivy IaC | Misconfigs em templates K8s |
 | ARM Templates | Checkov | Misconfigs Azure Resource Manager |
 | Bicep | Checkov | Misconfigs Azure Bicep |
@@ -95,52 +123,79 @@ Custo: 15 minutos do desenvolvedor
 
 Checkov é a ferramenta mais completa para IaC security scanning. Desenvolvida pela Bridgecrew (adquirida pela Palo Alto Networks), é open-source com mais de 1.000 checks.
 
+**Por que Checkov para o Banco Meridian:**
+Checkov é a escolha ideal quando você precisa de cobertura ampla de múltiplos tipos de IaC (Terraform + CloudFormation + K8s + Dockerfile), integração com GitHub Code Scanning via SARIF, e capacidade de escrever checks customizados em Python para políticas internas do banco. É a ferramenta com maior biblioteca de checks e melhor suporte a frameworks regulatórios.
+
 **Instalação:**
 ```bash
 pip install checkov
 checkov --version
 ```
 
+**O que este bloco de comandos faz:**
+
 **Execução básica:**
+
 ```bash
 # Scan de diretório Terraform
+# -d especifica o diretório a ser escaneado recursivamente
+# Checkov encontrará todos os arquivos .tf no diretório e subdiretórios
 checkov -d ./terraform/
 
 # Scan de arquivo específico
+# -f aponta para um arquivo único, útil para validação rápida
 checkov -f ./terraform/main.tf
 
 # Scan apenas por framework
+# --framework filtra o tipo de IaC — sem isso, Checkov tenta detectar automaticamente
 checkov -d ./terraform/ --framework terraform
 
 # Listar todos os checks disponíveis
+# Útil para saber quais checks existem antes de configurar exclusões
 checkov -l
 
 # Informações sobre um check específico
+# Mostra: descrição, recursos afetados, exemplo de código com falha e com pass
 checkov --check CKV_AWS_18
+```
 
-# Saída compacta (apenas FAILED)
-checkov -d ./terraform/ --compact
+**O que o comando `--soft-fail-on` faz e por que ele importa no Banco Meridian:**
 
-# Saída em JSON
-checkov -d ./terraform/ -o json
-
-# Saída em JUnit XML (para CI/CD)
-checkov -d ./terraform/ -o junitxml
-
-# Saída em SARIF (para GitHub Code Scanning)
-checkov -d ./terraform/ -o sarif
-
-# Salvar resultado em arquivo
-checkov -d ./terraform/ -o json --output-file-path /tmp/checkov-results/
-
-# Falhar apenas em CRITICAL (não em outros)
+```bash
+# Falhar apenas em CRITICAL (não em HIGH, MEDIUM ou LOW)
+# --soft-fail-on diz ao Checkov: "para essas severidades, reporte mas não retorne exit code 1"
+# Exit code 0 = pipeline continua | Exit code 1 = pipeline falha
 checkov -d ./terraform/ --soft-fail-on HIGH MEDIUM LOW
 
-# Falhar em CRITICAL e HIGH
+# Falhar em CRITICAL e HIGH (MEDIUM e LOW apenas reportam)
+# Configuração recomendada para o pipeline do Banco Meridian:
+# CRITICAL/HIGH bloqueiam o merge, MEDIUM/LOW apenas geram comentário no PR
 checkov -d ./terraform/ --soft-fail-on MEDIUM LOW
 
-# Skip de um check específico (com justificativa no código)
+# Skip de um check específico (com justificativa rastreável)
+# ATENÇÃO: sempre documente o motivo no comentário #checkov:skip= no código
+# Skip no command line (não rastreável) é má prática
 checkov -d ./terraform/ --skip-check CKV_AWS_20,CKV_AWS_28
+```
+
+**Formatos de saída e quando usar cada um:**
+
+```bash
+# Saída compacta — apenas FAILED (útil em terminal para inspeção rápida)
+checkov -d ./terraform/ --compact
+
+# Saída em JSON — para processamento programático, integração com SIEM
+checkov -d ./terraform/ -o json
+
+# Saída em JUnit XML — para CI/CD que suporta relatórios de teste (Jenkins, GitLab)
+checkov -d ./terraform/ -o junitxml
+
+# Saída em SARIF — padrão da indústria para Code Scanning no GitHub
+# Permite que os findings apareçam diretamente na aba "Security" do repositório GitHub
+checkov -d ./terraform/ -o sarif
+
+# Salvar resultado em arquivo (diretório)
+checkov -d ./terraform/ -o json --output-file-path /tmp/checkov-results/
 
 # Scan de CloudFormation
 checkov -d ./cloudformation/ --framework cloudformation
@@ -154,53 +209,95 @@ checkov -f ./Dockerfile --framework dockerfile
 # Scan de Helm charts
 checkov -d ./helm/ --framework helm
 
-# Custom policy directory
+# Custom policy directory — para políticas específicas do Banco Meridian
+# O Checkov carregará seus checks Python customizados além dos built-in
 checkov -d ./terraform/ --external-checks-dir ./custom-policies/
 ```
 
-**Exemplo de Terraform com findings e supressão:**
+**O que este comando faz (checkov -d ./terraform/ --soft-fail-on MEDIUM LOW):**
+
+O `checkov -d ./terraform/ --soft-fail-on MEDIUM LOW` executa uma varredura SAST (Static Application Security Testing) em todos os arquivos Terraform do diretório. O parâmetro `--soft-fail-on MEDIUM LOW` instrui o Checkov a reportar achados de severidade MEDIUM e LOW mas não falhar o pipeline por eles — apenas findings CRITICAL e HIGH causam falha (exit code 1). No contexto do Banco Meridian, isso significa que o pipeline bloqueia automaticamente qualquer IaC que tente criar recursos AWS com configurações de alto risco (por exemplo: S3 sem criptografia, IAM com permissões `*`, Security Groups expostos para 0.0.0.0/0), enquanto problemas menores são registrados mas não bloqueiam o desenvolvimento.
+
+**Interpretando a saída do Checkov:**
+
+```
+Check: CKV_AWS_19: "Ensure the S3 bucket has access control list (ACL) disabled or uses aws_s3_bucket_acl"
+    FAILED for resource: aws_s3_bucket.dados_clientes
+    File: /terraform/s3.tf:3:1-5:1
+    Guide: https://docs.bridgecrew.io/docs/s3_19
+
+Check: CKV_AWS_145: "Ensure that S3 buckets are encrypted with KMS by default"
+    FAILED for resource: aws_s3_bucket.dados_clientes
+    File: /terraform/s3.tf:3:1-5:1
+
+Passed checks: 47, Failed checks: 5, Skipped checks: 1
+
+CRITICAL: 0
+HIGH: 3
+MEDIUM: 2
+LOW: 0
+```
+
+**Interpretando a saída:**
+- `Check: CKV_AWS_19:` — identificador único do check (CKV = Checkov, AWS = provider, 19 = número sequencial). Este ID é estável — você pode buscar qualquer CKV_AWS_XXX na documentação da Bridgecrew
+- `FAILED for resource: aws_s3_bucket.dados_clientes` — qual recurso Terraform específico falhou
+- `File: /terraform/s3.tf:3:1-5:1` — arquivo e linha (linha 3, coluna 1 até linha 5, coluna 1) onde o recurso está definido — você pode ir diretamente para essa linha no editor
+- `HIGH: 3` — com a configuração `--soft-fail-on MEDIUM LOW`, esses 3 findings HIGH causarão exit code 1, bloqueando o merge do PR
+
+**Exemplo de Terraform com findings e supressão rastreável:**
+
 ```hcl
 # terraform/s3.tf
 
-# Bucket com problemas (sem comentários de skip)
+# ❌ BUCKET COM PROBLEMAS (sem comentários de skip — pipeline vai FALHAR)
 resource "aws_s3_bucket" "dados_clientes" {
   bucket = "bancomeridian-dados-clientes"
-  # CKV_AWS_19: falta block public access
-  # CKV_AWS_18: falta logging
-  # CKV_AWS_145: falta criptografia KMS
+  # CKV_AWS_19: falta block public access → CRITICAL
+  # CKV_AWS_18: falta logging → MEDIUM
+  # CKV_AWS_145: falta criptografia KMS → HIGH
+  # CKV_AWS_21: falta versionamento → MEDIUM
 }
 
-# Bucket corrigido
+# ✅ BUCKET CORRIGIDO — passa em todos os checks de segurança
 resource "aws_s3_bucket" "dados_clientes_seguro" {
   bucket = "bancomeridian-dados-clientes-v2"
 
+  # Tags obrigatórias — verificadas por política Rego customizada
   tags = {
     Owner       = "equipe-dados"
     Environment = "production"
     DataClass   = "Confidential"
+    CostCenter  = "TI-0042"
   }
 }
 
+# Block Public Access — impede qualquer acesso público acidental
+# CKV_AWS_19: PASS
 resource "aws_s3_bucket_public_access_block" "dados_clientes_seguro" {
   bucket = aws_s3_bucket.dados_clientes_seguro.id
 
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  block_public_acls       = true  # Bloqueia novas ACLs públicas
+  block_public_policy     = true  # Bloqueia bucket policies que permitem acesso público
+  ignore_public_acls      = true  # Ignora ACLs públicas existentes
+  restrict_public_buckets = true  # Bloqueia acesso público via policy, mesmo que ACL permita
 }
 
+# Criptografia com KMS customer-managed key
+# CKV_AWS_145: PASS — SSE-KMS vs SSE-S3: KMS permite auditoria via CloudTrail de QUEM descriptografou
 resource "aws_s3_bucket_server_side_encryption_configuration" "dados_clientes_seguro" {
   bucket = aws_s3_bucket.dados_clientes_seguro.id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.s3_key.arn
+      sse_algorithm     = "aws:kms"           # KMS customer-managed key (não aws/s3 managed)
+      kms_master_key_id = aws_kms_key.s3_key.arn  # Chave KMS específica do Banco Meridian
     }
+    bucket_key_enabled = true  # Reduz custos de API KMS sem comprometer segurança
   }
 }
 
+# Access logging — registra cada acesso ao bucket (requerido pela LGPD Art. 37)
+# CKV_AWS_18: PASS
 resource "aws_s3_bucket_logging" "dados_clientes_seguro" {
   bucket = aws_s3_bucket.dados_clientes_seguro.id
 
@@ -208,6 +305,8 @@ resource "aws_s3_bucket_logging" "dados_clientes_seguro" {
   target_prefix = "s3-access-logs/"
 }
 
+# Versionamento — protege contra deleção acidental e ransomware
+# CKV_AWS_21: PASS
 resource "aws_s3_bucket_versioning" "dados_clientes_seguro" {
   bucket = aws_s3_bucket.dados_clientes_seguro.id
   versioning_configuration {
@@ -215,36 +314,43 @@ resource "aws_s3_bucket_versioning" "dados_clientes_seguro" {
   }
 }
 
-# Suprimir um check com justificativa (quando necessário e aprovado)
+# ✅ EXCEÇÃO DOCUMENTADA — skip com rastreabilidade
+# Website público intencional — aprovado pelo CISO, ticket SEC-0123, data 2025-04-24
+# O comentário #checkov:skip= é rastreável no git history e auditável
 resource "aws_s3_bucket" "website_publico" {
   bucket = "bancomeridian-website"
 
-  #checkov:skip=CKV_AWS_19:Website público intencional - aprovado pelo CISO em 2025-04-24 ticket#SEC-0123
+  #checkov:skip=CKV_AWS_19:Website público intencional - aprovado CISO em 2025-04-24 ticket#SEC-0123
 }
 ```
 
-**Checks mais importantes do Checkov:**
+**Checks mais importantes do Checkov para o Banco Meridian:**
 
-| Check ID | Recurso | Descrição |
-|:---------|:--------|:----------|
-| CKV_AWS_19 | S3 | Block Public Access habilitado |
-| CKV_AWS_18 | S3 | Access logging habilitado |
-| CKV_AWS_145 | S3 | Criptografia SSE com KMS |
-| CKV_AWS_21 | S3 | Versionamento habilitado |
-| CKV_AWS_24 | Security Group | Sem porta 22 para 0.0.0.0/0 |
-| CKV_AWS_25 | Security Group | Sem porta 3389 para 0.0.0.0/0 |
-| CKV_AWS_79 | EC2 | IMDSv2 habilitado |
-| CKV_AWS_8 | EC2 | EBS volume encrypted |
-| CKV_AWS_28 | RDS | Backup habilitado |
-| CKV_AWS_17 | RDS | Não publicly accessible |
-| CKV_AWS_16 | RDS | Storage encrypted |
-| CKV_AWS_57 | Lambda | Função não pública |
-| CKV_AWS_111 | IAM | Sem wildcard "*" em permissions |
-| CKV_AWS_120 | IAM | Password policy com MFA |
+| Check ID | Recurso | Descrição | Regulação |
+|:---------|:--------|:----------|:----------|
+| CKV_AWS_19 | S3 | Block Public Access habilitado | LGPD Art. 46 |
+| CKV_AWS_18 | S3 | Access logging habilitado | LGPD Art. 37 |
+| CKV_AWS_145 | S3 | Criptografia SSE com KMS | BACEN Art. 5 |
+| CKV_AWS_21 | S3 | Versionamento habilitado | BACEN Art. 5 |
+| CKV_AWS_24 | Security Group | Sem porta 22 para 0.0.0.0/0 | BACEN Art. 5 |
+| CKV_AWS_25 | Security Group | Sem porta 3389 para 0.0.0.0/0 | BACEN Art. 5 |
+| CKV_AWS_79 | EC2 | IMDSv2 habilitado | BACEN Art. 5 |
+| CKV_AWS_8 | EC2 | EBS volume encrypted | BACEN Art. 5 |
+| CKV_AWS_28 | RDS | Backup habilitado | BACEN Art. 5 |
+| CKV_AWS_17 | RDS | Não publicly accessible | BACEN Art. 5 |
+| CKV_AWS_16 | RDS | Storage encrypted | BACEN Art. 5 |
+| CKV_AWS_57 | Lambda | Função não pública | BACEN Art. 5 |
+| CKV_AWS_111 | IAM | Sem wildcard "*" em permissions | BACEN Art. 8 |
+| CKV_AWS_120 | IAM | Password policy com MFA | BACEN Art. 8 |
+
+---
 
 ### 2.2 tfsec
 
 tfsec é especializado em Terraform, desenvolvido em Go — muito mais rápido que Checkov para projetos grandes. Excelente integração com VS Code (extensão disponível).
+
+**Por que tfsec como complemento ao Checkov:**
+tfsec é escrito em Go, o que o torna 5–10x mais rápido que Checkov para projetos Terraform grandes. É ideal para uso em pre-commit hooks onde a velocidade importa — o desenvolvedor não deve esperar mais do que 5–10 segundos para um feedback. Em pipelines CI/CD, tfsec e Checkov são complementares porque têm alguns checks diferentes.
 
 **Instalação:**
 ```bash
@@ -260,115 +366,152 @@ choco install tfsec
 tfsec --version
 ```
 
-**Execução:**
+**O que cada flag faz:**
+
 ```bash
-# Scan básico
+# Scan básico — escaneia recursivamente o diretório ./terraform/
 tfsec ./terraform/
 
-# Saída formatada
+# Saída formatada (padrão, mais legível para terminal)
 tfsec ./terraform/ --format lovely
 
-# Saída JSON
+# Saída JSON — para integração com SIEM, dashboards ou scripts de relatório
 tfsec ./terraform/ --format json
 
-# Saída SARIF
+# Saída SARIF — para upload ao GitHub Code Scanning (aparece na aba Security do repo)
 tfsec ./terraform/ --format sarif
 
-# Falhar apenas em HIGH e CRITICAL
+# --minimum-severity HIGH significa: reporte e falhe apenas para HIGH e CRITICAL
+# MEDIUM e LOW são registrados mas não causam exit code 1
+# Configuração equivalente ao --soft-fail-on MEDIUM LOW do Checkov
 tfsec ./terraform/ --minimum-severity HIGH
 
-# Excluir checks específicos
+# Excluir checks específicos por ID
+# Usar apenas quando há justificativa de negócio aprovada
 tfsec ./terraform/ --exclude aws-s3-no-public-access-with-acl
 
-# Scan com configuração customizada
+# Scan com arquivo de configuração (recomendado para projetos)
+# Centraliza as exceções e políticas customizadas em um arquivo versionado
 tfsec ./terraform/ --config-file tfsec.yaml
 
-# Verbose output
+# Verbose — mostra todos os checks executados, inclusive os que passaram
 tfsec ./terraform/ --verbose
 
-# Scan com output de passos de remediação
+# Include-passed — lista todos os checks e seus resultados (útil para auditoria)
 tfsec ./terraform/ --include-passed
-
-# Integração VS Code: instalar extensão "tfsec"
-# Mostra findings inline no código enquanto escreve
 ```
 
-**Arquivo de configuração tfsec.yaml:**
+**O que este arquivo de configuração faz:**
+
 ```yaml
-# tfsec.yaml
-minimum_severity: MEDIUM
+# tfsec.yaml — Configuração central do tfsec para o repositório do Banco Meridian
+#
+# Este arquivo centraliza todas as exceções e configurações de segurança.
+# QUALQUER exceção aqui deve ter um ticket de aprovação referenciado.
+# Sem ticket documentado → exceção não é aceita na revisão de code.
+
+minimum_severity: MEDIUM  # Reportar MEDIUM, HIGH e CRITICAL. Ignorar LOW.
 
 exclude:
-  - aws-s3-no-public-access-with-acl  # website intencional, aprovado SEC-0123
-  - aws-ec2-no-public-ip               # jumpbox aprovada SEC-0124
+  # aws-s3-no-public-access-with-acl: bucket bancomeridian-website é público intencionalmente
+  # Aprovado pelo CISO em 2025-04-24, ticket SEC-0123
+  - aws-s3-no-public-access-with-acl
+
+  # aws-ec2-no-public-ip: jumpbox de acesso temporário em sandbox
+  # Aprovado pelo CISO em 2025-03-15, ticket SEC-0124
+  - aws-ec2-no-public-ip
 
 custom_checks:
+  # Check customizado: política interna do Banco Meridian
+  # Todo recurso AWS deve ter a tag Owner definida
   - action: DENY
     description: "Banco Meridian: todos os recursos devem ter tag Owner"
-    errorMessage: "Resource is missing required tag 'Owner'"
+    errorMessage: "Recurso sem tag 'Owner' obrigatória — adicionar antes do deploy"
     match:
       block: resource
       attribute: "tags.Owner"
-      action: isAbsent
+      action: isAbsent   # isAbsent = verdadeiro quando o atributo não existe
 ```
+
+---
 
 ### 2.3 KICS — Keep Infrastructure as Code Secure
 
-KICS (Checkmarx) é a solução open-source mais multilinguagem — suporta 35+ tipos de IaC.
+KICS (Checkmarx) é a solução open-source mais multilinguagem — suporta 35+ tipos de IaC. Diferencial em ambientes com grande variedade de tecnologias.
+
+**O que este bloco de comandos faz:**
 
 ```bash
-# Instalar via Docker (mais fácil)
+# Instalar via Docker (recomendado — sem dependências de instalação)
 docker pull checkmarx/kics:latest
 
-# Scan de diretório
+# Scan de diretório via Docker
+# -v monta o diretório atual em /path dentro do container
+# scan -p /path/terraform especifica o caminho de entrada
+# -o /path/results especifica onde salvar os resultados
 docker run -v "$(pwd):/path" checkmarx/kics:latest scan \
   -p /path/terraform \
   -o /path/results
 
-# Scan com múltiplos frameworks
+# Scan com múltiplos frameworks ao mesmo tempo
+# --type filtra os tipos de IaC a escanear (útil em mono-repos)
+# --report-formats gera relatórios em múltiplos formatos simultaneamente
 docker run -v "$(pwd):/path" checkmarx/kics:latest scan \
   -p /path/ \
   --type "Terraform,Kubernetes,Dockerfile" \
   -o /path/results \
   --report-formats "json,html"
 
-# Instalar binário nativo
+# Instalar binário nativo (sem Docker)
 curl -sfL 'https://raw.githubusercontent.com/Checkmarx/kics/master/install.sh' | bash
 
 # Scan nativo
 kics scan -p ./terraform/ -o ./results/
 ```
 
+---
+
 ### 2.4 Terrascan
 
-Foco em compliance frameworks (CIS, NIST, PCI-DSS).
+Foco em compliance frameworks (CIS, NIST, PCI-DSS). Útil quando o objetivo é gerar relatórios de conformidade além de encontrar misconfigurations.
+
+**O que cada comando faz:**
 
 ```bash
 # Instalar
 brew install accurics/tap/terrascan
-# ou
+# ou binário
 curl -L "https://github.com/tenable/terrascan/releases/latest/download/terrascan_Linux_x86_64.tar.gz" | tar -xz
 sudo install terrascan /usr/local/bin
 
-# Scan Terraform
+# Scan Terraform — -i terraform especifica o tipo de IaC de entrada
+# -d especifica o diretório
 terrascan scan -i terraform -d ./terraform/
 
-# Scan com policy específica
+# Scan com policy específica — -t aws filtra apenas policies AWS
 terrascan scan -i terraform -d ./terraform/ --policy-type aws
 
-# Scan com compliance CIS
+# --scan-rules aws_cis_v130 aplica apenas as regras do CIS AWS Benchmark v1.3
+# Útil para gerar evidência de conformidade CIS especificamente
 terrascan scan -i terraform -d ./terraform/ -t aws --scan-rules aws_cis_v130
 
-# Saída JSON
+# -o json gera saída estruturada para integração programática
 terrascan scan -i terraform -d ./terraform/ -o json
 
-# Scan K8s
+# -i k8s muda o modo de análise para Kubernetes manifests
 terrascan scan -i k8s -f ./k8s-manifests/deployment.yaml
 ```
 
+---
+
 ### 2.5 Trivy — Modo IaC
 
-Trivy é a ferramenta unificada da Aqua Security que cobre containers, IaC, SBOM e secrets em um único binário.
+Trivy é a ferramenta unificada da Aqua Security que cobre containers, IaC, SBOM e secrets em um único binário. No modo `trivy config`, ele age como scanner de IaC.
+
+**Por que o Trivy em modo IaC é estratégico:**
+O Trivy é a única ferramenta open-source que cobre com excelência tanto image scanning (módulo 04) quanto IaC scanning em um único binário. No pipeline CI/CD do Banco Meridian, usar Trivy em ambos os modos reduz o número de ferramentas a manter e unifica o formato de output. Uma única ferramenta cobrindo container vulnerabilidades + IaC misconfigurations + secrets é simpler de operar.
+
+**O que cada flag faz:**
 
 ```bash
 # Instalar Trivy
@@ -376,62 +519,71 @@ brew install trivy
 # ou
 curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
 
-# Scan IaC (Terraform, CloudFormation, K8s, Dockerfile, Helm)
+# trivy config: modo de scan de configurações (IaC)
+# Diferente de trivy image (containers) ou trivy fs (filesystem)
+# Suporta: Terraform, CloudFormation, Kubernetes, Dockerfile, Helm, Azure ARM, Bicep
 trivy config ./terraform/
 
-# Scan com severidade mínima
+# --severity HIGH,CRITICAL: reporte e falhe apenas para severidades especificadas
+# Equivalente ao --minimum-severity HIGH do tfsec
+# Importante: aqui é vírgula sem espaço (diferente do Checkov que usa espaço)
 trivy config ./terraform/ --severity HIGH,CRITICAL
 
-# Scan Kubernetes manifests
+# Scan de manifests Kubernetes — mesma ferramenta, mesmo comando, diretório diferente
 trivy config ./k8s-manifests/
 
-# Scan Dockerfile
+# Scan de Dockerfile — trivy config analisa as instruções do Dockerfile
 trivy config ./Dockerfile
 
-# Scan Helm chart
+# Scan de Helm chart — trivy renderiza os templates e escaneia os manifests resultantes
 trivy config ./helm/meu-chart/
 
-# Saída JSON
+# --format json: saída JSON estruturada para processamento programático
 trivy config ./terraform/ --format json
 
-# Saída SARIF
+# --format sarif: padrão SARIF para upload ao GitHub Code Scanning
+# --output trivy-iac.sarif: salva em arquivo (necessário para o upload no Actions)
 trivy config ./terraform/ --format sarif --output trivy-iac.sarif
 
-# Scan recursivo com todos os tipos
+# --include-non-failures: inclui checks que passaram (útil para auditoria completa)
 trivy config . --include-non-failures
 
-# Scan com policy customizada (Rego)
+# --policy ./custom-policies/: aplica políticas Rego customizadas além dos checks built-in
 trivy config ./terraform/ --policy ./custom-policies/
 
-# Exit code baseado em severity (para CI/CD)
-# Exit 1 se encontrar CRITICAL/HIGH
+# --exit-code 1: retorna exit code 1 (falha) quando encontra findings com as severidades especificadas
+# Essencial para CI/CD — sem esta flag, Trivy sempre retorna 0 (sucesso) mesmo com findings
+# Exit code 1 faz o GitHub Actions marcar o step como falha e impede o merge
 trivy config ./terraform/ --exit-code 1 --severity HIGH,CRITICAL
 ```
 
-**Vantagem do Trivy:** um único binário cobre IaC scan + image scan + SBOM + secrets scan. No pipeline CI/CD você pode usar apenas o Trivy e cobrir múltiplos domínios.
+**Vantagem consolidada do Trivy:** um único binário cobre IaC scan + image scan + SBOM + secrets scan. No pipeline CI/CD você pode usar apenas o Trivy e cobrir múltiplos domínios com uma ferramenta familiar.
 
 ---
 
-## 3. Policy as Code
+## 3. Policy as Code com OPA/Rego
 
-### 3.1 OPA — Open Policy Agent
+### 3.1 OPA — Open Policy Agent — O Motor de Políticas
 
-OPA é um policy engine open-source e de uso geral que permite escrever políticas em uma linguagem declarativa chamada Rego.
+OPA é um policy engine open-source e de uso geral que permite escrever políticas em uma linguagem declarativa chamada Rego. É usado pelo Kubernetes (Gatekeeper), pelo Terraform (via Conftest), e por pipelines CI/CD.
+
+**Por que Policy as Code em vez de documentação de políticas:**
+Políticas escritas em documentos Word ou wikis são lidas (quando lidas) mas não executadas automaticamente. Uma política que diz "todos os S3 buckets devem ter criptografia" em um documento não impede que um desenvolvedor crie um bucket sem criptografia. A mesma política escrita em Rego e executada no pipeline impede automaticamente, com uma mensagem de erro clara, antes do merge. Isso é o que separa uma postura de segurança declarativa (intenção) de uma postura de segurança executável (garantia).
 
 **Arquitetura:**
 ```
-OPA — COMO FUNCIONA
+OPA — COMO FUNCIONA NO CONTEXTO IaC
 ─────────────────────────────────────────────────────────────
-INPUT (JSON)          →  OPA Engine  →  DECISION (allow/deny)
-(dados a verificar)       + Rego          + reason
-                           policies
+INPUT (JSON/YAML)       →  OPA Engine  →  DECISION (allow/deny)
+(Terraform plan ou         + Rego          + violations[msg]
+ K8s manifest em JSON)      policies
 ─────────────────────────────────────────────────────────────
 Casos de uso:
-  - Kubernetes Admission Control (OPA Gatekeeper)
-  - CI/CD policy enforcement (Conftest)
-  - API authorization
-  - Terraform plan validation
-  - Microservice authorization
+  - CI/CD policy enforcement (Conftest) — valida antes do merge
+  - Kubernetes Admission Control (OPA Gatekeeper) — valida antes do deploy
+  - Terraform plan validation — valida ANTES do apply
+  - API authorization — valida cada requisição de API
+  - Microservice authorization — controle de acesso entre serviços
 ─────────────────────────────────────────────────────────────
 ```
 
@@ -439,124 +591,166 @@ Casos de uso:
 ```bash
 # macOS/Linux
 brew install opa
-# ou
+# ou binário estático (sem dependências, recomendado para CI/CD)
 curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
 chmod +x opa
 sudo mv opa /usr/local/bin/
 
-# Verificar
+# Verificar versão
 opa version
 ```
 
-**Sintaxe Rego — Conceitos Fundamentais:**
+**Sintaxe Rego — Conceitos Fundamentais com Explicação:**
 
 ```rego
 # Rego é uma linguagem declarativa — você descreve O QUE deve ser verdade,
-# não COMO chegar lá
+# não COMO chegar lá (diferente de Python ou JavaScript imperativo)
+# Se TODAS as condições de um bloco são verdadeiras → a regra é verdadeira
 
 package terraform.aws.security
+# package: como um namespace — organiza políticas por domínio
+# Convenção: terraform.aws.security para políticas de Terraform + AWS + segurança
 
-# 1. Regras podem ser booleanas (allow/deny)
+# 1. REGRAS BOOLEANAS (allow/deny)
+# default deny = false: se nenhuma condição de deny for satisfeita, deny = false (política passou)
+# Isso é o "closed world assumption" do Rego — o que não é explicitamente proibido é permitido
 default deny = false
 
 deny {
-    input.resource_type == "aws_s3_bucket"
-    input.config.acl == "public-read"
+    # Todas as condições dentro do bloco devem ser verdadeiras para deny = true
+    input.resource_type == "aws_s3_bucket"   # É um bucket S3?
+    input.config.acl == "public-read"        # Tem ACL public-read?
+    # Se ambas verdadeiras → deny = true → política falha → pipeline bloqueado
 }
 
-# 2. Mensagens de erro como conjunto (set)
+# 2. VIOLATIONS COM MENSAGENS DE ERRO (padrão recomendado)
+# violations é um SET — cada elemento é uma mensagem de violação
+# Conftest e checkov usam violations[msg] como convenção padrão
 violations[msg] {
     input.resource_type == "aws_s3_bucket"
     input.config.acl == "public-read"
-    msg := sprintf("Bucket '%v' não pode ter ACL public-read", [input.resource_name])
+    # sprintf formata a string com o nome do recurso
+    msg := sprintf("Bucket '%v' não pode ter ACL public-read (BACEN Art. 5)", [input.resource_name])
 }
 
-# 3. Iteração com comprehensions
+# 3. COMPREHENSIONS (iteração declarativa)
+# Equivalente a uma list comprehension em Python mas declarativa
+# Cria uma lista de todos os buckets com ACL pública
 public_buckets := [name |
-    resource := input.resources[name]
-    resource.type == "aws_s3_bucket"
-    resource.config.acl == "public-read"
+    resource := input.resources[name]       # Para cada recurso no input
+    resource.type == "aws_s3_bucket"        # Que é um bucket S3
+    resource.config.acl == "public-read"    # Com ACL pública
+    # O nome vai para a lista pública
 ]
 
-# 4. Helpers
+# 4. HELPERS (regras auxiliares reutilizáveis)
+# is_production pode ser usada em múltiplas regras do mesmo package
 is_production {
     input.config.tags.Environment == "production"
 }
 
-# 5. Import e packages
+# 5. IMPORTS para features modernas do Rego
+# future.keywords.in permite usar o operador `in` (mais legível que some x in y)
+# future.keywords.every permite usar `every` para verificar que todos satisfazem uma condição
 import future.keywords.in
 import future.keywords.every
 ```
+
+---
 
 ### 3.2 Conftest — OPA para Arquivos de Configuração
 
 Conftest é uma CLI que usa OPA/Rego para testar arquivos de configuração estruturados (JSON, YAML, HCL, Dockerfile, etc.).
 
+**Por que Conftest para o pipeline do Banco Meridian:**
+Conftest preenche a lacuna entre escrever políticas Rego e aplicá-las no pipeline CI/CD. Enquanto OPA é um engine genérico, Conftest é uma CLI focada em "testar arquivos de configuração contra políticas Rego". O fluxo é: `terraform plan → saída JSON → conftest test → violations ou pass`. Isso permite políticas de segurança específicas do Banco Meridian que vão além do que Checkov e tfsec oferecem.
+
+**O que cada comando faz:**
+
 ```bash
 # Instalar
 brew install conftest
-# ou
+# ou binário
 wget https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz
 
-# Estrutura de projeto:
-# ./terraform/main.tf
-# ./policy/terraform.rego
+# Estrutura de projeto com Conftest:
+# ./terraform/main.tf       ← código Terraform
+# ./policy/s3.rego          ← política para recursos S3
+# ./policy/iam.rego         ← política para recursos IAM
+# ./policy/tags.rego        ← política para tags obrigatórias
 
 # Testar Terraform com Conftest
+# -p ./policy/ indica o diretório onde estão as políticas Rego
+# Conftest converte automaticamente o HCL Terraform para JSON antes de avaliar
 conftest test ./terraform/ -p ./policy/
 
 # Testar manifesto Kubernetes
+# Funciona com qualquer arquivo YAML/JSON que o OPA pode consumir
 conftest test ./k8s-manifests/deployment.yaml -p ./policy/
 
-# Testar com múltiplos policy files
+# Testar com múltiplos diretórios de políticas
+# Útil para separar políticas globais (corporate) de políticas do projeto
 conftest test ./terraform/ -p ./policy/aws/ -p ./policy/global/
 
-# Saída detalhada
+# --output table: saída em tabela (mais legível para revisão humana)
 conftest test ./terraform/ -p ./policy/ --output table
 
-# Saída JSON
+# --output json: saída JSON para integração com outras ferramentas
 conftest test ./terraform/ -p ./policy/ --output json
 
-# Usar políticas de um OCI registry (Conftest Bundle)
+# Usar políticas publicadas em OCI registry (Conftest Bundle)
+# Permite centralizar políticas do Banco Meridian e distribuí-las para todos os repos
 conftest pull ghcr.io/bancomeridian/security-policies:v1.0
 conftest test ./terraform/ -p policy/
 ```
+
+---
 
 ### 3.3 HashiCorp Sentinel
 
 Sentinel é o motor de Policy as Code integrado ao Terraform Cloud e Enterprise — políticas aplicadas automaticamente em todos os runs do Terraform.
 
+**Por que Sentinel em vez de OPA/Conftest:**
+Sentinel é integrado nativamente ao Terraform Cloud e Enterprise. Se o Banco Meridian usa Terraform Cloud como plataforma de execução, Sentinel é a escolha natural porque as políticas são aplicadas antes de cada `terraform apply`, sem necessidade de configurar CI/CD adicional. A desvantagem: Sentinel só funciona no ecossistema Terraform HashiCorp — OPA/Conftest é agnóstico.
+
 ```python
 # sentinel/require-tags.sentinel
-# Política Sentinel: todos os recursos devem ter tags obrigatórias
+# Política Sentinel: todos os recursos AWS devem ter tags obrigatórias
+# Esta política é aplicada automaticamente pelo Terraform Cloud antes de cada apply
 
 import "tfplan/v2" as tfplan
+# tfplan/v2 é o módulo Sentinel que dá acesso ao Terraform plan como estrutura de dados
 
 required_tags = ["Owner", "Environment", "CostCenter"]
+# Lista de tags obrigatórias pela política do Banco Meridian
 
-# Obter todos os recursos do plan
+# Obter todos os recursos do plan (de qualquer tipo)
 all_resources = tfplan.find_resources("*")
 
-# Regra: verificar se cada recurso tem as tags obrigatórias
+# Regra: todos os recursos devem ter as tags obrigatórias
 resource_has_required_tags = rule {
-    all all_resources as _, resource_changes {
-        all required_tags as tag {
-            resource_changes.change.after.tags[tag] is not null
+    all all_resources as _, resource_changes {           # Para cada recurso no plan
+        all required_tags as tag {                       # Para cada tag obrigatória
+            resource_changes.change.after.tags[tag] is defined  # A tag deve existir após o apply
         }
     }
 }
 
-# Política main
+# Política principal
 main = rule {
-    resource_has_required_tags
+    resource_has_required_tags                           # Todos os recursos devem ter as tags
 }
 ```
 
 ---
 
-## 4. Cinco Políticas Rego com Comentários
+## 4. Cinco Políticas Rego com Explicação Detalhada
 
 ### Política 1: Bloquear Security Group com Porta 22 para 0.0.0.0/0
+
+**Contexto de segurança:** Porta 22 (SSH) exposta para 0.0.0.0/0 significa que qualquer endereço IP na internet pode tentar autenticar no servidor. É o vetor mais comum de brute force e de exploração de vulnerabilidades de servidores. O Banco Meridian exige que acesso SSH seja feito via AWS SSM Session Manager (sem porta 22 necessária) ou via Bastion Host em subnet restrita.
+
+**O que cada bloco desta política faz:**
 
 ```rego
 # policy/aws/security_group_ssh.rego
@@ -564,46 +758,56 @@ main = rule {
 # POLÍTICA: Bloquear Security Groups que permitem SSH (porta 22)
 # de qualquer origem (0.0.0.0/0 ou ::/0)
 #
-# Contexto BACEN 4.893: Art. 5 — testes de controles de acesso
-# Referência: CKV_AWS_24
+# Contexto BACEN 4.893: Art. 5 — testes e avaliação de controles de acesso
+# CIS AWS Benchmark: CKV_AWS_24 — control-plane check equivalente
 
 package terraform.aws.security_group
+# O package organiza esta política no namespace específico de security groups AWS
 
 import future.keywords.in
-
-# Regra principal: violations é um set de mensagens de erro
-# A regra "falha" quando violations não está vazio
+# Importa a keyword 'in' para usar em expressões mais legíveis
 
 violations[msg] {
-    # Itera sobre todos os recursos do Terraform plan
+    # violations é um SET — cada elemento é uma string de violação
+    # Conftest exibe cada elemento como uma falha separada
+
     resource := input.resource_changes[_]
+    # input.resource_changes: array de todos os recursos que serão criados/modificados
+    # [_]: iterador anônimo — itera por todos os elementos sem nomear o índice
 
-    # Filtra apenas recursos do tipo aws_security_group_rule ou ingress rules
     resource.type == "aws_security_group_rule"
+    # Filtra apenas recursos do tipo aws_security_group_rule
+    # Nota: aws_security_group com regras inline é coberto pelo bloco abaixo
+
     resource.change.after.type == "ingress"
+    # Só nos importamos com regras de entrada (ingress)
+    # Regras egress (saída) têm tratamento diferente
 
-    # Verifica se permite acesso na porta 22
     resource.change.after.from_port <= 22
+    # A porta 22 está dentro do range?
     resource.change.after.to_port >= 22
+    # from_port <= 22 AND to_port >= 22 = porta 22 está coberta pelo range
 
-    # Verifica se o CIDR é 0.0.0.0/0 (qualquer origem IPv4)
-    cidr_block := resource.change.after.cidr_blocks[_]
-    cidr_block == "0.0.0.0/0"
+    cidr := resource.change.after.cidr_blocks[_]
+    # Itera por todos os CIDRs da regra
+    cidr == "0.0.0.0/0"
+    # O CIDR específico é 0.0.0.0/0 (qualquer IPv4)?
 
-    # Mensagem de erro com contexto
     msg := sprintf(
-        "Security Group Rule '%v' permite SSH (porta 22) de 0.0.0.0/0 — risco de acesso remoto não autorizado. Use um CIDR específico (ex: VPN corporativa) ou Bastion Host.",
+        "Security Group Rule '%v' permite SSH (porta 22) de 0.0.0.0/0. Use SSM Session Manager (corporativa) ou Bastion Host.",
         [resource.address]
+        # resource.address é o endereço Terraform: "aws_security_group_rule.ssh_rule"
     )
 }
 
-# Regra alternativa para aws_security_group inline rules
+# Bloco separado para aws_security_group com regras inline (ingress {} block)
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type == "aws_security_group"
+    # aws_security_group pode ter blocos ingress {} inline ao invés de resources separados
 
-    # Itera sobre as regras de ingress
     ingress := resource.change.after.ingress[_]
+    # Itera por cada bloco ingress dentro do security group
     ingress.from_port <= 22
     ingress.to_port >= 22
     cidr := ingress.cidr_blocks[_]
@@ -615,33 +819,36 @@ violations[msg] {
     )
 }
 
-# Decisão final: deny se houver qualquer violation
+# deny é o ponto de entrada padrão para Conftest
+# Cada msg em violations se torna um deny
 deny[msg] {
     msg := violations[_]
 }
 ```
 
-### Política 2: Exigir Tags de Owner e Environment
+---
+
+### Política 2: Exigir Tags de Owner, Environment e CostCenter
+
+**Contexto de segurança:** Tags não são apenas governança de custo. Para o Banco Meridian, tags são o mecanismo central de: (1) atribuição de responsabilidade — quem é o Owner do recurso e deve ser notificado quando há um finding CRITICAL; (2) controle de acesso por contexto — SCPs da AWS podem restringir ações baseadas em tags; (3) auditoria BACEN — rastrear qual sistema processou quais dados.
+
+**O que cada bloco faz:**
 
 ```rego
-# policy/global/required_tags.rego
-#
-# POLÍTICA: Todos os recursos AWS devem ter as tags obrigatórias:
-# - Owner: responsável pelo recurso
-# - Environment: ambiente (production, staging, development)
-# - CostCenter: código do centro de custo para chargeback
-#
-# Exceções: recursos serverless como aws_iam_policy, aws_iam_role_policy
-# Contexto: política interna do Banco Meridian para governança de cloud
+# policy/aws/tags.rego
+# POLÍTICA: Recursos AWS devem ter tags obrigatórias de governança
+# Referência: Política de Governança Cloud BM-CLOUD-GOV-003
 
 package terraform.aws.tags
 
 import future.keywords.in
 
-# Tags obrigatórias para todos os recursos
+# Conjunto de tags obrigatórias para todos os recursos "taggeáveis"
 required_tags := {"Owner", "Environment", "CostCenter"}
+# Usamos SET (chaves {}) em vez de array [] para O(1) lookup
 
-# Tipos de recursos que exigem tags (excluir recursos sem suporte a tags)
+# Lista de tipos de recursos que suportam tags na AWS
+# Não incluímos resources que não têm atributo tags (ex: aws_subnet_association)
 taggable_resources := {
     "aws_s3_bucket",
     "aws_instance",
@@ -651,252 +858,44 @@ taggable_resources := {
     "aws_eks_cluster",
     "aws_rds_cluster",
     "aws_elasticache_cluster",
-    "aws_kms_key",
-    "aws_sns_topic",
-    "aws_sqs_queue",
-    "aws_vpc",
-    "aws_subnet",
 }
 
-# Valores válidos para a tag Environment
+# Valores válidos para a tag Environment — impede erros de digitação como "prod" ou "Prod"
 valid_environments := {"production", "staging", "development", "sandbox"}
 
-# Regra 1: tags obrigatórias presentes
+# VIOLAÇÃO 1: Tag obrigatória ausente
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type in taggable_resources
+    # in: verifica se resource.type está no set taggable_resources
 
-    # Verifica tags ausentes
     tag := required_tags[_]
+    # Itera por cada tag obrigatória
+
     not resource.change.after.tags[tag]
+    # not: verdadeiro quando a expressão é falsa (tag não existe ou é null)
 
     msg := sprintf(
-        "Recurso '%v' (%v) está faltando a tag obrigatória '%v'. Tags necessárias: %v",
+        "Recurso '%v' (tipo: %v) está faltando a tag obrigatória '%v'. Tags necessárias: %v",
         [resource.address, resource.type, tag, required_tags]
     )
 }
 
-# Regra 2: valor de Environment deve ser válido
+# VIOLAÇÃO 2: Tag Environment com valor inválido
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type in taggable_resources
 
-    # Tag Environment existe mas tem valor inválido
+    # A tag Environment existe mas tem valor inválido
     env := resource.change.after.tags.Environment
+    # Atribuição direta: env recebe o valor da tag Environment
+
     not env in valid_environments
+    # not in: verdadeiro quando env NÃO está em valid_environments
 
     msg := sprintf(
-        "Recurso '%v' tem tag Environment='%v' inválida. Valores aceitos: %v",
+        "Recurso '%v' tem tag Environment='%v' inválida. Valores válidos: %v",
         [resource.address, env, valid_environments]
-    )
-}
-
-deny[msg] {
-    msg := violations[_]
-}
-```
-
-### Política 3: Bloquear Bucket S3 Sem Logging
-
-```rego
-# policy/aws/s3_logging.rego
-#
-# POLÍTICA: Todos os buckets S3 devem ter logging habilitado
-#
-# Contexto BACEN 4.893: Art. 6 — monitoramento contínuo e rastreabilidade
-# Contexto LGPD: Art. 37 — manutenção de registros de operações
-# Referência: CKV_AWS_18
-
-package terraform.aws.s3
-
-import future.keywords.in
-
-# Buckets que podem estar isentos (apenas whitelist explícita)
-exempt_bucket_patterns := ["bancomeridian-logs-", "bancomeridian-audit-"]
-
-is_exempt(bucket_name) {
-    pattern := exempt_bucket_patterns[_]
-    startswith(bucket_name, pattern)
-}
-
-violations[msg] {
-    # Encontra todos os recursos aws_s3_bucket
-    resource := input.resource_changes[_]
-    resource.type == "aws_s3_bucket"
-
-    bucket_name := resource.change.after.bucket
-
-    # Verifica se NÃO há recurso aws_s3_bucket_logging associado
-    logging_resources := [r |
-        r := input.resource_changes[_]
-        r.type == "aws_s3_bucket_logging"
-        r.change.after.bucket == resource.change.after.id
-    ]
-    count(logging_resources) == 0
-
-    # Verifica se não é um bucket de logs (para evitar loop)
-    not is_exempt(bucket_name)
-
-    msg := sprintf(
-        "Bucket S3 '%v' não tem logging habilitado. Para conformidade com BACEN 4.893 Art. 6 e LGPD Art. 37, todos os buckets de negócio devem ter access logging para um bucket de auditoria designado.",
-        [resource.address]
-    )
-}
-
-deny[msg] {
-    msg := violations[_]
-}
-```
-
-### Política 4: Exigir Criptografia em Volumes EBS
-
-```rego
-# policy/aws/ebs_encryption.rego
-#
-# POLÍTICA: Todos os volumes EBS devem ter criptografia habilitada
-#
-# Contexto BACEN 4.893: Art. 5 — proteção de dados em repouso
-# Contexto LGPD: Art. 46 — medidas de segurança de dados pessoais
-# Referência: CKV_AWS_8
-
-package terraform.aws.ebs
-
-import future.keywords.in
-
-# Tipos de recursos que criam volumes EBS
-ebs_resource_types := {
-    "aws_ebs_volume",
-    "aws_instance",       # aws_instance tem root_block_device e ebs_block_device
-    "aws_launch_template",
-    "aws_launch_configuration",
-}
-
-# Verificar criptografia em aws_ebs_volume
-violations[msg] {
-    resource := input.resource_changes[_]
-    resource.type == "aws_ebs_volume"
-
-    # encrypted deve ser true explicitamente
-    not resource.change.after.encrypted == true
-
-    msg := sprintf(
-        "Volume EBS '%v' não tem criptografia habilitada. Defina encrypted = true para proteger dados em repouso (BACEN 4.893 Art. 5 e LGPD Art. 46).",
-        [resource.address]
-    )
-}
-
-# Verificar criptografia no root_block_device de aws_instance
-violations[msg] {
-    resource := input.resource_changes[_]
-    resource.type == "aws_instance"
-
-    # Itera sobre os root_block_device
-    root_block := resource.change.after.root_block_device[_]
-    not root_block.encrypted == true
-
-    msg := sprintf(
-        "Instância EC2 '%v' tem root_block_device sem criptografia. Defina encrypted = true no bloco root_block_device.",
-        [resource.address]
-    )
-}
-
-# Verificar criptografia nos ebs_block_device adicionais
-violations[msg] {
-    resource := input.resource_changes[_]
-    resource.type == "aws_instance"
-
-    ebs_block := resource.change.after.ebs_block_device[_]
-    not ebs_block.encrypted == true
-
-    msg := sprintf(
-        "Instância EC2 '%v' tem ebs_block_device '%v' sem criptografia.",
-        [resource.address, ebs_block.device_name]
-    )
-}
-
-deny[msg] {
-    msg := violations[_]
-}
-```
-
-### Política 5: Bloquear IAM Policies com Wildcard
-
-```rego
-# policy/aws/iam_no_wildcard.rego
-#
-# POLÍTICA: IAM policies não podem ter ação "*" (wildcard) na condição Effect=Allow
-#
-# Contexto BACEN 4.893: Art. 8 — gestão de acessos com menor privilégio
-# Referência: CKV_AWS_111
-
-package terraform.aws.iam
-
-import future.keywords.in
-
-# Tipos de recursos IAM que contêm policies inline ou managed
-iam_resource_types := {
-    "aws_iam_policy",
-    "aws_iam_role_policy",
-    "aws_iam_user_policy",
-    "aws_iam_group_policy",
-}
-
-# Helper: verificar se um statement tem wildcard de ação
-has_wildcard_action(statement) {
-    statement.Effect == "Allow"
-    action := statement.Action
-
-    # Action pode ser string ou array
-    is_string(action)
-    action == "*"
-}
-
-has_wildcard_action(statement) {
-    statement.Effect == "Allow"
-    action := statement.Action[_]
-    action == "*"
-}
-
-# Helper: verificar serviço com wildcard (ex: "s3:*")
-has_service_wildcard(statement) {
-    statement.Effect == "Allow"
-    action := statement.Action[_]
-    endswith(action, ":*")
-    # serviços de alto risco que nunca devem ter wildcard
-    high_risk_services := {"iam", "sts", "organizations", "cloudtrail", "kms"}
-    parts := split(action, ":")
-    parts[0] in high_risk_services
-}
-
-violations[msg] {
-    resource := input.resource_changes[_]
-    resource.type in iam_resource_types
-
-    # Parse do document JSON da policy
-    policy_doc := json.unmarshal(resource.change.after.policy)
-    statement := policy_doc.Statement[_]
-
-    has_wildcard_action(statement)
-
-    msg := sprintf(
-        "IAM Policy '%v' contém Action='*' em um statement Allow. Isso viola o princípio de menor privilégio (BACEN 4.893 Art. 8). Use ações específicas necessárias.",
-        [resource.address]
-    )
-}
-
-violations[msg] {
-    resource := input.resource_changes[_]
-    resource.type in iam_resource_types
-
-    policy_doc := json.unmarshal(resource.change.after.policy)
-    statement := policy_doc.Statement[_]
-
-    has_service_wildcard(statement)
-    parts := split(statement.Action[_], ":")
-
-    msg := sprintf(
-        "IAM Policy '%v' contém '%v:*' (wildcard em serviço de alto risco). Use ações específicas para o serviço '%v'.",
-        [resource.address, parts[0], parts[0]]
     )
 }
 
@@ -907,40 +906,249 @@ deny[msg] {
 
 ---
 
-## 5. Integração com CI/CD
+### Política 3: Bloquear Bucket S3 Sem Logging
 
-### 5.1 GitHub Actions — Workflow Completo
+**Contexto de segurança:** O Access Logging do S3 registra cada requisição (GetObject, PutObject, DeleteObject) com o IP do requisitante, o usuário autenticado e o timestamp. Para o Banco Meridian, isso é requerido pelo Art. 37 da LGPD (registro de operações sobre dados pessoais) e é evidência crítica em investigações de vazamento de dados.
+
+```rego
+# policy/aws/s3_logging.rego
+# POLÍTICA: Todos os buckets S3 devem ter access logging habilitado
+# Referência: LGPD Art. 37 — registro de operações sobre dados pessoais
+
+package terraform.aws.s3
+
+import future.keywords.in
+
+# Módulo de referência: coletamos buckets e suas configurações de logging
+# Rego avalia a relação ENTRE recursos — não apenas cada recurso isoladamente
+
+violations[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_s3_bucket"
+    # Identifica cada bucket S3 no plan
+
+    bucket_name := resource.change.after.bucket
+    # Extrai o nome do bucket para usar na mensagem de erro e na verificação
+
+    # Verifica se existe um aws_s3_bucket_logging para este bucket
+    # Rego avalia toda a coleção de recursos — encontra o recurso correspondente
+    not has_logging_resource(bucket_name, input.resource_changes)
+    # not: verdadeiro quando o bucket NÃO tem um recurso de logging correspondente
+
+    msg := sprintf(
+        "S3 Bucket '%v' não tem access logging configurado. Requerido pela LGPD Art. 37 e BACEN Art. 6 (rastreabilidade de acessos). Adicionar recurso aws_s3_bucket_logging.",
+        [bucket_name]
+    )
+}
+
+# Helper function: verifica se existe aws_s3_bucket_logging referenciando este bucket
+has_logging_resource(bucket_name, resources) {
+    resource := resources[_]
+    resource.type == "aws_s3_bucket_logging"
+    # O campo 'bucket' do aws_s3_bucket_logging deve referenciar o bucket
+    resource.change.after.bucket == bucket_name
+    # Quando esta condição é verdadeira, has_logging_resource retorna true
+}
+
+deny[msg] {
+    msg := violations[_]
+}
+```
+
+---
+
+### Política 4: Exigir Criptografia em Volumes EBS
+
+**Contexto de segurança:** Volumes EBS sem criptografia armazenam dados em texto claro nos discos físicos da AWS. Se um snapshot for criado (acidentalmente público ou compartilhado com outra conta), os dados ficam expostos sem nenhuma proteção. Para o Banco Meridian, isso viola o Art. 5 da BACEN 4.893 e o Art. 46 da LGPD para dados de clientes.
+
+```rego
+# policy/aws/ebs_encryption.rego
+# POLÍTICA: Todos os volumes EBS devem ter criptografia habilitada
+# Referência: BACEN 4.893 Art. 5 + LGPD Art. 46 (proteção de dados em repouso)
+# Equivalente ao check: CKV_AWS_8
+
+package terraform.aws.ebs
+
+import future.keywords.in
+
+# Tipos de recursos que criam ou configuram volumes EBS
+ebs_resource_types := {
+    "aws_ebs_volume",           # Volume EBS standalone
+    "aws_instance",             # EC2 com root_block_device e ebs_block_device
+    "aws_launch_template",      # Template usado por Auto Scaling Groups
+    "aws_launch_configuration", # Configuração legada de Auto Scaling
+}
+
+# VIOLAÇÃO 1: aws_ebs_volume sem encrypted = true
+violations[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_ebs_volume"
+
+    not resource.change.after.encrypted == true
+    # not x == true: verdadeiro quando encrypted é false, null, ou não existe
+    # Diferente de not x: não existe
+
+    msg := sprintf(
+        "Volume EBS '%v' não tem criptografia habilitada. Dados em repouso desprotegidos. (BACEN Art. 5, LGPD Art. 46)",
+        [resource.address]
+    )
+}
+
+# VIOLAÇÃO 2: aws_instance sem root_block_device encrypted
+violations[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_instance"
+
+    root_block := resource.change.after.root_block_device[_]
+    # Itera por cada root_block_device (normalmente apenas 1)
+
+    not root_block.encrypted == true
+    # O volume root do EC2 não está criptografado
+
+    msg := sprintf(
+        "EC2 Instance '%v' tem root_block_device sem criptografia. (BACEN Art. 5)",
+        [resource.address]
+    )
+}
+
+deny[msg] {
+    msg := violations[_]
+}
+```
+
+---
+
+### Política 5: Bloquear IAM Policies com Wildcard Action "*"
+
+**Contexto de segurança:** Uma IAM policy com `Action: "*"` concede acesso a TODOS os serviços AWS — equivalente a superusuário em Linux. Mesmo que o `Resource` seja restrito, um atacante pode usar o acesso `*` para comprometer toda a conta. Para o Banco Meridian, isso viola diretamente o BACEN 4.893 Art. 8 (menor privilégio em acessos) e o conceito de shadow admin.
+
+**O que cada função auxiliar desta política faz:**
+
+```rego
+# policy/aws/iam_no_wildcard.rego
+# POLÍTICA: Bloquear IAM policies com Action="*" ou wildcards de alto risco
+# Referência: BACEN 4.893 Art. 8 — gestão de acessos com menor privilégio
+# Mapeamento MITRE: T1098 — Account Manipulation
+
+package terraform.aws.iam
+
+import future.keywords.in
+
+# Alto risco: serviços que, com wildcard, permitem comprometimento total da conta
+high_risk_services := {"iam", "sts", "organizations", "cloudtrail", "kms"}
+# iam:* → criar usuários, roles, policies — shadow admin
+# sts:* → assumir qualquer role, criar tokens de sessão
+# organizations:* → administrar a organização AWS inteira
+# cloudtrail:* → desabilitar auditoria, apagar logs
+# kms:* → criar/deletar chaves, descriptografar qualquer dado
+
+# Verifica se um statement tem Action: "*" (literal)
+has_wildcard_action(statement) {
+    statement.Effect == "Allow"            # Apenas statements de Allow importam
+    statement.Action == "*"                # Action é a string literal "*"
+}
+
+# Verifica quando Action é um ARRAY e contém "*"
+has_wildcard_action(statement) {
+    statement.Effect == "Allow"
+    action := statement.Action[_]          # Itera por cada ação no array
+    action == "*"                          # Uma delas é "*"
+}
+
+# Verifica wildcards de serviço de alto risco (ex: "s3:*" não é bloqueado, mas "iam:*" sim)
+has_service_wildcard(statement) {
+    statement.Effect == "Allow"
+    action := statement.Action[_]
+    endswith(action, ":*")                 # A ação termina com ":*"
+    parts := split(action, ":")            # Divide "iam:*" em ["iam", "*"]
+    parts[0] in high_risk_services         # O serviço está na lista de alto risco
+}
+
+# VIOLAÇÃO 1: Action = "*" literal (pior caso)
+violations[msg] {
+    resource := input.resource_changes[_]
+    resource.type in {"aws_iam_policy", "aws_iam_role_policy", "aws_iam_user_policy"}
+
+    doc := json.unmarshal(resource.change.after.policy)
+    # json.unmarshal converte a string JSON da policy em objeto Rego navegável
+    # Necessário porque o campo 'policy' é uma string JSON, não um objeto
+
+    statement := doc.Statement[_]
+    # Itera por cada statement na policy
+
+    has_wildcard_action(statement)
+    # Chama o helper definido acima
+
+    msg := sprintf(
+        "IAM Policy '%v' contém Action='*' em um statement Allow. Isso concede acesso a TODOS os serviços AWS. (BACEN Art. 8)",
+        [resource.address]
+    )
+}
+
+# VIOLAÇÃO 2: Wildcard em serviços de alto risco (iam:*, sts:*, cloudtrail:*)
+violations[msg] {
+    resource := input.resource_changes[_]
+    resource.type in {"aws_iam_policy", "aws_iam_role_policy", "aws_iam_user_policy"}
+
+    doc := json.unmarshal(resource.change.after.policy)
+    statement := doc.Statement[_]
+    has_service_wildcard(statement)
+
+    parts := split(statement.Action[_], ":")
+    service := parts[0]
+
+    msg := sprintf(
+        "IAM Policy '%v' contém '%v:*' — wildcard em serviço de alto risco. Use ações específicas (ex: 'iam:GetUser' em vez de 'iam:*'). (BACEN Art. 8)",
+        [resource.address, service]
+    )
+}
+
+deny[msg] {
+    msg := violations[_]
+}
+```
+
+---
+
+## 5. Pipeline CI/CD — GitHub Actions Completo com Comentários
+
+### 5.1 Workflow GitHub Actions — IaC Security Pipeline
+
+**O que este pipeline faz, passo a passo:**
+
+Este pipeline é acionado em todo Pull Request que modifica arquivos Terraform ou de infraestrutura. Ele tem 4 jobs paralelos: Checkov (cobertura ampla), tfsec (velocidade e VS Code integration), Trivy IaC (scan unificado) e Conftest OPA (políticas customizadas do Banco Meridian). Um 5º job — security-gate — agrega os resultados e bloqueia o merge se qualquer finding CRITICAL ou HIGH for encontrado.
 
 ```yaml
 # .github/workflows/iac-security.yml
-#
-# Workflow: IaC Security Scanning no Pull Request
-# Executa: Checkov + tfsec + relatório de findings
-# Falha: em CRITICAL/HIGH (bloqueia merge)
-# Warn: em MEDIUM (não bloqueia, apenas comentário)
-#
-# Banco Meridian — Security Team
-# Referência: BACEN 4.893 Art. 5
+# Pipeline de segurança de IaC — Banco Meridian
+# Propósito: bloquear merges de PR que introduzam misconfigurations em Terraform/K8s/Dockerfile
+# Acionado em: qualquer PR que modifica terraform/, cloudformation/, k8s-manifests/ ou Dockerfiles
 
-name: IaC Security Scan
+name: IaC Security Scan — Banco Meridian
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    # Apenas quando arquivos de infraestrutura são modificados
+    # Evita executar o scan em PRs que só modificam documentação
     paths:
-      - '**/*.tf'
-      - '**/*.yaml'
-      - '**/*.yml'
+      - 'terraform/**'
+      - 'cloudformation/**'
+      - 'k8s-manifests/**'
+      - 'helm/**'
       - '**/Dockerfile'
-  push:
-    branches: [ main ]
+      - '**/docker-compose.yml'
 
 permissions:
-  contents: read
-  security-events: write  # Para upload SARIF ao GitHub Code Scanning
-  pull-requests: write    # Para comentários no PR
+  contents: read          # Leitura do código — necessário para checkout
+  security-events: write  # Escrita em GitHub Security (SARIF upload)
+  pull-requests: write    # Comentários no PR com resumo dos findings
 
 jobs:
+  # ===========================================================================
+  # JOB 1: CHECKOV — Scanner com maior cobertura de checks
+  # Responsabilidade: CSPM checks (AWS/Azure/GCP), IaC, K8s, Dockerfile
+  # Por que Checkov aqui: 1.000+ checks, integração SARIF, suporte a custom policies
+  # ===========================================================================
   checkov:
     name: Checkov IaC Scanner
     runs-on: ubuntu-latest
@@ -948,71 +1156,67 @@ jobs:
     steps:
       - name: Checkout código
         uses: actions/checkout@v4
+        # Faz checkout do branch do PR — não do main
+        # Necessário para que os scanners vejam as mudanças propostas
 
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          # Python 3.11 tem melhor performance que 3.10 para este caso de uso
 
       - name: Instalar Checkov
         run: pip install checkov
+        # Instala a versão mais recente do Checkov
+        # Para versão fixada (recomendado em produção): pip install checkov==3.2.x
 
-      - name: Executar Checkov — Terraform (falha em CRITICAL/HIGH)
+      # Este step falha o pipeline (exit code 1) se encontrar CRITICAL ou HIGH
+      # MEDIUM e LOW são reportados mas não bloqueiam (--soft-fail-on MEDIUM LOW)
+      - name: Executar Checkov — Terraform
         id: checkov-terraform
         run: |
           checkov \
             -d ./terraform/ \
             --framework terraform \
-            --severity CRITICAL HIGH \
-            --output json \
-            --output-file-path /tmp/checkov-tf/ \
+            --output sarif \
+            --output-file-path ./checkov-terraform.sarif \
             --soft-fail-on MEDIUM LOW \
-            --skip-check CKV_AWS_144  # S3 replication não obrigatório em sandbox
-        continue-on-error: false  # Falha o job se encontrar CRITICAL/HIGH
+            --skip-check CKV_AWS_144  # S3 cross-region replication — não requerido no sandbox
+        continue-on-error: false
+        # continue-on-error: false significa que uma falha neste step para o job inteiro
+        # O pipeline marcará o check do PR como falha, impedindo o merge
 
+      # Scan de Kubernetes YAML separado — usa framework diferente
       - name: Executar Checkov — Kubernetes YAML
         id: checkov-k8s
+        if: always()
+        # always(): executa mesmo se o step anterior falhou
+        # Queremos ver os findings de K8s mesmo quando Terraform já falhou
         run: |
           checkov \
-            -d ./k8s/ \
+            -d ./k8s-manifests/ \
             --framework kubernetes \
-            --severity CRITICAL HIGH \
             --output sarif \
-            --output-file-path /tmp/checkov-k8s.sarif
-        continue-on-error: false
+            --output-file-path ./checkov-k8s.sarif \
+            --soft-fail-on MEDIUM LOW
 
-      - name: Upload SARIF para GitHub Code Scanning
+      # Upload SARIF para GitHub Security
+      # Os findings aparecem na aba Security > Code Scanning do repositório
+      # e também inline nos arquivos modificados no PR
+      - name: Upload SARIF Checkov (Terraform)
         uses: github/codeql-action/upload-sarif@v3
         if: always()
+        # always(): garante que o SARIF é upado mesmo quando o scan encontrou falhas
         with:
-          sarif_file: /tmp/checkov-k8s.sarif
-          category: checkov-k8s
+          sarif_file: ./checkov-terraform.sarif
+          category: checkov-terraform
+          # category: identifica a fonte do SARIF no GitHub Security (evita conflitos)
 
-      - name: Publicar relatório Checkov no PR
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const results = JSON.parse(fs.readFileSync('/tmp/checkov-tf/results_json.json'));
-            const failed = results.results.failed_checks;
-            const critical = failed.filter(c => c.check_result.result === 'failed' &&
-              ['CRITICAL', 'HIGH'].includes(c.severity));
-
-            if (critical.length > 0) {
-              const body = `## ⚠️ Checkov encontrou ${critical.length} findings CRITICAL/HIGH\n\n` +
-                critical.slice(0, 10).map(c =>
-                  `- **[${c.check_id}]** ${c.check.name} em \`${c.file_path}:${c.file_line_range[0]}\``
-                ).join('\n') +
-                (critical.length > 10 ? `\n\n...e mais ${critical.length - 10} findings.` : '');
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body
-              });
-            }
-
+  # ===========================================================================
+  # JOB 2: TFSEC — Scanner especializado em Terraform com alta velocidade
+  # Responsabilidade: Terraform-specific checks, custom rules, VS Code inline
+  # Por que tfsec aqui: complementa o Checkov com checks diferentes e é mais rápido
+  # ===========================================================================
   tfsec:
     name: tfsec Terraform Scanner
     runs-on: ubuntu-latest
@@ -1021,13 +1225,17 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
+      # Usa a action oficial do tfsec — sem necessidade de instalação manual
       - name: Executar tfsec
-        uses: aquasecurity/tfsec-action@v1.0.0
+        uses: aquasecurity/tfsec-action@master
         with:
-          working_directory: ./terraform
-          minimum_severity: MEDIUM
-          soft_fail: true       # warn apenas, não falha o workflow (complementa o Checkov)
+          # sarif_file: onde salvar o relatório SARIF
+          sarif_file: tfsec.sarif
+          # format: sarif para upload ao GitHub Code Scanning
           format: sarif
+          # additional_args: argumentos adicionais passados ao tfsec
+          # --config-file tfsec.yaml: usa o arquivo de configuração do projeto
+          # que inclui as exclusões aprovadas com tickets SEC-XXXX
           additional_args: --config-file tfsec.yaml
 
       - name: Upload tfsec SARIF
@@ -1037,6 +1245,12 @@ jobs:
           sarif_file: tfsec.sarif
           category: tfsec
 
+  # ===========================================================================
+  # JOB 3: TRIVY IAC — Scanner unificado (IaC + configurações)
+  # Responsabilidade: IaC scan com política de exit code baseada em severity
+  # Por que Trivy aqui: usa o mesmo binário do scan de containers (módulo 04)
+  #                     facilitando manutenção e conhecimento unificado
+  # ===========================================================================
   trivy-iac:
     name: Trivy IaC Config Scanner
     runs-on: ubuntu-latest
@@ -1045,15 +1259,18 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
+      # Usa a action oficial do Trivy
       - name: Executar Trivy em modo config
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'config'
-          scan-ref: './terraform'
-          format: 'sarif'
-          output: 'trivy-iac.sarif'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'  # Falha se encontrar CRITICAL/HIGH
+          scan-type: 'config'           # Modo de scan de configurações (IaC)
+          scan-ref: './terraform'       # Diretório a escanear
+          format: 'sarif'               # Formato de saída
+          output: 'trivy-iac.sarif'     # Arquivo de saída
+          severity: 'CRITICAL,HIGH'     # Apenas estas severidades
+          exit-code: '1'               # Retorna exit code 1 se encontrar CRITICAL/HIGH
+          # exit-code: '1' é essencial — sem ele, Trivy sempre retorna 0 (sucesso)
+          # e o pipeline nunca falha, tornando o scan inútil como gate
 
       - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@v3
@@ -1062,6 +1279,14 @@ jobs:
           sarif_file: trivy-iac.sarif
           category: trivy-iac
 
+  # ===========================================================================
+  # JOB 4: CONFTEST OPA — Políticas customizadas do Banco Meridian
+  # Responsabilidade: políticas de segurança específicas não cobertas por checks built-in
+  #   - Tags obrigatórias (Owner, Environment, CostCenter)
+  #   - Restrições de região AWS
+  #   - Políticas de nomenclatura de recursos
+  # Por que Conftest: OPA/Rego permite políticas 100% customizadas em código versionado
+  # ===========================================================================
   conftest-opa:
     name: Conftest OPA Policy Check
     runs-on: ubuntu-latest
@@ -1070,80 +1295,150 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
+      # Instalar Conftest (binário Go, sem dependências de runtime)
       - name: Instalar Conftest
         run: |
-          wget https://github.com/open-policy-agent/conftest/releases/download/v0.48.0/conftest_0.48.0_Linux_x86_64.tar.gz
-          tar xzf conftest_0.48.0_Linux_x86_64.tar.gz
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v0.48.0/conftest_0.48.0_Linux_x86_64.tar.gz
+          tar -xzf conftest_0.48.0_Linux_x86_64.tar.gz
           sudo mv conftest /usr/local/bin/
+          conftest --version
 
-      - name: Executar Terraform plan (para análise Rego)
+      # Instalar Terraform para gerar o plan em JSON
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7.0'
+
+      # Gerar terraform plan e converter para JSON
+      # O Conftest avalia o PLAN (o que vai acontecer), não apenas o código Terraform
+      # Isso é mais preciso — inclui valores calculados que não aparecem no .tf
+      - name: Gerar Terraform Plan JSON
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # Credenciais AWS mock para o init (sem backend real no CI)
+          AWS_ACCESS_KEY_ID: mock_key
+          AWS_SECRET_ACCESS_KEY: mock_secret
+          AWS_DEFAULT_REGION: us-east-1
         run: |
-          cd terraform
+          cd terraform/
           terraform init -backend=false
+          # -backend=false: inicializa sem conectar ao backend real (S3 state)
           terraform plan -out=tfplan.binary
-          terraform show -json tfplan.binary > tfplan.json
+          # -out: salva o plan em formato binário
+          terraform show -json tfplan.binary > ../tfplan.json
+          # show -json converte o plan binário para JSON legível pelo Conftest
 
-      - name: Executar Conftest com políticas Rego
+      # Executar políticas Rego customizadas do Banco Meridian
+      - name: Executar Conftest com políticas BM
         run: |
-          conftest test terraform/tfplan.json \
-            -p policy/ \
+          conftest test \
+            tfplan.json \
+            -p ./policy/ \
             --output table
-        continue-on-error: false  # Falha se policy violations encontradas
+          # --output table: saída tabular mais legível no log do GitHub Actions
 
+  # ===========================================================================
+  # JOB 5: SECURITY GATE — Agregação de resultados e decisão final
+  # Responsabilidade: ler os outputs dos jobs anteriores e bloquear o PR
+  #                   se qualquer finding CRITICAL/HIGH foi encontrado
+  # Por que um job separado: centraliza a lógica de decisão e fornece uma
+  #                           mensagem de erro clara para o desenvolvedor
+  # ===========================================================================
   security-gate:
-    name: Security Gate — Resumo Final
+    name: Security Gate — Decisão Final
     runs-on: ubuntu-latest
-    needs: [ checkov, tfsec, trivy-iac, conftest-opa ]
+    needs: [checkov, tfsec, trivy-iac, conftest-opa]
+    # needs: este job só executa APÓS todos os outros terminarem (com sucesso ou falha)
     if: always()
+    # if: always(): executa mesmo se algum job anterior falhou — queremos verificar o resultado
 
     steps:
-      - name: Verificar resultado de todos os jobs
+      - name: Verificar resultado dos scans
+        # Este step verifica se algum dos jobs de scan falhou
+        # Se sim: exibe mensagem de erro clara e falha o pipeline
         run: |
-          echo "checkov: ${{ needs.checkov.result }}"
-          echo "tfsec: ${{ needs.tfsec.result }}"
-          echo "trivy-iac: ${{ needs.trivy-iac.result }}"
-          echo "conftest-opa: ${{ needs.conftest-opa.result }}"
+          echo "=== SECURITY GATE — BANCO MERIDIAN ==="
+          echo "Verificando resultados dos scanners de IaC..."
+          echo ""
 
-          if [[ "${{ needs.checkov.result }}" == "failure" ]] || \
-             [[ "${{ needs.conftest-opa.result }}" == "failure" ]]; then
-            echo "SECURITY GATE: FALHOU — findings CRITICAL/HIGH ou policy violations detectados"
-            echo "O PR não pode ser mergeado até que os findings sejam resolvidos ou suprimidos com justificativa."
+          # Verificar resultado de cada job
+          # needs.<job>.result pode ser: success, failure, cancelled, skipped
+          CHECKOV="${{ needs.checkov.result }}"
+          TFSEC="${{ needs.tfsec.result }}"
+          TRIVY="${{ needs.trivy-iac.result }}"
+          CONFTEST="${{ needs.conftest-opa.result }}"
+
+          echo "Checkov:  $CHECKOV"
+          echo "tfsec:    $TFSEC"
+          echo "Trivy:    $TRIVY"
+          echo "Conftest: $CONFTEST"
+          echo ""
+
+          # Se qualquer scanner encontrou findings CRITICAL/HIGH → bloquear merge
+          if [[ "$CHECKOV" == "failure" || "$TFSEC" == "failure" || \
+                "$TRIVY" == "failure" || "$CONFTEST" == "failure" ]]; then
+            echo "❌ SECURITY GATE: FALHOU"
+            echo ""
+            echo "Um ou mais scanners de IaC encontraram findings CRITICAL ou HIGH."
+            echo "O merge desta PR está bloqueado até a resolução."
+            echo ""
+            echo "Para corrigir:"
+            echo "  1. Verifique os findings na aba 'Security > Code Scanning' do repositório"
+            echo "  2. Corrija as misconfigurations no código Terraform"
+            echo "  3. Se o finding é um falso positivo, documente e use #checkov:skip= com ticket"
+            echo "  4. Faça push das correções — o pipeline será re-executado automaticamente"
+            echo ""
+            echo "Para dúvidas: #security-alerts no Slack ou security@bancomeridian.com.br"
             exit 1
+            # exit 1 falha este step → falha o job security-gate → PR não pode ser mergeado
           fi
 
-          echo "SECURITY GATE: PASSOU — sem findings CRITICAL/HIGH bloqueantes"
+          echo "✅ SECURITY GATE: PASSOU"
+          echo "Todos os scanners concluíram sem findings CRITICAL ou HIGH."
+          echo "O PR pode ser mergeado após aprovação dos revisores de código."
 ```
 
-### 5.2 GitLab CI — Pipeline Equivalente
+---
+
+### 5.2 GitLab CI Pipeline Equivalente
 
 ```yaml
-# .gitlab-ci.yml
+# .gitlab-ci.yml — Equivalente ao GitHub Actions para GitLab CI
+# Estrutura de stages com relatórios de teste integrados
 
 stages:
-  - iac-security
+  - iac-security  # Stage de segurança de IaC (antes do deploy)
+  - security-gate # Stage de gate final
 
 variables:
   TF_DIR: ./terraform
+  # Define o diretório Terraform como variável para reutilização
 
 checkov-scan:
   stage: iac-security
   image: bridgecrew/checkov:latest
+  # Usa a imagem Docker oficial do Checkov (sem necessidade de instalação)
   script:
+    # -d: diretório a escanear
+    # --severity CRITICAL HIGH: apenas estas severidades causam exit code 1
+    # --output junitxml: formato suportado pelo GitLab para relatórios de teste
+    # --output-file-path: onde salvar (deve ser junit-reports/ para o artifact abaixo)
     - checkov -d $TF_DIR --framework terraform --severity CRITICAL HIGH --output junitxml --output-file-path junit-reports/
   artifacts:
     reports:
       junit: junit-reports/results_junitxml.xml
+      # GitLab exibe os resultados JUnit diretamente na interface do Merge Request
     when: always
+    # when: always garante que os relatórios são salvos mesmo quando o scan falha
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Apenas em Merge Requests — equivalente ao paths: trigger do GitHub Actions
 
 tfsec-scan:
   stage: iac-security
   image: aquasec/tfsec:latest
   script:
+    # --minimum-severity MEDIUM: reporta MEDIUM+ mas não bloqueia (allow_failure abaixo)
+    # --format json: salva em JSON para análise posterior
     - tfsec $TF_DIR --minimum-severity MEDIUM --format json --out tfsec-report.json
   artifacts:
     paths:
@@ -1151,7 +1446,9 @@ tfsec-scan:
     when: always
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  allow_failure: true  # tfsec apenas warn, não bloqueia
+  allow_failure: true
+  # allow_failure: true — tfsec apenas avisa (warn), não bloqueia o pipeline
+  # O Checkov acima é o gate definitivo
 
 conftest-policies:
   stage: iac-security
@@ -1160,63 +1457,68 @@ conftest-policies:
     - terraform -chdir=$TF_DIR init -backend=false
     - terraform -chdir=$TF_DIR plan -out=tfplan.binary
     - terraform -chdir=$TF_DIR show -json tfplan.binary > tfplan.json
-    - conftest test tfplan.json -p policy/ --output table
+    - conftest test tfplan.json -p ./policy/
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 ```
 
-### 5.3 Jenkinsfile — Pipeline IaC Security
+---
+
+### 5.3 Jenkins Pipeline (Declarativo)
 
 ```groovy
-// Jenkinsfile — Pipeline IaC Security
-// Banco Meridian DevSecOps
+// Jenkinsfile — Pipeline declarativo para IaC Security no Jenkins
+// Usado em ambientes corporativos com Jenkins já estabelecido
 
 pipeline {
-    agent {
-        docker {
-            image 'ubuntu:22.04'
-        }
+    agent { label 'linux-agent' }  // Executa em agentes Linux
+
+    triggers {
+        // Acionar em todo Pull Request via webhook do GitHub/GitLab
+        githubPullRequests()
     }
 
     environment {
-        AWS_DEFAULT_REGION = 'us-east-1'
+        TF_DIR = './terraform'
+        // Credenciais armazenadas no Jenkins Credentials Store (não hardcoded)
+        AWS_CREDS = credentials('bancomeridian-aws-audit-role')
     }
 
     stages {
-        stage('Instalar Ferramentas') {
+        stage('Checkout') {
             steps {
-                sh '''
-                    apt-get update -q
-                    pip3 install checkov
-                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-                    wget -q https://github.com/open-policy-agent/conftest/releases/download/v0.48.0/conftest_0.48.0_Linux_x86_64.tar.gz
-                    tar xzf conftest_0.48.0_Linux_x86_64.tar.gz
-                    mv conftest /usr/local/bin/
-                '''
+                checkout scm  // Checkout do branch do PR
             }
         }
 
-        stage('Checkov — IaC Scan') {
+        stage('IaC Security — Checkov') {
             steps {
                 sh '''
-                    checkov -d ./terraform/ \
+                    # Instalar e executar Checkov
+                    pip install checkov
+                    checkov \
+                        -d ./terraform/ \
                         --framework terraform \
-                        --severity CRITICAL HIGH \
                         --output junitxml \
-                        --output-file-path reports/ \
+                        --output-file-path junit-reports/ \
                         --soft-fail-on MEDIUM LOW
                 '''
             }
             post {
                 always {
-                    junit 'reports/results_junitxml.xml'
+                    // Publicar resultados JUnit na interface do Jenkins
+                    junit 'junit-reports/*.xml'
                 }
             }
         }
 
-        stage('Trivy — Config Scan') {
+        stage('IaC Security — Trivy') {
             steps {
                 sh '''
+                    # trivy config = modo de scan de configurações IaC
+                    # --severity HIGH,CRITICAL: apenas estas severidades
+                    # --exit-code 1: retorna falha se encontrar findings
+                    # --format json: salva resultado estruturado
                     trivy config ./terraform/ \
                         --severity HIGH,CRITICAL \
                         --exit-code 1 \
@@ -1228,23 +1530,22 @@ pipeline {
 
         stage('Conftest — Policy Validation') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                                   credentialsId: 'aws-audit-credentials']]) {
-                    sh '''
-                        cd terraform
-                        terraform init -backend=false
-                        terraform plan -out=tfplan.binary
-                        terraform show -json tfplan.binary > ../tfplan.json
-                        cd ..
-                        conftest test tfplan.json -p policy/ --output table
-                    '''
-                }
+                sh '''
+                    # Gerar plan JSON para o Conftest avaliar
+                    terraform init -chdir=${TF_DIR} -backend=false
+                    terraform plan -chdir=${TF_DIR} -out=tfplan.binary
+                    terraform show -chdir=${TF_DIR} -json tfplan.binary > tfplan.json
+
+                    # Executar políticas Rego customizadas
+                    conftest test tfplan.json -p ./policy/
+                '''
             }
         }
     }
 
     post {
         failure {
+            // Notificar o time de segurança por e-mail quando o pipeline falha
             mail to: 'security@bancomeridian.com.br',
                  subject: "FALHA: IaC Security Scan — ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "O scan de segurança IaC detectou findings críticos. Acesse ${env.BUILD_URL} para detalhes."
@@ -1253,19 +1554,20 @@ pipeline {
 }
 ```
 
+---
+
 ### 5.4 Azure DevOps — Pipeline YAML
 
 ```yaml
-# azure-pipelines.yml
+# azure-pipelines.yml — Pipeline para Azure DevOps
 trigger:
   branches:
     include:
       - main
-      - develop
+      - 'feature/*'
   paths:
     include:
       - terraform/**
-      - k8s/**
 
 pool:
   vmImage: ubuntu-latest
@@ -1274,6 +1576,7 @@ steps:
   - task: UsePythonVersion@0
     inputs:
       versionSpec: '3.11'
+    displayName: Configurar Python 3.11
 
   - script: pip install checkov
     displayName: Instalar Checkov
@@ -1284,70 +1587,58 @@ steps:
         --severity CRITICAL HIGH \
         --output junitxml \
         --output-file-path $(Build.ArtifactStagingDirectory)/
-    displayName: Checkov IaC Scan
-    continueOnError: false
+    displayName: Executar Checkov
+    # $(Build.ArtifactStagingDirectory): variável do Azure DevOps com o dir de artefatos
 
   - task: PublishTestResults@2
     inputs:
-      testResultsFormat: JUnit
-      testResultsFiles: '$(Build.ArtifactStagingDirectory)/results_junitxml.xml'
-      testRunTitle: Checkov IaC Security Scan
-    condition: always()
-
-  - task: PublishBuildArtifacts@1
-    inputs:
-      pathToPublish: $(Build.ArtifactStagingDirectory)
-      artifactName: security-reports
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '$(Build.ArtifactStagingDirectory)/*.xml'
+    displayName: Publicar Resultados de Segurança
     condition: always()
 ```
 
 ---
 
-## 6. Configuração de Thresholds — Fail/Warn/Ignore
+## 6. Configuração de Severity Thresholds por Ambiente
 
-### 6.1 Estratégia Recomendada
+### 6.1 Por Que Severity Thresholds Diferentes por Ambiente
+
+No Banco Meridian, um finding CRITICAL em produção tem impacto financeiro real. O mesmo finding em ambiente de desenvolvimento pode ser tolerado por alguns dias enquanto o desenvolvedor corrige. A política diferenciada de thresholds permite velocidade de desenvolvimento sem comprometer a segurança em produção.
 
 ```
-MODELO DE THRESHOLDS — BANCO MERIDIAN
+POLÍTICA DE SEVERITY THRESHOLDS — BANCO MERIDIAN
 
-CRITICAL → FAIL (bloqueia merge/deploy)
-─────────────────────────────────────────────────────
-Exemplos: S3 público com dados de clientes, SSH aberto
-para 0.0.0.0/0, IAM wildcard em produção
-→ Requer remediação antes do merge
-→ Pode ser suprimido apenas com aprovação do CISO
+CRITICAL → BLOQUEIO IMEDIATO em todos os ambientes
+  Exemplos: EBS sem criptografia, RDS sem backup
+  → Em QUALQUER ambiente: falha o pipeline imediatamente
+  → Deve ser corrigido antes de qualquer merge
+  → Prazo de remediação: 0 dias (bloqueante)
 
-HIGH → FAIL em prod, WARN em dev/staging
-─────────────────────────────────────────────────────
-Exemplos: EBS sem criptografia, RDS sem backup
-→ Em produção: bloqueia deploy
-→ Em desenvolvimento: cria comentário no PR mas não bloqueia
-→ Prazo de remediação: 7 dias
+HIGH → BLOQUEIO em produção, WARN em dev/staging
+  Exemplos: Security Group com porta SSH aberta para 0.0.0.0/0
+  → Em produção: bloqueia o deploy
+  → Em desenvolvimento: cria comentário no PR mas não bloqueia
+  → Prazo de remediação: 7 dias
 
-MEDIUM → WARN (comentário no PR, não bloqueia)
-─────────────────────────────────────────────────────
-Exemplos: falta de versioning em S3, IMDSv1 habilitado
-→ Não bloqueia merge
-→ Rastreado em backlog de segurança
-→ Prazo: 30 dias
+MEDIUM → WARN em todos os ambientes (comentário no PR, não bloqueia)
+  Exemplos: falta de versioning em S3, IMDSv1 habilitado
+  → Não bloqueia merge em nenhum ambiente
+  → Rastreado em backlog de segurança do time
+  → Prazo de remediação: 30 dias
 
-LOW → LOG (apenas registrado, sem notificação)
-─────────────────────────────────────────────────────
-→ Revisado mensalmente
-→ Suprimível sem aprovação formal
+LOW → LOG apenas (não aparece no PR, apenas em relatório)
+  → Revisado mensalmente pela equipe de segurança
+  → Suprimível sem aprovação formal (apenas com ticket de backlog)
 ```
 
-### 6.2 Implementação no Checkov
-
-```bash
-# Configuração no checkov.yaml (na raiz do repositório)
-```
+### 6.2 Implementação no Checkov por Ambiente
 
 ```yaml
-# checkov.yaml
-# Configuração global do Checkov para o repositório Banco Meridian
+# .checkov.yaml — Configuração central do Checkov para o repositório Banco Meridian
+# Este arquivo é lido automaticamente pelo Checkov quando presente no diretório
 
-# Frameworks habilitados
+# Frameworks a escanear — todos os tipos de IaC suportados
 framework:
   - terraform
   - cloudformation
@@ -1355,37 +1646,26 @@ framework:
   - dockerfile
   - helm
 
-# Severidade mínima para falhar o job
+# Findings que FALHAM o pipeline (exit code 1)
+# Qualquer check com severidade CRITICAL ou HIGH bloqueia o merge
 hard-fail-on:
   - CRITICAL
   - HIGH
 
-# Severidade que gera warn mas não falha
+# Findings que são REPORTADOS mas não falham o pipeline
 soft-fail-on:
   - MEDIUM
   - LOW
 
-# Checks suprimidos globalmente (com justificativa)
+# Exclusões aprovadas com tickets de rastreabilidade
+# FORMATO OBRIGATÓRIO: ID do check + comentário com ticket SEC-XXXX
 skip-check:
-  - CKV_AWS_144  # S3 cross-region replication: não obrigatório em sandbox (aprovado SEC-0045)
-  - CKV_AWS_18   # S3 logging: bucket de logs não precisa logar a si mesmo (lógica circular)
+  - CKV_AWS_144  # S3 cross-region replication — não requerido no sandbox, ticket SEC-0145
+  - CKV_AWS_18   # S3 access logging — bucket de logs não precisa de auto-logging, ticket SEC-0146
 
-# Diretórios a ignorar
-skip-path:
-  - ./terraform/examples/   # exemplos de documentação, não produção
-  - ./terraform/tests/      # fixtures de teste unitário
-
-# Políticas customizadas
+# Políticas customizadas do Banco Meridian (Rego ou Python)
 external-checks-dir:
-  - ./policy/
-
-# Output
-output:
-  - cli
-  - json
-  - junitxml
-
-output-file-path: ./security-reports/
+  - ./custom-policies/
 ```
 
 ---
@@ -1393,84 +1673,134 @@ output-file-path: ./security-reports/
 ## 7. Atividades de Fixação
 
 ### Questão 1
-Um desenvolvedor do Banco Meridian adicionou o seguinte bloco Terraform em uma PR:
 
-```hcl
-resource "aws_s3_bucket" "backup" {
-  bucket = "bancomeridian-backup-2025"
-}
-```
+Um desenvolvedor do Banco Meridian cria um recurso `aws_s3_bucket` com apenas o nome definido (sem bloco de criptografia, logging ou versioning). Qual check do Checkov é o PRIMEIRO a falhar (mais crítico)?
 
-Quais checks do Checkov esse código FALHARIA? (selecione todos que se aplicam)
+**a)** CKV_AWS_19 — Block public access não habilitado
+**b)** CKV_AWS_18 — Access logging não habilitado
+**c)** CKV_AWS_145 — Criptografia SSE-KMS não habilitada
+**d)** CKV_AWS_21 — Versionamento não habilitado
 
-**a)** CKV_AWS_19 — Block public access não configurado  
-**b)** CKV_AWS_18 — Access logging não configurado  
-**c)** CKV_AWS_145 — Criptografia SSE-KMS não configurada  
-**d)** CKV_AWS_21 — Versionamento não configurado  
-
-**Gabarito: a), b), c) e d)**  
-Justificativa: Um bloco `aws_s3_bucket` com apenas o nome definido falha em todos os checks de segurança básicos. Block public access, logging, criptografia e versionamento são todos necessários para um bucket de backup corporativo que pode conter dados sensíveis. O Checkov verificaria todos esses checks por padrão.
+**Gabarito: a)**
+Justificativa: Um `aws_s3_bucket` com apenas o nome definido falha em todos os checks de segurança básicos. O CKV_AWS_19 (Block Public Access) é geralmente classificado como CRITICAL porque um bucket público pode expor dados de clientes na internet imediatamente. CKV_AWS_145 (criptografia) é HIGH, CKV_AWS_18 (logging) é MEDIUM, e CKV_AWS_21 (versioning) é MEDIUM. A severidade do CKV_AWS_19 o torna o primeiro a bloquear o pipeline.
 
 ---
 
 ### Questão 2
-Qual é a diferença principal entre usar `--severity CRITICAL HIGH` e `--soft-fail-on MEDIUM LOW` no Checkov?
 
-**a)** São equivalentes — ambos têm o mesmo efeito  
-**b)** `--severity CRITICAL HIGH` executa apenas os checks de alta severidade; `--soft-fail-on MEDIUM LOW` executa todos mas não falha o job para MEDIUM/LOW  
-**c)** `--severity` filtra os checks executados; `--soft-fail-on` executa todos os checks mas retorna exit code 0 para os severity especificados (não falhando o CI)  
-**d)** `--soft-fail-on MEDIUM LOW` suprime os findings de MEDIUM e LOW do relatório  
+Qual é o comportamento do pipeline quando se usa `--severity CRITICAL HIGH` e `--soft-fail-on MEDIUM LOW` no Checkov?
 
-**Gabarito: c)**  
-Justificativa: `--severity` filtra quais checks são executados. `--soft-fail-on` executa todos os checks, mas ao encontrar findings nos severity listados, o Checkov retorna exit code 0 (sucesso) em vez de 1 (falha). Isso permite que o pipeline continue mesmo com findings MEDIUM/LOW, ao mesmo tempo que os registra para visibilidade.
+**a)** O pipeline falha para MEDIUM e LOW e ignora CRITICAL e HIGH
+**b)** `--severity CRITICAL HIGH` e `--soft-fail-on MEDIUM LOW` têm comportamentos conflitantes e causam erro
+**c)** Findings CRITICAL e HIGH causam exit code 1 (falha do pipeline); MEDIUM e LOW são reportados no output mas o exit code é 0 (sucesso)
+**d)** Todos os findings são reportados mas nenhum causa falha de pipeline
+
+**Gabarito: c)**
+Justificativa: `--soft-fail-on MEDIUM LOW` instrui o Checkov: "para essas severidades, reporte no output mas não falhe (exit code 0)". CRITICAL e HIGH não estão no soft-fail-on, então eles causam exit code 1. No GitHub Actions, exit code 1 marca o step como falha, o que impede o merge via branch protection rules.
 
 ---
 
 ### Questão 3
-No contexto de Policy as Code com OPA/Rego, o que acontece quando o conjunto `deny` de uma política está vazio?
 
-**a)** A política falha com erro de execução  
-**b)** A política é considerada aprovada (allow) — o recurso satisfaz a política  
-**c)** OPA retorna um erro de autorização por padrão  
-**d)** A política precisa definir explicitamente `allow = true` para ser aprovada  
+Um desenvolvedor quer suprimir um check do Checkov para um recurso específico no código Terraform. Qual é a forma CORRETA e rastreável de fazer isso?
 
-**Gabarito: b)**  
-Justificativa: Em OPA/Rego com Conftest, a semântica padrão é: se o conjunto `deny` está vazio (nenhuma regra de deny foi ativada), o recurso passou na política. É uma abordagem "deny unless explicitly denied" — se não há violations, está aprovado.
+**a)** Usar `--skip-check CKV_AWS_19` na linha de comando do pipeline
+**b)** Adicionar `#checkov:skip=CKV_AWS_19:justificativa com ticket SEC-XXXX` como comentário na linha do recurso no arquivo .tf
+**c)** Remover o check da lista de checks habilitados no .checkov.yaml
+**d)** Criar um arquivo .checkovignore com o ID do check
+
+**Gabarito: b)**
+Justificativa: O inline skip com `#checkov:skip=CKV_AWS_19:justificativa` é a forma mais rastreável porque: (1) está no git history junto com o código que suprime; (2) o motivo é documentado no próprio arquivo; (3) a revisão de code fica ciente da supressão; (4) ferramentas de auditoria como o `git log` mostram quem suprimiu e quando. Skip via command line (`--skip-check`) não é rastreável por recurso — suprime globalmente para todos os recursos.
 
 ---
 
 ### Questão 4
+
 Um engenheiro quer configurar o workflow GitHub Actions para que:
 - Findings CRITICAL/HIGH bloqueiem o merge da PR
 - Findings MEDIUM apenas adicionem um comentário de aviso na PR
 - A PR ainda possa ser mergeada com findings MEDIUM pendentes
 
-Como isso deve ser implementado?
+**a)** Um único job com `checkov --severity CRITICAL HIGH --soft-fail-on MEDIUM LOW`
+**b)** Dois jobs separados: job-1 com `--severity CRITICAL HIGH` (exit-on-error: true) e job-2 com `--severity MEDIUM` (continue-on-error: true) + GitHub branch protection rules exigindo apenas job-1
+**c)** Um único job com `checkov --severity MEDIUM LOW CRITICAL HIGH`
+**d)** `--severity CRITICAL HIGH --soft-fail-on MEDIUM LOW` executa (exit code 1) apenas para CRITICAL/HIGH, com exit 0 para MEDIUM/LOW output
 
-**a)** Um único job com `checkov --severity CRITICAL HIGH --soft-fail-on MEDIUM LOW`  
-**b)** Dois jobs separados: um com `--severity CRITICAL HIGH` e exit-code 1; outro com `--severity MEDIUM` e continue-on-error: true  
-**c)** Configurar GitHub branch protection rules com require all CI jobs to pass  
-**d)** Usar apenas `checkov --severity MEDIUM LOW --soft-fail-on CRITICAL HIGH`  
-
-**Gabarito: a)**  
-Justificativa: `--severity CRITICAL HIGH --soft-fail-on MEDIUM LOW` executa todos os checks, falha o job (exit code 1) apenas para CRITICAL/HIGH, e retorna exit code 0 para MEDIUM/LOW (o job passa). Para adicionar o comentário com findings MEDIUM, você adiciona um step adicional após o Checkov que lê o JSON de saída e usa `github-script` para criar o comentário — sem afetar o exit code.
+**Gabarito: b) e d) ambas corretas, mas d) é a implementação mais simples.**
+Justificativa: A opção d) descreve o comportamento correto com um único job: `--soft-fail-on MEDIUM LOW` faz o Checkov reportar MEDIUM/LOW mas retornar exit code 0 — o GitHub Actions vê o step como "passed". Apenas CRITICAL/HIGH retornam exit code 1 e bloqueiam. Para adicionar um comentário de PR sobre os MEDIUM, pode-se usar um segundo job que executa Checkov com `--severity MEDIUM` e posta o output como comentário no PR.
 
 ---
 
 ### Questão 5
-Qual é a principal vantagem do Trivy em relação a usar Checkov + tfsec separadamente em um pipeline de IaC?
 
-**a)** Trivy é mais rápido em qualquer cenário  
-**b)** Trivy é um binário unificado que cobre IaC scan + image scan + SBOM + secrets em um único passo, reduzindo a complexidade do pipeline  
-**c)** Trivy tem mais checks de IaC do que Checkov e tfsec combinados  
-**d)** Trivy tem integração nativa com GitHub Actions sem necessidade de configuração adicional  
+No workflow GitHub Actions do Banco Meridian, o job `security-gate` usa `needs: [checkov, tfsec, trivy-iac, conftest-opa]` e `if: always()`. Por que esse job é necessário?
 
-**Gabarito: b)**  
-Justificativa: O principal diferencial do Trivy é a unificação. Em vez de usar Checkov para IaC + Grype para imagens + Syft para SBOM + GitLeaks para secrets — você usa apenas Trivy com diferentes flags. Isso simplifica o pipeline (menos dependências, menos manutenção) e a interface de análise (um único formato de output, uma única ferramenta para aprender).
+**a)** Para executar qualquer ação que não possa ser executada nos outros jobs
+**b)** Para centralizar a lógica de decisão final em um único ponto, garantindo que o merge seja bloqueado se QUALQUER um dos scanners falhar, e fornecendo uma mensagem de erro unificada e clara para o desenvolvedor
+**c)** Para enviar os relatórios de segurança por e-mail automaticamente
+**d)** Para executar os scanners de forma sequencial em vez de paralela
+
+**Gabarito: b)**
+Justificativa: Sem o security-gate, cada scanner falha o seu próprio job, mas o PR pode ser confuso para o desenvolvedor — ele vê 4 jobs vermelhos sem uma mensagem centralizada. O security-gate agrega, fornece uma mensagem de erro clara com instruções de correção, e é o único job que o branch protection rule precisa exigir (em vez de exigir os 4 jobs de scanner individualmente).
 
 ---
 
-## 8. Roteiros de Gravação
+### Questão 6
+
+O HashiCorp Sentinel se diferencia do OPA/Conftest para uso no Banco Meridian em qual aspecto principal?
+
+**a)** Sentinel suporta mais linguagens de IaC do que OPA/Conftest
+**b)** Sentinel é integrado nativamente ao Terraform Cloud e Enterprise, aplicando políticas antes de cada `terraform apply` sem necessidade de pipeline CI/CD adicional — mas é limitado ao ecossistema HashiCorp; OPA/Conftest é agnóstico de plataforma e se integra a qualquer CI/CD
+**c)** Sentinel é gratuito e OPA tem licença paga
+**d)** Sentinel tem melhor suporte a AWS; OPA tem melhor suporte a Azure e GCP
+
+**Gabarito: b)**
+Justificativa: Sentinel é nativo ao Terraform Cloud/Enterprise — políticas são aplicadas por padrão em todos os runs sem configuração adicional de CI/CD. A desvantagem: só funciona com Terraform HashiCorp. OPA/Conftest é agnóstico — funciona com qualquer CI/CD (GitHub Actions, Jenkins, GitLab CI, Azure DevOps) e com qualquer tipo de arquivo de configuração (YAML, JSON, HCL, Dockerfile). Para o Banco Meridian, que tem pipelines em múltiplos sistemas, OPA/Conftest é mais adequado. Se o banco usar Terraform Cloud Enterprise, Sentinel é adicional e complementar.
+
+---
+
+## 8. Gabarito — Questões de Análise Avançada
+
+### Parte B — Análise de Cenário (40 pontos)
+
+**Cenário:** O pipeline DevSecOps do Banco Meridian foi configurado, mas o time encontrou os seguintes problemas:
+1. O Checkov está falhando em 47 recursos por falta da tag `Owner` — mas os desenvolvedores dizem que essa tag não é responsabilidade deles, é do IaC central
+2. Uma política Rego (Conftest) está gerando falso positivo: o bucket do website público `bancomeridian-website` está falhando no check de Block Public Access
+3. O pipeline demora 12 minutos para executar, atrasando o feedback para os desenvolvedores
+4. Um finding CRITICAL de IAM policy com `iam:*` está bloqueando o deploy de um sistema legado que realmente precisa dessa permissão (aprovado pelo CISO)
+
+**Questão 1 (10 pts):** Como resolver o problema das tags — corrigir o pipeline, a política ou o processo?
+
+**Gabarito Q1:**
+A solução correta é separar responsabilidades via tag inheritance no Terraform. Criar um módulo Terraform central `bancomeridian-base-tags` que define as tags obrigatórias e é importado por todos os módulos. O check de tags deve verificar que o módulo central está sendo usado, não que cada desenvolvedor adicionou as tags manualmente. Alternativa: usar Default Tags via `provider "aws" { default_tags { tags = { ... } } }` no bloco de provider, que aplica tags automaticamente a todos os recursos sem que o desenvolvedor precise especificá-las.
+
+**Questão 2 (10 pts):** Como tratar o falso positivo do bucket público?
+
+**Gabarito Q2:**
+Correto: adicionar `#checkov:skip=CKV_AWS_19:Website público intencional — aprovado CISO 2025-04-24 ticket SEC-0123` como comentário inline no código Terraform do bucket. Na política Rego (Conftest), adicionar uma exceção baseada no nome do bucket: `not bucket_name in bancomeridian_public_websites` onde `bancomeridian_public_websites := {"bancomeridian-website"}`. A exceção deve ser versionada no código e aprovada via PR review pelo time de segurança.
+
+**Questão 3 (10 pts):** Como reduzir o tempo de 12 minutos para menos de 5 minutos?
+
+**Gabarito Q3:**
+Estratégias:
+- Paralelização: Checkov, tfsec e Trivy já rodam em paralelo — verificar se há dependências desnecessárias entre jobs
+- Cache de dependências: cachear o ambiente Python com `actions/cache` para evitar `pip install checkov` a cada run (salva 1–2 min)
+- Filtro por arquivos modificados: usar `actions/changed-files` para executar apenas os scanners relevantes (se apenas Kubernetes YAML mudou, pular o scan Terraform)
+- Pre-commit hooks: executar Checkov localmente no pre-commit, antes do push — 80% dos problemas são detectados em segundos no terminal do dev, sem precisar do CI/CD pipeline
+
+**Questão 4 (10 pts):** Como permitir o sistema legado com `iam:*` sem comprometer a política geral?
+
+**Gabarito Q4:**
+Correto: criar uma exceção documentada e time-limited. O recurso IAM do sistema legado deve ter:
+1. `#checkov:skip=CKV_AWS_111:Sistema legado pré-aprovado — CISO ticket SEC-CISO-0099 — rever até 2025-12-31`
+2. Um issue de backlog com prazo de migração para uso de permissões específicas
+3. A role deve ter o menor conjunto de permissões HIGH RISK bloqueada mesmo dentro do `iam:*` — usar Permissions Boundary para limitar o escopo real
+
+Errado: adicionar `CKV_AWS_111` ao `skip-check` global do `.checkov.yaml` — isso remove o check para TODOS os recursos, não apenas para o sistema legado.
+
+---
+
+## 9. Roteiros de Gravação
 
 ### Aula 3.1: Shift-Left + Checkov + tfsec (50 min)
 
@@ -1480,104 +1810,77 @@ Justificativa: O principal diferencial do Trivy é a unificação. Em vez de usa
 |:------|:------|
 | **Título** | Shift-Left na Prática: Checkov e tfsec para IaC Security |
 | **Duração** | 50 minutos |
-| **Formato** | Talking head + VS Code + terminal |
+| **Formato** | Talking head + screen share (terminal + VS Code) + slides |
 
 ---
 
 **[00:00 – 05:00 | ABERTURA | Talking head]**
 
-Neste módulo vamos falar de uma das mudanças de mentalidade mais importantes em Cloud Security: o Shift-Left. E depois de entender o conceito, vamos colocar a mão na massa com duas ferramentas que você vai usar no seu dia a dia: Checkov e tfsec.
+Neste módulo vamos falar sobre uma mudança fundamental de abordagem em segurança: o Shift-Left. A ideia é simples — encontrar problemas de segurança mais cedo no ciclo de desenvolvimento. Mais cedo significa mais barato, mais rápido de corrigir e, no caso de um banco como o Banco Meridian, sem exposição de dados de clientes.
 
-Uma pergunta antes de começar: você já foi chamado de urgência porque alguém fez um `terraform apply` em produção e criou um S3 bucket com acesso público? Se já, este módulo é para você. Se nunca aconteceu, este módulo vai garantir que nunca aconteça.
+Vamos ver na prática como implementar isso com Checkov e tfsec — duas das melhores ferramentas open-source de IaC security.
 
 ---
 
 **[05:00 – 18:00 | CONCEITO SHIFT-LEFT | Slides]**
 
-*[Dica de edição: animação da linha do tempo do custo de correção]*
+*[Dica de edição: slide animado mostrando o custo subindo dramaticamente da esquerda para a direita]*
 
-Shift-Left é um princípio simples: mover as atividades de segurança para a esquerda da linha do tempo de desenvolvimento — do final (produção) para o início (código).
+A Regra do 10x é o argumento de negócio mais poderoso para justificar investimento em segurança de IaC. Desenvolvimento: R$ 1. Produção: R$ 1.000. Pós-incidente: R$ 10.000+.
 
-*[Slide: custo de correção por fase]*
+Para o Banco Meridian: um bucket S3 público em produção por 24 horas de exposição, 40 horas de trabalho para corrigir via change management, possível notificação ao BACEN. Com Shift-Left, o pre-commit hook detecta em 3 segundos e o desenvolvedor corrige em 15 minutos no terminal.
 
-Olha esta curva. O custo de corrigir uma vulnerabilidade numa fase inicial de desenvolvimento é aproximadamente 1 real. Na PR, 10 reais. Em staging, 100 reais. Em produção, 1.000 reais. Após um incidente, 10.000 ou mais — sem contar multas e danos de reputação.
-
-Não estou inventando esse número. É uma estimativa do NIST e de estudos do IBM Security. A ordem de magnitude é real.
-
-*[Slide: fluxo com e sem shift-left]*
-
-No fluxo sem shift-left: desenvolvedor escreve Terraform com S3 bucket público, faz push, CI/CD aplica em produção, CSPM detecta 24 horas depois no próximo scan. Resultado: 24 horas de exposição, 40 horas de trabalho para corrigir, possível notificação ao BACEN.
-
-No fluxo com shift-left: desenvolvedor escreve o mesmo Terraform, o pre-commit hook executa Checkov, que imediatamente mostra: "CKV_AWS_19 FAILED — S3 bucket sem block public access". O desenvolvedor corrige em 15 minutos antes de fazer o push. Nenhum dado exposto, nenhum incidente.
-
-É literalmente 100x mais barato. E o Checkov é gratuito.
+*[Mostra o diagrama de fluxo com e sem shift-left]*
 
 ---
 
-**[18:00 – 40:00 | CHECKOV E TFSEC NA PRÁTICA | VS Code + terminal]**
+**[18:00 – 42:00 | CHECKOV E TFSEC NA PRÁTICA | Screen share — terminal + VS Code]**
 
-*[Dica de edição: split-screen — VS Code à esquerda, terminal à direita]*
+*[Dica de edição: tela cheia no terminal, fonte maior, zoom nos comandos e outputs]*
 
-Vamos abrir o VS Code e criar um arquivo Terraform típico de um desenvolvedor sem treinamento de security.
-
-*[Cria o arquivo terraform/s3.tf com código inseguro]*
-
-```hcl
-resource "aws_s3_bucket" "backup" {
-  bucket = "bancomeridian-backup-2025"
-}
-```
-
-Simples, funciona, sem erros de sintaxe. Mas do ponto de vista de segurança, tem pelo menos 4 problemas críticos. Vamos executar o Checkov para ver.
-
-*[Terminal: executa checkov]*
+Vamos para o terminal. Vou demonstrar o Checkov em um projeto Terraform real.
 
 ```bash
-checkov -f terraform/s3.tf
+# Instalar e verificar
+pip install checkov
+checkov --version
+
+# Scan de diretório Terraform
+checkov -d ./terraform/
 ```
 
-*[Mostra e comenta os resultados]*
+*[Mostra o output do scan, aponta para os campos: Check ID, FAILED, resource, file:line]*
 
-Veja: 4 checks falhando — sem block public access, sem logging, sem criptografia, sem versionamento. Cada um com um ID de check, a descrição do problema, e um link para a documentação.
+Veja esse output. O Checkov me diz: "CKV_AWS_19 FAILED — aws_s3_bucket.dados_clientes — linha 3 do s3.tf". Isso é exatamente a informação que o desenvolvedor precisa para corrigir sem precisar abrir documentação.
 
-*[Corrige o código Terraform]*
+```bash
+# Falhar apenas em CRITICAL/HIGH
+checkov -d ./terraform/ --soft-fail-on MEDIUM LOW
+```
 
-Agora vou corrigir cada problema. *[Adiciona os blocos necessários ao Terraform]*
+*[Mostra a diferença no output — apenas CRITICAL e HIGH causam exit code 1]*
 
-*[Executa checkov novamente, mostra PASSED]*
+*[Abre VS Code, mostra a extensão tfsec funcionando inline]*
 
-Perfeito. Agora vamos ver o tfsec — mais rápido e com integração muito boa com VS Code.
-
-*[Mostra integração VS Code com tfsec — highlighting inline]*
-
-Com a extensão tfsec no VS Code, você vê os problemas inline no código enquanto escreve, sem nem precisar rodar a ferramenta manualmente. Isso é o shift-left mais próximo possível do início: feedback imediato no editor.
+No VS Code com a extensão tfsec, você vê o problema sublinhado em vermelho enquanto escreve. Não precisa nem salvar o arquivo — o feedback é instantâneo. Isso é shift-left no seu extremo.
 
 ---
 
-**[40:00 – 50:00 | PRE-COMMIT HOOK | Terminal]**
+**[42:00 – 50:00 | PRE-COMMIT HOOK | Terminal]**
 
-*[Dica de edição: tela cheia no terminal]*
-
-Para garantir que nenhum código inseguro saia da máquina do desenvolvedor, vamos configurar um pre-commit hook.
+*[Configura pre-commit com Checkov e demonstra blocagem de commit]*
 
 ```bash
 pip install pre-commit
 cat .pre-commit-config.yaml
-```
-
-*[Mostra o .pre-commit-config.yaml]*
-
-*[Demonstra commit sendo bloqueado pelo Checkov]*
-
-```bash
 git add terraform/s3-inseguro.tf
-git commit -m "adicionar bucket de backup"
+git commit -m "adiciona bucket de backup"
 # Checkov executa, encontra CRITICAL/HIGH, bloqueia o commit
 ```
 
-*[Mostra o output do hook]*
+*[Mostra a mensagem de erro do pre-commit]*
 
-O commit foi bloqueado. O desenvolvedor vê os problemas agora, neste momento, quando o custo de correção é mínimo. Isso é shift-left na prática.
+O commit foi bloqueado antes de chegar ao GitHub. Zero exposição. Zero PR necessário. O problema ficou no terminal do desenvolvedor, que pode corrigir imediatamente.
 
 ---
 
@@ -1589,213 +1892,235 @@ O commit foi bloqueado. O desenvolvedor vê os problemas agora, neste momento, q
 |:------|:------|
 | **Título** | Policy as Code com OPA/Rego e Pipeline GitHub Actions Completo |
 | **Duração** | 50 minutos |
-| **Formato** | Terminal + VS Code + GitHub |
+| **Formato** | Talking head + screen share (terminal + GitHub Actions) + slides |
 
 ---
 
 **[00:00 – 05:00 | ABERTURA | Talking head]**
 
-Na aula anterior vimos Checkov e tfsec — ferramentas que verificam os checks built-in. Nesta aula vamos um passo além: Policy as Code com OPA Rego, que permite escrever as políticas específicas do seu negócio — as regras que não existem em nenhuma ferramenta open-source porque são específicas do Banco Meridian.
+Na aula anterior você viu como o Checkov e o tfsec detectam problemas conhecidos de configuração. Mas e as políticas específicas do Banco Meridian? Como garantir que todos os recursos têm a tag `Owner`? Como impedir que alguém crie recursos em regiões proibidas? Isso vai além dos checks built-in — você precisa escrever sua própria política.
 
-E depois vamos montar o pipeline GitHub Actions completo que executa tudo automaticamente em cada Pull Request.
+É aqui que entra o OPA com Rego — Policy as Code. Vamos ver como escrever políticas e integrá-las ao pipeline GitHub Actions completo.
 
 ---
 
-**[05:00 – 25:00 | OPA E REGO | VS Code + terminal]**
+**[05:00 – 25:00 | OPA/REGO NA PRÁTICA | Terminal]**
 
-*[Dica de edição: tela cheia no VS Code com syntax highlighting Rego]*
-
-OPA é um policy engine open-source. A linguagem Rego é declarativa — você não descreve como verificar uma política, você descreve o que deve ser verdadeiro.
-
-*[Mostra a estrutura básica de uma política Rego]*
-
-Vamos escrever uma política específica do Banco Meridian: todos os recursos AWS devem ter a tag Owner. Não existe check built-in para isso no Checkov porque é uma política interna da nossa organização.
-
-*[Escreve a política Rego ao vivo, comentando cada parte]*
-
-*[Instala conftest, executa contra tfplan.json]*
+*[Dica de edição: tela cheia no terminal, fonte maior]*
 
 ```bash
+# Instalar OPA
+brew install opa
+
+# Criar primeira política Rego
+cat > policy/tags.rego << 'REGO'
+package terraform.aws.tags
+violations[msg] {
+  resource := input.resource_changes[_]
+  resource.type == "aws_s3_bucket"
+  not resource.change.after.tags.Owner
+  msg := sprintf("Bucket '%v' sem tag Owner", [resource.address])
+}
+deny[msg] { msg := violations[_] }
+REGO
+
+# Gerar Terraform plan JSON
 terraform init -backend=false
 terraform plan -out=tfplan.binary
 terraform show -json tfplan.binary > tfplan.json
+
+# Testar política
 conftest test tfplan.json -p policy/
 ```
 
-*[Mostra violations encontradas, corrige o Terraform, reroda]*
+*[Mostra violations sendo geradas, corrige o Terraform, roda novamente e mostra PASS]*
 
 ---
 
-**[25:00 – 48:00 | GITHUB ACTIONS PIPELINE | GitHub]*
+**[25:00 – 48:00 | GITHUB ACTIONS PIPELINE | GitHub + Terminal]**
 
-*[Dica de edição: tela cheia no GitHub, zoom nos arquivos de workflow]*
+*[Abre o workflow YAML no VS Code, explica cada seção]*
 
-Agora vamos montar o pipeline completo. Vou criar o arquivo `.github/workflows/iac-security.yml`.
+Vamos ver o pipeline completo. Ele tem 4 jobs paralelos: Checkov, tfsec, Trivy e Conftest. Um 5º job — o security-gate — agrega os resultados e é o único ponto de decisão.
 
-*[Mostra e explica cada step do workflow]*
+*[Demonstra um PR com código Terraform inseguro sendo bloqueado pelo pipeline]*
 
-Temos 4 jobs: Checkov (falha em CRITICAL/HIGH), tfsec (apenas warn), Trivy IaC (falha em CRITICAL/HIGH), e Conftest com nossas políticas Rego customizadas.
+*[Mostra o resultado visual no GitHub — PR com "Required checks failed" em vermelho]*
 
-*[Demonstra uma PR com Terraform inseguro sendo aberta]*
-
-*[Mostra o workflow executando no GitHub Actions]*
-
-*[Mostra o comentário automático na PR com os findings]*
-
-*[Mostra que o merge está bloqueado pelo security gate]*
-
-Veja: o PR está bloqueado. A única maneira de fazer o merge é ou corrigir o código ou adicionar uma supressão documentada com justificativa aprovada pelo CISO.
+*[Corrige o código, faz novo push, mostra o pipeline passando em verde]*
 
 ---
 
 **[48:00 – 50:00 | ENCERRAMENTO | Talking head]**
 
-Resumindo: você viu como OPA Rego permite codificar políticas específicas do seu negócio, e como integrar tudo em um pipeline GitHub Actions que bloqueia automaticamente código inseguro.
-
-No laboratório Lab-02, você vai construir esse pipeline completo para o Banco Meridian — com Terraform real, GitHub Actions, Checkov, tfsec, e políticas Rego customizadas. É exatamente o que você vai fazer em um ambiente de trabalho real.
+Você agora tem o kit completo de IaC Security: Checkov e tfsec para checks built-in, OPA/Rego para políticas customizadas, e o pipeline GitHub Actions que integra tudo. No Lab 02, você vai implementar esse pipeline do zero em um repositório GitHub real com Terraform do Banco Meridian. Nos vemos lá!
 
 ---
 
-## 9. Avaliação do Módulo 03
+## 10. Avaliação do Módulo 03
 
 ### Parte A — Múltipla Escolha (60 pontos)
 
-**Questão 1 (10 pts)**  
-De acordo com a regra do custo de correção por fase, uma vulnerabilidade encontrada em produção custa quanto em comparação com a mesma encontrada na fase de desenvolvimento?
+**Questão 1 (10 pts)**
+De acordo com a Regra do 10x, por que corrigir um problema de segurança em IaC em produção é 1.000x mais caro do que no desenvolvimento?
 
-**a)** 2 vezes mais  
-**b)** 10 vezes mais  
-**c)** 100 vezes mais  
-**d)** 1.000 vezes mais  
+**a)** Porque em produção a ferramenta de scan custa 1.000x mais para executar
+**b)** Porque a Regra do 10x diz que o custo dobra a cada fase, e desenvolvimento → CI → staging → produção são 3 doublings (2^3 = 8, não 1.000)
+**c)** Porque a regra mostra que desenvolvimento custa R$ 1, CI custa R$ 10, staging R$ 100, produção R$ 1.000 — a diferença em produção inclui processo de change management, aprovações formais, possível janela de manutenção, risco de exposição durante o tempo de correção, e potencial notificação a reguladores como o BACEN
+**d)** 1.000 vezes mais caro apenas para vulnerabilidades CRITICAL — LOW e MEDIUM têm custo igual em todas as fases
 
-**Gabarito: d)** A regra do 10x mostra: desenvolvimento (R$ 1) → PR/review (R$ 10) → staging (R$ 100) → produção (R$ 1.000) → pós-incidente (R$ 10.000+). De desenvolvimento para produção, o custo é 1.000x maior.
-
----
-
-**Questão 2 (10 pts)**  
-Um desenvolvedor escreveu uma política Rego que usa a regra `deny[msg]`. O que acontece quando o conjunto `deny` resultante está vazio (nenhuma regra foi ativada)?
-
-**a)** A ferramenta retorna um erro de compilação  
-**b)** A política é considerada aprovada — o recurso passou em todos os checks  
-**c)** OPA retorna "undecided" e o recurso precisa de aprovação manual  
-**d)** O conftest falha com exit code 2 por política incompleta  
-
-**Gabarito: b)** Quando `deny` é um conjunto vazio, significa que nenhuma condição de violação foi verdadeira. No framework Conftest/OPA, isso significa que o recurso passou na política.
+**Gabarito: c)**
+Justificativa: A Regra do 10x mostra: desenvolvimento (R$ 1) → PR/review (R$ 10) → staging (R$ 100) → produção (R$ 1.000) → pós-incidente (R$ 10.000+). Em produção, o custo extra vem de: change management formal, aprovações, janela de manutenção programada, possível downtime, risco de exposição durante a janela de correção, e potencial notificação ao BACEN e investigação regulatória.
 
 ---
 
-**Questão 3 (10 pts)**  
-Qual ferramenta é a melhor escolha para um pipeline que precisa cobrir IaC scan + image scan + SBOM em um único step?
+**Questão 2 (10 pts)**
+Um desenvolvedor escreveu uma política Rego que usa a regra `deny[msg]`. O que acontece quando o conjunto `deny` é vazio?
 
-**a)** Checkov — porque suporta todos os tipos de arquivos IaC  
-**b)** Trivy — porque é um binário unificado que cobre todos esses domínios  
-**c)** tfsec — porque é o mais rápido para Terraform  
-**d)** KICS — porque suporta 35+ tipos de IaC  
+**a)** A ferramenta retorna um erro de compilação porque deny não pode ser vazio
+**b)** A política é considerada aprovada — o recurso passou em todos os checks porque nenhuma condição de violação foi verdadeira
+**c)** OPA retorna "undecided" quando nenhuma regra é satisfeita
+**d)** O conftest falha com exit code 2 por política incompleta
 
-**Gabarito: b)** Trivy é o único binário que cobre: `trivy config` (IaC), `trivy image` (container scan), `trivy sbom` (geração de SBOM), `trivy fs` (filesystem scan para secrets). Usando Trivy, um único step no CI/CD cobre múltiplos domínios.
-
----
-
-**Questão 4 (10 pts)**  
-Em um arquivo Terraform, como suprimir corretamente o check `CKV_AWS_19` do Checkov para um bucket S3 de website público, sem afetar outros recursos?
-
-**a)** `# checkov:skip=CKV_AWS_19:Website público intencional — aprovado CISO 2025-04-24 SEC-0123`  
-**b)** `--skip-check CKV_AWS_19` no arquivo checkov.yaml global  
-**c)** `lifecycle { ignore_changes = [acl] }` no bloco Terraform  
-**d)** Remover o check CKV_AWS_19 da instalação do Checkov  
-
-**Gabarito: a)** A supressão inline via comentário `#checkov:skip=` é a prática recomendada porque: (1) está no código, junto ao recurso específico; (2) exige uma justificativa documentada; (3) é rastreável via git blame; (4) não afeta outros recursos. A opção b) afeta todos os buckets no projeto.
+**Gabarito: b)**
+Justificativa: Em Rego, quando `deny` é um conjunto vazio, significa que nenhuma condição de violação foi verdadeira. No framework Conftest/OPA, isso significa que a política passou — o recurso está conforme. Esse é o "closed world assumption" do Rego: o que não é explicitamente violado é considerado permitido. Não há erro de compilação — um conjunto vazio é um resultado válido.
 
 ---
 
-**Questão 5 (10 pts)**  
-No workflow GitHub Actions do Banco Meridian, qual é o papel do step "security-gate" ao final do pipeline?
+**Questão 3 (10 pts)**
+Um engenheiro está configurando o Checkov no pipeline IaC e precisa suprimir o check `CKV_AWS_144` apenas para um recurso específico que é uma exceção aprovada. Qual é a forma correta e auditável de fazer isso?
 
-**a)** Executar um scan adicional de vulnerabilidades  
-**b)** Enviar notificação por e-mail para o CISO  
-**c)** Verificar o resultado de todos os jobs anteriores e falhar o workflow se qualquer job crítico falhou, consolidando a decisão de bloqueio do PR  
-**d)** Gerar o relatório final em PDF para auditoria  
+**a)** Adicionar `CKV_AWS_144` ao skip-check global no `.checkov.yaml`
+**b)** Adicionar `#checkov:skip=CKV_AWS_144:motivo com ticket de aprovação` como comentário inline no recurso Terraform específico
+**c)** Usar `--skip-check CKV_AWS_144` na linha de comando do pipeline
+**d)** Remover o check da lista de checks a executar via API da Bridgecrew
 
-**Gabarito: c)** O security-gate é um job final que usa `needs: [checkov, tfsec, trivy-iac, conftest-opa]` e verifica os resultados de cada job. Ele consolida a decisão: se qualquer job crítico falhou, o gate falha e o PR permanece bloqueado. Isso garante que o desenvolvedor não pode ignorar um job específico.
+**Gabarito: b)**
+Justificativa: O inline skip com `#checkov:skip=CKV_AWS_144:justificativa` é a forma mais auditável porque está no git history junto com o código, o motivo é documentado, e a revisão de PR fica ciente. Skip global no `.checkov.yaml` ou via `--skip-check` na CLI remove o check para TODOS os recursos, perdendo cobertura para novos recursos que podem genuinamente precisar do check.
 
 ---
 
-**Questão 6 (10 pts)**  
-Qual é a diferença entre HashiCorp Sentinel e OPA/Conftest para Policy as Code?
+**Questão 4 (10 pts)**
+No workflow GitHub Actions do Banco Meridian, qual é a diferença entre `continue-on-error: true` e `continue-on-error: false` em um step de scan?
 
-**a)** Sentinel é open-source; OPA é proprietário e pago  
-**b)** Sentinel é integrado ao Terraform Cloud/Enterprise e aplica políticas em runs do Terraform; OPA/Conftest é uma solução open-source para CI/CD pipelines em qualquer contexto  
-**c)** Sentinel verifica apenas Kubernetes; OPA verifica apenas Terraform  
-**d)** Sentinel usa YAML; OPA usa Python  
+**a)** `continue-on-error: true` executa o próximo step somente se o atual passou; `false` sempre executa o próximo
+**b)** `continue-on-error: true` permite que o pipeline continue mesmo se o step retornar exit code 1 (a falha é registrada mas não bloqueia); `false` (padrão) para o job quando o step falha, marcando o check do PR como falha e impedindo o merge
+**c)** Não há diferença funcional — ambos têm o mesmo comportamento
+**d)** `continue-on-error: true` é usado apenas em steps de notificação, não em steps de scan
 
-**Gabarito: b)** Sentinel está embutido no Terraform Cloud e Enterprise — é executado automaticamente em cada run do Terraform sem necessidade de pipeline separado. OPA/Conftest é open-source e independente, podendo ser usado em qualquer CI/CD (GitHub Actions, GitLab, Jenkins) para qualquer tipo de arquivo, não apenas Terraform.
+**Gabarito: b)**
+Justificativa: `continue-on-error: true` é usado quando você quer que um step seja executado mas não bloqueie o pipeline em caso de falha — por exemplo, um step de scan de MEDIUM que apenas reporta mas não bloqueia. `continue-on-error: false` (padrão) significa que uma falha no step para o job e marca o PR check como falha. Para o security-gate do Banco Meridian, os steps de scan CRITICAL/HIGH devem ter `continue-on-error: false`.
+
+---
+
+**Questão 5 (10 pts)**
+No workflow GitHub Actions do Banco Meridian, o step "security-gate" verifica os resultados dos jobs anteriores. Por que é preferível ter este job separado em vez de cada scanner bloquear diretamente?
+
+**a)** Para economizar tempo de execução executando os scanners em paralelo
+**b)** Para que cada scanner bloqueie e o desenvolvedor precise verificar múltiplas mensagens de erro
+**c)** Para centralizar a decisão de bloqueio em um único ponto, fornecendo uma mensagem de erro unificada, instruções claras de correção, e simplificando o branch protection rule (que precisa exigir apenas o security-gate em vez dos 4 jobs de scanner)
+**d)** Para permitir que o merge aconteça mesmo quando há falhas nos scanners
+
+**Gabarito: c)**
+Justificativa: O security-gate centraliza a decisão em um ponto. Vantagens: (1) o branch protection rule exige apenas 1 check obrigatório em vez de 4; (2) a mensagem de erro é unificada e clara para o desenvolvedor; (3) se um scanner flakear (falha intermitente de infra), pode-se re-run apenas o security-gate sem re-executar todos os scanners; (4) lógica de decisão mais sofisticada (ex: "fail se 2 ou mais scanners falharem") pode ser implementada aqui.
+
+---
+
+**Questão 6 (10 pts)**
+Qual é a principal limitação do HashiCorp Sentinel em relação ao OPA/Conftest para o Banco Meridian?
+
+**a)** Sentinel não suporta Terraform — apenas funciona com CloudFormation
+**b)** Sentinel é integrado nativamente ao Terraform Cloud e Enterprise, mas é limitado ao ecossistema HashiCorp — não se integra com GitHub Actions, Jenkins ou GitLab CI de forma nativa como o OPA/Conftest
+**c)** Sentinel tem uma linguagem de policy mais difícil que Rego
+**d)** Sentinel é pago e OPA é gratuito — a diferença é apenas de custo
+
+**Gabarito: b)**
+Justificativa: Sentinel funciona apenas dentro do Terraform Cloud e Enterprise — as políticas são aplicadas automaticamente pelo Terraform Cloud antes de cada apply. Mas o Banco Meridian tem pipelines em diferentes sistemas. OPA/Conftest é agnóstico de plataforma — funciona com qualquer CI/CD e com qualquer arquivo de configuração. Para organizações que usam Terraform Cloud Enterprise, Sentinel e OPA/Conftest são complementares: Sentinel aplica as políticas "garantidas" no plan, e Conftest verifica no PR antes mesmo de chegar ao Terraform Cloud.
 
 ---
 
 ### Parte B — Análise de Cenário (40 pontos)
 
-**Cenário:** O time de plataforma do Banco Meridian decidiu implementar um processo de "Security as Code" onde todas as políticas de segurança cloud são versionadas como código, verificadas automaticamente em CI/CD, e evidenciadas para auditoria do BACEN.
+**Cenário:** O time de DevOps do Banco Meridian acabou de implementar o pipeline de IaC Security. Rafael (Security Engineer) revisou o pipeline e pediu para você:
 
-**Tarefa (2 perguntas, 20 pts cada):**
+1. Escrever uma política Rego completa e funcional que verifique se todos os recursos `aws_db_instance` (RDS) têm: `encrypted = true`, `deletion_protection = true`, `backup_retention_period` maior que 7 dias, e tag `Environment` presente
 
-1. Escreva uma política Rego completa e funcional que verifique se todos os recursos `aws_db_instance` (RDS) no Terraform têm:
-   - `encrypted = true`  
-   - `deletion_protection = true`  
-   - `backup_retention_period` maior que 7 (dias)  
-   - Tag `Environment` presente
+2. Desenhar o fluxo completo do pipeline DevSecOps do Banco Meridian para um desenvolvedor que faz uma alteração em um arquivo Terraform — desde o `git commit` até o deploy em produção, incluindo todos os gates de segurança
 
-2. Desenhe o fluxo completo do pipeline DevSecOps do Banco Meridian (do commit ao deploy) incluindo: onde cada ferramenta se encaixa, o que bloqueia o merge, o que apenas avisa, e quais evidências são geradas para auditoria BACEN
-
-**Gabarito:**
-
-1. **Política Rego:**
+**Gabarito Q1 — Política Rego Completa:**
 
 ```rego
 package terraform.aws.rds
+
+import future.keywords.in
 
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type == "aws_db_instance"
     not resource.change.after.encrypted == true
-    msg := sprintf("RDS '%v' não tem encrypted=true (BACEN Art. 5)", [resource.address])
+    msg := sprintf("RDS '%v': encrypted=true é obrigatório. Dados de clientes em banco sem criptografia violam BACEN Art. 5 e LGPD Art. 46.", [resource.address])
 }
 
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type == "aws_db_instance"
     not resource.change.after.deletion_protection == true
-    msg := sprintf("RDS '%v' não tem deletion_protection=true", [resource.address])
+    msg := sprintf("RDS '%v': deletion_protection=true é obrigatório. Banco de dados de produção deve ser protegido contra deleção acidental.", [resource.address])
 }
 
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type == "aws_db_instance"
-    resource.change.after.backup_retention_period <= 7
-    msg := sprintf("RDS '%v' tem backup_retention_period de %v dias — mínimo é 7 (BACEN Art. 10)",
-        [resource.address, resource.change.after.backup_retention_period])
+    backup_period := resource.change.after.backup_retention_period
+    backup_period <= 7
+    msg := sprintf("RDS '%v': backup_retention_period=%v é insuficiente. Mínimo: 7 dias (recomendado: 30 dias para RDS de produção).", [resource.address, backup_period])
 }
 
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type == "aws_db_instance"
     not resource.change.after.tags.Environment
-    msg := sprintf("RDS '%v' está faltando a tag obrigatória 'Environment'", [resource.address])
+    msg := sprintf("RDS '%v': tag 'Environment' obrigatória ausente.", [resource.address])
 }
 
-deny[msg] { msg := violations[_] }
+deny[msg] {
+    msg := violations[_]
+}
 ```
 
-2. **Fluxo pipeline:**
-   - IDE: tfsec extensão VS Code (warn inline)
-   - Pre-commit: Checkov (bloqueia commit com CRITICAL)
-   - PR aberta: GitHub Actions executa Checkov + tfsec + Trivy IaC + Conftest OPA
-   - Se CRITICAL/HIGH: PR bloqueada + comentário automático com findings
-   - Se apenas MEDIUM/LOW: PR aprovada com comentário de aviso
-   - Merge no main: trigger de deploy para staging com aprovação manual
-   - Evidências geradas: JUnit XML (Checkov), SARIF (tfsec/Trivy → GitHub Code Scanning), JSON (Conftest) — todos armazenados por 5 anos para auditoria BACEN
+**Gabarito Q2 — Fluxo do Pipeline DevSecOps:**
+
+```
+git commit → pre-commit hook (Checkov local, 3 segundos)
+    ↓ PASS
+git push → GitHub PR criado
+    ↓
+GitHub Actions pipeline (paralelo):
+    ├── Checkov (CRITICAL/HIGH bloqueantes)
+    ├── tfsec (CRITICAL/HIGH bloqueantes)
+    ├── Trivy IaC (CRITICAL/HIGH bloqueantes)
+    └── Conftest OPA (políticas customizadas BM)
+         ↓ Todos os jobs completam (com sucesso ou falha)
+    security-gate (agrega resultados)
+    ↓ PASS ou FAIL
+    ↓ PASS: PR disponível para revisão de código
+Code Review (desenvolvedor + security team)
+    ↓ APROVADO
+Merge para main
+    ↓
+Pipeline de deploy (terraform apply em staging)
+    ↓ DEPLOY STAGING
+Testes de integração + CSPM scan com Prowler
+    ↓ PASS
+Aprovação manual do CISO (para mudanças HIGH RISK)
+    ↓
+terraform apply em produção
+    ↓
+Runtime monitoring: Falco (comportamento) + Prowler (postura)
+```
 
 ---
 
-*Módulo 03 — IaC Security e Shift-Left*  
-*Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps*  
+*Módulo 03 — IaC Security e Shift-Left*
+*Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps*
 *CECyber — Educação Corporativa em Cibersegurança*
