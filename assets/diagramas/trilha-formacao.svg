@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="960" height="600" viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <!-- Fundo -->
+  <rect width="960" height="600" fill="#0a0f1e" rx="16"/>
+
+  <!-- Título -->
+  <text x="480" y="44" text-anchor="middle" font-size="22" font-weight="bold" fill="#ffffff">Trilhas de Formação — Security Operations em Nuvem</text>
+  <text x="480" y="66" text-anchor="middle" font-size="13" fill="#64748b">CECyber · Programa 40/40/20 · 140h Total</text>
+
+  <!-- Linha separadora -->
+  <line x1="40" y1="82" x2="920" y2="82" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- ===================== CURSOS (CAIXAS) ===================== -->
+
+  <!-- Curso 1: Google SecOps -->
+  <rect x="40" y="100" width="190" height="100" rx="12" fill="#1a2744" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="40" y="100" width="190" height="28" rx="12" fill="#2563eb"/>
+  <rect x="40" y="116" width="190" height="12" fill="#2563eb"/>
+  <text x="135" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#ffffff">CURSO 1</text>
+  <text x="135" y="148" text-anchor="middle" font-size="12" font-weight="bold" fill="#93c5fd">Google SecOps</text>
+  <text x="135" y="163" text-anchor="middle" font-size="11" fill="#60a5fa">Essentials</text>
+  <text x="135" y="183" text-anchor="middle" font-size="13" font-weight="bold" fill="#dbeafe">30h</text>
+  <text x="135" y="196" text-anchor="middle" font-size="10" fill="#64748b">12h · 12h · 6h</text>
+
+  <!-- Curso 2: Azure SecOps -->
+  <rect x="260" y="100" width="190" height="100" rx="12" fill="#1a1f3a" stroke="#7c3aed" stroke-width="2"/>
+  <rect x="260" y="100" width="190" height="28" rx="12" fill="#6d28d9"/>
+  <rect x="260" y="116" width="190" height="12" fill="#6d28d9"/>
+  <text x="355" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#ffffff">CURSO 2</text>
+  <text x="355" y="148" text-anchor="middle" font-size="12" font-weight="bold" fill="#c4b5fd">Microsoft Sentinel</text>
+  <text x="355" y="163" text-anchor="middle" font-size="11" fill="#a78bfa">&amp; Defender (Azure)</text>
+  <text x="355" y="183" text-anchor="middle" font-size="13" font-weight="bold" fill="#ede9fe">40h</text>
+  <text x="355" y="196" text-anchor="middle" font-size="10" fill="#64748b">16h · 16h · 8h</text>
+
+  <!-- Curso 3: AWS SecOps -->
+  <rect x="480" y="100" width="190" height="100" rx="12" fill="#1f1a12" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="480" y="100" width="190" height="28" rx="12" fill="#d97706"/>
+  <rect x="480" y="116" width="190" height="12" fill="#d97706"/>
+  <text x="575" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#ffffff">CURSO 3</text>
+  <text x="575" y="148" text-anchor="middle" font-size="12" font-weight="bold" fill="#fcd34d">AWS Cloud</text>
+  <text x="575" y="163" text-anchor="middle" font-size="11" fill="#fbbf24">Security Operations</text>
+  <text x="575" y="183" text-anchor="middle" font-size="13" font-weight="bold" fill="#fef3c7">40h</text>
+  <text x="575" y="196" text-anchor="middle" font-size="10" fill="#64748b">16h · 16h · 8h</text>
+
+  <!-- Curso 4: Cloud Security Tools -->
+  <rect x="700" y="100" width="220" height="100" rx="12" fill="#14291a" stroke="#22c55e" stroke-width="2"/>
+  <rect x="700" y="100" width="220" height="28" rx="12" fill="#16a34a"/>
+  <rect x="700" y="116" width="220" height="12" fill="#16a34a"/>
+  <text x="810" y="120" text-anchor="middle" font-size="11" font-weight="bold" fill="#ffffff">CURSO 4</text>
+  <text x="810" y="148" text-anchor="middle" font-size="12" font-weight="bold" fill="#86efac">Ferramentas de</text>
+  <text x="810" y="163" text-anchor="middle" font-size="11" fill="#4ade80">Cloud Security</text>
+  <text x="810" y="183" text-anchor="middle" font-size="13" font-weight="bold" fill="#dcfce7">30h</text>
+  <text x="810" y="196" text-anchor="middle" font-size="10" fill="#64748b">12h · 12h · 6h</text>
+
+  <!-- ===================== TRILHAS (LINHAS) ===================== -->
+
+  <!-- Linha de base das trilhas -->
+  <line x1="60" y1="215" x2="60" y2="240" stroke="#3b82f6" stroke-width="2"/>
+  <line x1="280" y1="215" x2="280" y2="240" stroke="#7c3aed" stroke-width="2"/>
+  <line x1="500" y1="215" x2="500" y2="240" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="720" y1="215" x2="720" y2="240" stroke="#22c55e" stroke-width="2"/>
+  <line x1="210" y1="215" x2="210" y2="240" stroke="#3b82f6" stroke-width="2"/>
+  <line x1="450" y1="215" x2="450" y2="240" stroke="#7c3aed" stroke-width="2"/>
+  <line x1="670" y1="215" x2="670" y2="240" stroke="#f59e0b" stroke-width="2"/>
+  <line x1="920" y1="215" x2="920" y2="240" stroke="#22c55e" stroke-width="2"/>
+
+  <!-- ===================== TRILHA 1: SINGLE-CLOUD ===================== -->
+  <rect x="40" y="250" width="820" height="85" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <rect x="40" y="250" width="7" height="85" rx="4" fill="#64748b"/>
+
+  <text x="68" y="280" font-size="14" font-weight="bold" fill="#94a3b8">TRILHA 1</text>
+  <text x="68" y="298" font-size="13" fill="#e2e8f0">SecOps Single-Cloud</text>
+  <text x="68" y="316" font-size="11" fill="#64748b">Para empresas que padronizaram em um único provedor · 30–40h · Escolha 1 dos 3 cursos cloud</text>
+
+  <!-- Opções da trilha 1 -->
+  <rect x="300" y="259" width="150" height="30" rx="6" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1"/>
+  <text x="375" y="278" text-anchor="middle" font-size="11" fill="#93c5fd">Opção A: Google (30h)</text>
+  <rect x="465" y="259" width="155" height="30" rx="6" fill="#3b0764" stroke="#7c3aed" stroke-width="1"/>
+  <text x="543" y="278" text-anchor="middle" font-size="11" fill="#c4b5fd">Opção B: Azure (40h) ★</text>
+  <rect x="635" y="259" width="150" height="30" rx="6" fill="#451a03" stroke="#f59e0b" stroke-width="1"/>
+  <text x="710" y="278" text-anchor="middle" font-size="11" fill="#fcd34d">Opção C: AWS (40h)</text>
+  <text x="810" y="278" font-size="9" fill="#64748b">★ Recomendado para setor financeiro</text>
+
+  <!-- ===================== TRILHA 2: MULTI-CLOUD ===================== -->
+  <rect x="40" y="348" width="820" height="85" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <rect x="40" y="348" width="7" height="85" rx="4" fill="#818cf8"/>
+
+  <text x="68" y="378" font-size="14" font-weight="bold" fill="#818cf8">TRILHA 2</text>
+  <text x="68" y="396" font-size="13" fill="#e2e8f0">SecOps Multi-Cloud</text>
+  <text x="68" y="414" font-size="11" fill="#64748b">Para bancos e seguradoras multi-cloud · 80–110h · Azure + AWS + (opcional) Google</text>
+
+  <!-- Opções da trilha 2 -->
+  <rect x="300" y="357" width="210" height="30" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="1"/>
+  <text x="405" y="376" text-anchor="middle" font-size="11" fill="#a5b4fc">Azure + AWS → 80h</text>
+  <rect x="525" y="357" width="250" height="30" rx="6" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="650" y="376" text-anchor="middle" font-size="11" fill="#818cf8">+ Google SecOps → 110h (expandida)</text>
+
+  <!-- ===================== TRILHA 3: ARCHITECT ===================== -->
+  <rect x="40" y="446" width="820" height="85" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <rect x="40" y="446" width="7" height="85" rx="4" fill="#22c55e"/>
+
+  <text x="68" y="476" font-size="14" font-weight="bold" fill="#22c55e">TRILHA 3</text>
+  <text x="68" y="494" font-size="13" fill="#e2e8f0">Cloud Security Architect</text>
+  <text x="68" y="512" font-size="11" fill="#64748b">Para arquitetos e líderes técnicos · 60–140h · Head of Cloud Security / pipeline CISO</text>
+
+  <!-- Opções da trilha 3 -->
+  <rect x="300" y="455" width="240" height="30" rx="6" fill="#052e16" stroke="#22c55e" stroke-width="1"/>
+  <text x="420" y="474" text-anchor="middle" font-size="11" fill="#86efac">Ferramentas + 1 curso SecOps → 60–70h</text>
+  <rect x="555" y="455" width="220" height="30" rx="6" fill="#052e16" stroke="#16a34a" stroke-width="1"/>
+  <text x="665" y="474" text-anchor="middle" font-size="11" fill="#4ade80">4 Cursos (completo) → 140h</text>
+
+  <!-- ===================== LEGENDA / TOTAIS ===================== -->
+  <rect x="40" y="548" width="820" height="40" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="140" y="572" text-anchor="middle" font-size="12" fill="#94a3b8">Total do Programa:</text>
+  <text x="270" y="572" text-anchor="middle" font-size="13" font-weight="bold" fill="#f1f5f9">140h</text>
+  <text x="370" y="572" text-anchor="middle" font-size="12" fill="#3b82f6">Video: 56h</text>
+  <text x="480" y="572" text-anchor="middle" font-size="12" fill="#22c55e">Labs: 56h</text>
+  <text x="580" y="572" text-anchor="middle" font-size="12" fill="#a855f7">Live: 28h</text>
+  <text x="720" y="572" text-anchor="middle" font-size="11" fill="#64748b">Certificações: SC-200 · AWS Specialty · GCP Security Eng. · CCSP</text>
+</svg>

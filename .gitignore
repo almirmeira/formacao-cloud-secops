@@ -1,0 +1,57 @@
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs e editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Dados sensíveis (nunca versionar credenciais!)
+*.env
+.env.local
+.env.*.local
+credenciais/
+credentials/
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Logs locais
+*.log
+logs/
+
+# Dependências
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+
+# Arquivos temporários de laboratório
+/tmp/
+/temp/
+lab-workspace/
+sandbox/
+
+# Dados sintéticos comprimidos (grandes demais para Git)
+*.tar.gz
+*.zip
+*.7z
+
+# Outputs de scripts
+*.out
+*.results
+
+# Arquivos de curso específicos do aluno (não versionar)
+aluno-workspace/
+meus-labs/
+minha-solucao/
