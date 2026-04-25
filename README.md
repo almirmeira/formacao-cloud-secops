@@ -61,6 +61,44 @@ O diagrama abaixo representa a **visão arquitetural completa** do ambiente de C
 
 ---
 
+## Arquitetura do Banco Meridian (Cenário de Laboratório)
+
+Todos os laboratórios e capstones do programa utilizam o **Banco Meridian** — uma instituição financeira fictícia — como cenário padrão. O diagrama abaixo mostra a infraestrutura completa usada nos exercícios práticos.
+
+![Arquitetura Banco Meridian](assets/diagramas/arquitetura-banco-meridian.svg)
+
+---
+
+## Fluxo Pedagógico — Estrutura de Cada Módulo
+
+Cada módulo dos 4 cursos segue esta estrutura pedagógica padrão:
+
+![Fluxo Pedagógico Padrão](assets/diagramas/fluxo-modulo-padrao.svg)
+
+---
+
+## Pipeline DevSecOps — Shift-Left Security (Curso 4)
+
+O Curso 4 aborda o pipeline completo de segurança para ambientes cloud-native:
+
+![Pipeline DevSecOps](assets/diagramas/devsecops-pipeline.svg)
+
+---
+
+## Kill Chain APT — Cenário Capstone
+
+Todos os capstones dos cursos reproduzem variações desta kill chain contra o Banco Meridian:
+
+![Kill Chain Banco Meridian](assets/diagramas/kill-chain-banco-meridian.svg)
+
+---
+
+## Ciclo de Incident Response (NIST SP 800-61 adaptado para Cloud)
+
+![Ciclo de Incident Response](assets/diagramas/ciclo-incident-response.svg)
+
+---
+
 ## Trilhas de Formação
 
 ![Trilhas de Formação](assets/diagramas/trilha-formacao.svg)
@@ -114,6 +152,18 @@ Para arquitetos e líderes técnicos responsáveis por estratégia, ferramental 
   AWS Cloud Practitioner (CLF-C02), AZ-900 ou Google Cloud Digital Leader
 - Familiaridade com conceitos de logs, redes TCP/IP e linha de comando (bash / PowerShell)
 - Noções de MITRE ATT&CK *(apresentadas nos módulos introdutórios quando necessário)*
+
+---
+
+## Roadmap de Certificações
+
+![Roadmap de Certificações](assets/diagramas/roadmap-certificacoes.svg)
+
+---
+
+## Cobertura MITRE ATT&CK
+
+![Cobertura MITRE ATT&CK](assets/diagramas/mitre-attack-cobertura.svg)
 
 ---
 
