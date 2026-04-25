@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1000" height="520" viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <rect width="1000" height="520" fill="#08101c" rx="16"/>
+  <text x="500" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#f1f5f9">Pipeline DevSecOps — Shift-Left Security em Cloud</text>
+  <text x="500" y="56" text-anchor="middle" font-size="11" fill="#64748b">CECyber · Curso 4 · CNAPP, IaC e DevSecOps · Ferramentas open-source e comerciais</text>
+  <line x1="20" y1="68" x2="980" y2="68" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- ETAPA 1: CODE -->
+  <rect x="20" y="88" width="130" height="280" rx="10" fill="#0f1928" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="20" y="88" width="130" height="28" rx="10" fill="#1d4ed8"/>
+  <rect x="20" y="104" width="130" height="12" fill="#1d4ed8"/>
+  <text x="85" y="106" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">CODE</text>
+  <text x="85" y="130" text-anchor="middle" font-size="9" font-weight="bold" fill="#60a5fa">IaC Security</text>
+  <text x="30" y="148" font-size="8" fill="#93c5fd">• Checkov</text>
+  <text x="30" y="162" font-size="8" fill="#93c5fd">• tfsec</text>
+  <text x="30" y="176" font-size="8" fill="#93c5fd">• KICS</text>
+  <text x="30" y="190" font-size="8" fill="#93c5fd">• Trivy (IaC)</text>
+  <text x="30" y="210" font-size="9" font-weight="bold" fill="#60a5fa">Policy as Code</text>
+  <text x="30" y="226" font-size="8" fill="#93c5fd">• OPA + Rego</text>
+  <text x="30" y="240" font-size="8" fill="#93c5fd">• Conftest</text>
+  <text x="30" y="254" font-size="8" fill="#93c5fd">• HashiCorp</text>
+  <text x="30" y="266" font-size="8" fill="#93c5fd">  Sentinel</text>
+  <text x="30" y="286" font-size="9" font-weight="bold" fill="#60a5fa">Secrets</text>
+  <text x="30" y="302" font-size="8" fill="#93c5fd">• detect-secrets</text>
+  <text x="30" y="316" font-size="8" fill="#93c5fd">• gitleaks</text>
+  <text x="30" y="330" font-size="8" fill="#93c5fd">• truffleHog</text>
+  <text x="85" y="356" text-anchor="middle" font-size="9" fill="#1d4ed8">Desenvolvedor</text>
+  <text x="85" y="368" text-anchor="middle" font-size="9" fill="#1d4ed8">corrige antes</text>
+  <text x="85" y="380" text-anchor="middle" font-size="9" fill="#1d4ed8">do PR/merge</text>
+
+  <!-- Seta -->
+  <line x1="150" y1="228" x2="178" y2="228" stroke="#334155" stroke-width="2" marker-end="url(#arr-main)"/>
+
+  <!-- ETAPA 2: BUILD -->
+  <rect x="178" y="88" width="130" height="280" rx="10" fill="#0f1928" stroke="#22c55e" stroke-width="2"/>
+  <rect x="178" y="88" width="130" height="28" rx="10" fill="#15803d"/>
+  <rect x="178" y="104" width="130" height="12" fill="#15803d"/>
+  <text x="243" y="106" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">BUILD</text>
+  <text x="243" y="130" text-anchor="middle" font-size="9" font-weight="bold" fill="#86efac">Container Build</text>
+  <text x="188" y="148" font-size="8" fill="#bbf7d0">• Docker build</text>
+  <text x="188" y="162" font-size="8" fill="#bbf7d0">• Multi-stage</text>
+  <text x="188" y="176" font-size="8" fill="#bbf7d0">• Distroless base</text>
+  <text x="188" y="190" font-size="8" fill="#bbf7d0">• Non-root user</text>
+  <text x="188" y="210" font-size="9" font-weight="bold" fill="#86efac">Image Scanning</text>
+  <text x="188" y="226" font-size="8" fill="#bbf7d0">• Trivy (OS + libs)</text>
+  <text x="188" y="240" font-size="8" fill="#bbf7d0">• Grype</text>
+  <text x="188" y="254" font-size="8" fill="#bbf7d0">• Snyk Container</text>
+  <text x="188" y="274" font-size="9" font-weight="bold" fill="#86efac">SBOM</text>
+  <text x="188" y="290" font-size="8" fill="#bbf7d0">• Syft (CycloneDX)</text>
+  <text x="188" y="304" font-size="8" fill="#bbf7d0">• SPDX format</text>
+  <text x="243" y="356" text-anchor="middle" font-size="9" fill="#15803d">Falha se CRITICAL</text>
+  <text x="243" y="368" text-anchor="middle" font-size="9" fill="#15803d">CVE bloqueante</text>
+  <text x="243" y="380" text-anchor="middle" font-size="9" fill="#15803d">no PR/merge</text>
+
+  <!-- Seta -->
+  <line x1="308" y1="228" x2="336" y2="228" stroke="#334155" stroke-width="2" marker-end="url(#arr-main)"/>
+
+  <!-- ETAPA 3: SIGN + PUSH -->
+  <rect x="336" y="88" width="130" height="280" rx="10" fill="#1a1000" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="336" y="88" width="130" height="28" rx="10" fill="#b45309"/>
+  <rect x="336" y="104" width="130" height="12" fill="#b45309"/>
+  <text x="401" y="106" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">SIGN + PUSH</text>
+  <text x="401" y="130" text-anchor="middle" font-size="9" font-weight="bold" fill="#fcd34d">Image Signing</text>
+  <text x="346" y="148" font-size="8" fill="#fde68a">• Cosign (Sigstore)</text>
+  <text x="346" y="162" font-size="8" fill="#fde68a">• Keyless (OIDC)</text>
+  <text x="346" y="176" font-size="8" fill="#fde68a">• Attestation SBOM</text>
+  <text x="346" y="190" font-size="8" fill="#fde68a">• Transparency log</text>
+  <text x="346" y="210" font-size="9" font-weight="bold" fill="#fcd34d">Registry</text>
+  <text x="346" y="226" font-size="8" fill="#fde68a">• Amazon ECR</text>
+  <text x="346" y="240" font-size="8" fill="#fde68a">• Azure ACR</text>
+  <text x="346" y="254" font-size="8" fill="#fde68a">• GCR / Artifact</text>
+  <text x="346" y="274" font-size="9" font-weight="bold" fill="#fcd34d">SLSA Level</text>
+  <text x="346" y="290" font-size="8" fill="#fde68a">• Build provenance</text>
+  <text x="346" y="304" font-size="8" fill="#fde68a">• Supply chain sec.</text>
+  <text x="401" y="356" text-anchor="middle" font-size="9" fill="#b45309">Apenas imagens</text>
+  <text x="401" y="368" text-anchor="middle" font-size="9" fill="#b45309">assinadas fazem</text>
+  <text x="401" y="380" text-anchor="middle" font-size="9" fill="#b45309">push para registry</text>
+
+  <!-- Seta -->
+  <line x1="466" y1="228" x2="494" y2="228" stroke="#334155" stroke-width="2" marker-end="url(#arr-main)"/>
+
+  <!-- ETAPA 4: DEPLOY (Admission Control) -->
+  <rect x="494" y="88" width="130" height="280" rx="10" fill="#150a1a" stroke="#9333ea" stroke-width="2"/>
+  <rect x="494" y="88" width="130" height="28" rx="10" fill="#6d28d9"/>
+  <rect x="494" y="104" width="130" height="12" fill="#6d28d9"/>
+  <text x="559" y="106" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">DEPLOY</text>
+  <text x="559" y="130" text-anchor="middle" font-size="9" font-weight="bold" fill="#c4b5fd">Verify + Admit</text>
+  <text x="504" y="148" font-size="8" fill="#ddd6fe">• Verificar assinatura</text>
+  <text x="504" y="162" font-size="8" fill="#ddd6fe">  Cosign antes deploy</text>
+  <text x="504" y="182" font-size="9" font-weight="bold" fill="#c4b5fd">Admission Control</text>
+  <text x="504" y="198" font-size="8" fill="#ddd6fe">• Kyverno policies</text>
+  <text x="504" y="212" font-size="8" fill="#ddd6fe">• OPA Gatekeeper</text>
+  <text x="504" y="226" font-size="8" fill="#ddd6fe">• Non-root enforce</text>
+  <text x="504" y="240" font-size="8" fill="#ddd6fe">• Resource limits</text>
+  <text x="504" y="254" font-size="8" fill="#ddd6fe">• No hostPath</text>
+  <text x="504" y="274" font-size="9" font-weight="bold" fill="#c4b5fd">K8s Security</text>
+  <text x="504" y="290" font-size="8" fill="#ddd6fe">• Pod Security Std.</text>
+  <text x="504" y="304" font-size="8" fill="#ddd6fe">• NetworkPolicy</text>
+  <text x="504" y="318" font-size="8" fill="#ddd6fe">• RBAC mínimo</text>
+  <text x="559" y="360" text-anchor="middle" font-size="9" fill="#6d28d9">Deploy rejeitado</text>
+  <text x="559" y="372" text-anchor="middle" font-size="9" fill="#6d28d9">se violar políticas</text>
+
+  <!-- Seta -->
+  <line x1="624" y1="228" x2="652" y2="228" stroke="#334155" stroke-width="2" marker-end="url(#arr-main)"/>
+
+  <!-- ETAPA 5: RUNTIME -->
+  <rect x="652" y="88" width="130" height="280" rx="10" fill="#1a0a0a" stroke="#ef4444" stroke-width="2"/>
+  <rect x="652" y="88" width="130" height="28" rx="10" fill="#b91c1c"/>
+  <rect x="652" y="104" width="130" height="12" fill="#b91c1c"/>
+  <text x="717" y="106" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">RUNTIME</text>
+  <text x="717" y="130" text-anchor="middle" font-size="9" font-weight="bold" fill="#fca5a5">Threat Detection</text>
+  <text x="662" y="148" font-size="8" fill="#fecaca">• Falco (eBPF)</text>
+  <text x="662" y="162" font-size="8" fill="#fecaca">• Sysdig Secure</text>
+  <text x="662" y="176" font-size="8" fill="#fecaca">• Aqua Security</text>
+  <text x="662" y="196" font-size="9" font-weight="bold" fill="#fca5a5">Postura (CSPM)</text>
+  <text x="662" y="212" font-size="8" fill="#fecaca">• Prowler (AWS)</text>
+  <text x="662" y="226" font-size="8" fill="#fecaca">• Wiz / Orca</text>
+  <text x="662" y="240" font-size="8" fill="#fecaca">• Defender for Cloud</text>
+  <text x="662" y="260" font-size="9" font-weight="bold" fill="#fca5a5">CWPP</text>
+  <text x="662" y="276" font-size="8" fill="#fecaca">• Network policies</text>
+  <text x="662" y="290" font-size="8" fill="#fecaca">• Secrets rotation</text>
+  <text x="662" y="304" font-size="8" fill="#fecaca">• Vault / KMS</text>
+  <text x="717" y="352" text-anchor="middle" font-size="9" fill="#b91c1c">Alert → SIEM →</text>
+  <text x="717" y="364" text-anchor="middle" font-size="9" fill="#b91c1c">SOAR → resposta</text>
+  <text x="717" y="376" text-anchor="middle" font-size="9" fill="#b91c1c">automatizada</text>
+
+  <!-- Seta -->
+  <line x1="782" y1="228" x2="810" y2="228" stroke="#334155" stroke-width="2" marker-end="url(#arr-main)"/>
+
+  <!-- ETAPA 6: MONITOR + LEARN -->
+  <rect x="810" y="88" width="170" height="280" rx="10" fill="#0a1a12" stroke="#10b981" stroke-width="2"/>
+  <rect x="810" y="88" width="170" height="28" rx="10" fill="#047857"/>
+  <rect x="810" y="104" width="170" height="12" fill="#047857"/>
+  <text x="895" y="106" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">MONITOR + LEARN</text>
+  <text x="895" y="130" text-anchor="middle" font-size="9" font-weight="bold" fill="#6ee7b7">SIEM Alerts</text>
+  <text x="820" y="148" font-size="8" fill="#a7f3d0">• GuardDuty findings</text>
+  <text x="820" y="162" font-size="8" fill="#a7f3d0">• Sentinel alerts</text>
+  <text x="820" y="176" font-size="8" fill="#a7f3d0">• Chronicle YARA-L</text>
+  <text x="820" y="196" font-size="9" font-weight="bold" fill="#6ee7b7">SOAR Response</text>
+  <text x="820" y="212" font-size="8" fill="#a7f3d0">• Logic Apps / Playbooks</text>
+  <text x="820" y="226" font-size="8" fill="#a7f3d0">• Auto-remediation</text>
+  <text x="820" y="240" font-size="8" fill="#a7f3d0">• Ticket criação</text>
+  <text x="820" y="260" font-size="9" font-weight="bold" fill="#6ee7b7">Métricas</text>
+  <text x="820" y="276" font-size="8" fill="#a7f3d0">• MTTD / MTTR</text>
+  <text x="820" y="290" font-size="8" fill="#a7f3d0">• Vulnerability SLA</text>
+  <text x="820" y="304" font-size="8" fill="#a7f3d0">• Compliance score</text>
+  <text x="820" y="320" font-size="8" fill="#a7f3d0">• Pipeline pass rate</text>
+  <text x="895" y="354" text-anchor="middle" font-size="9" fill="#047857">Lições aprendidas</text>
+  <text x="895" y="366" text-anchor="middle" font-size="9" fill="#047857">→ novas policies</text>
+  <text x="895" y="378" text-anchor="middle" font-size="9" fill="#047857">→ ciclo melhora</text>
+
+  <!-- Área inferior: fluxo de feedback -->
+  <rect x="20" y="400" width="960" height="100" rx="10" fill="#0c1628" stroke="#1e293b" stroke-width="1.5"/>
+  <text x="500" y="422" text-anchor="middle" font-size="12" font-weight="bold" fill="#64748b">Feedback Loop — Cada Finding Melhora o Pipeline</text>
+
+  <!-- Blocos do feedback -->
+  <rect x="30" y="432" width="140" height="50" rx="6" fill="#1e293b" stroke="#3b82f6" stroke-width="1"/>
+  <text x="100" y="451" text-anchor="middle" font-size="9" fill="#93c5fd">Vuln em produção</text>
+  <text x="100" y="465" text-anchor="middle" font-size="8" fill="#64748b">→ nova Checkov policy</text>
+  <text x="100" y="478" text-anchor="middle" font-size="8" fill="#64748b">  para bloqueio futuro</text>
+
+  <rect x="185" y="432" width="140" height="50" rx="6" fill="#1e293b" stroke="#22c55e" stroke-width="1"/>
+  <text x="255" y="451" text-anchor="middle" font-size="9" fill="#86efac">CVE em imagem</text>
+  <text x="255" y="465" text-anchor="middle" font-size="8" fill="#64748b">→ trigger rebuild + rescan</text>
+  <text x="255" y="478" text-anchor="middle" font-size="8" fill="#64748b">  automático</text>
+
+  <rect x="340" y="432" width="140" height="50" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1"/>
+  <text x="410" y="451" text-anchor="middle" font-size="9" fill="#fcd34d">Secret detectado</text>
+  <text x="410" y="465" text-anchor="middle" font-size="8" fill="#64748b">→ rotação imediata +</text>
+  <text x="410" y="478" text-anchor="middle" font-size="8" fill="#64748b">  bloqueio do commit</text>
+
+  <rect x="495" y="432" width="140" height="50" rx="6" fill="#1e293b" stroke="#9333ea" stroke-width="1"/>
+  <text x="565" y="451" text-anchor="middle" font-size="9" fill="#c4b5fd">Pod policy violation</text>
+  <text x="565" y="465" text-anchor="middle" font-size="8" fill="#64748b">→ nova Kyverno rule</text>
+  <text x="565" y="478" text-anchor="middle" font-size="8" fill="#64748b">  + alertar dev team</text>
+
+  <rect x="650" y="432" width="140" height="50" rx="6" fill="#1e293b" stroke="#ef4444" stroke-width="1"/>
+  <text x="720" y="451" text-anchor="middle" font-size="9" fill="#fca5a5">Runtime anomalia</text>
+  <text x="720" y="465" text-anchor="middle" font-size="8" fill="#64748b">→ nova Falco rule +</text>
+  <text x="720" y="478" text-anchor="middle" font-size="8" fill="#64748b">  YARA-L/KQL analytic</text>
+
+  <rect x="805" y="432" width="165" height="50" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="1"/>
+  <text x="888" y="451" text-anchor="middle" font-size="9" fill="#6ee7b7">Incident em produção</text>
+  <text x="888" y="465" text-anchor="middle" font-size="8" fill="#64748b">→ relatório pós-mortem +</text>
+  <text x="888" y="478" text-anchor="middle" font-size="8" fill="#64748b">  melhoria em todas as fases</text>
+
+  <defs>
+    <marker id="arr-main" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#475569"/>
+    </marker>
+  </defs>
+</svg>

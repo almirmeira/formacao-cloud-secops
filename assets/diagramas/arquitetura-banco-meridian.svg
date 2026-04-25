@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1000" height="680" viewBox="0 0 1000 680" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <rect width="1000" height="680" fill="#060d1a" rx="16"/>
+
+  <!-- Título -->
+  <text x="500" y="36" text-anchor="middle" font-size="18" font-weight="bold" fill="#f1f5f9">Arquitetura de TI — Banco Meridian (Empresa Fictícia)</text>
+  <text x="500" y="56" text-anchor="middle" font-size="11" fill="#64748b">Cenário padrão de todos os laboratórios · Ambiente multi-cloud híbrido · CECyber</text>
+  <line x1="20" y1="68" x2="980" y2="68" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Legenda de cursos -->
+  <rect x="20" y="74" width="12" height="12" fill="#4285f4"/>
+  <text x="36" y="84" font-size="9" fill="#94a3b8">Curso 1 (GCP/Chronicle)</text>
+  <rect x="200" y="74" width="12" height="12" fill="#0078d4"/>
+  <text x="216" y="84" font-size="9" fill="#94a3b8">Curso 2 (Azure/Sentinel)</text>
+  <rect x="390" y="74" width="12" height="12" fill="#ff9900"/>
+  <text x="406" y="84" font-size="9" fill="#94a3b8">Curso 3 (AWS)</text>
+  <rect x="530" y="74" width="12" height="12" fill="#22c55e"/>
+  <text x="546" y="84" font-size="9" fill="#94a3b8">Curso 4 (CNAPP/DevSecOps)</text>
+
+  <!-- ============ USUÁRIOS / INTERNET ============ -->
+  <ellipse cx="500" cy="118" rx="130" ry="24" fill="#1a0a0a" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="500" y="114" text-anchor="middle" font-size="11" font-weight="bold" fill="#ef4444">INTERNET · AMEAÇAS</text>
+  <text x="500" y="130" text-anchor="middle" font-size="9" fill="#fca5a5">APTs · Ransomware · Phishing · Script Kiddies</text>
+
+  <!-- ============ CAMADA DE BORDA ============ -->
+  <rect x="20" y="156" width="960" height="64" rx="8" fill="#1a1000" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="500" y="174" text-anchor="middle" font-size="11" font-weight="bold" fill="#fbbf24">CAMADA DE BORDA E PROTEÇÃO PERIMETRAL</text>
+  <text x="110" y="196" text-anchor="middle" font-size="9" fill="#fde68a">AWS WAF + Shield</text>
+  <text x="260" y="196" text-anchor="middle" font-size="9" fill="#fde68a">Azure WAF + DDoS</text>
+  <text x="410" y="196" text-anchor="middle" font-size="9" fill="#fde68a">Cloudflare CDN</text>
+  <text x="570" y="196" text-anchor="middle" font-size="9" fill="#fde68a">Zscaler ZIA (SSE)</text>
+  <text x="730" y="196" text-anchor="middle" font-size="9" fill="#fde68a">DNS Firewall Route53</text>
+  <text x="890" y="196" text-anchor="middle" font-size="9" fill="#fde68a">Azure Front Door</text>
+
+  <!-- ============ GOOGLE CLOUD ============ -->
+  <rect x="20" y="234" width="200" height="200" rx="10" fill="#0a1a35" stroke="#4285f4" stroke-width="2"/>
+  <rect x="20" y="234" width="200" height="26" rx="10" fill="#1a73e8"/>
+  <rect x="20" y="248" width="200" height="12" fill="#1a73e8"/>
+  <text x="120" y="252" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">GOOGLE CLOUD (GCP)</text>
+  <text x="30" y="278" font-size="9" fill="#93c5fd">📊 Analytics workloads (BigQuery)</text>
+  <text x="30" y="294" font-size="9" fill="#93c5fd">☁️ Google Kubernetes Engine</text>
+  <text x="30" y="310" font-size="9" fill="#93c5fd">🗄️ Cloud Storage (dados analíticos)</text>
+  <text x="30" y="330" font-size="9" font-weight="bold" fill="#60a5fa">SecOps (Curso 1):</text>
+  <text x="30" y="346" font-size="9" fill="#93c5fd">🔍 Google SecOps (Chronicle)</text>
+  <text x="30" y="362" font-size="9" fill="#93c5fd">🛡️ GCP Security Command Center</text>
+  <text x="30" y="378" font-size="9" fill="#93c5fd">🔎 Cloud Armor</text>
+  <text x="30" y="394" font-size="9" fill="#93c5fd">🧠 Mandiant TI + VirusTotal</text>
+  <text x="30" y="414" font-size="8" fill="#4285f4">SIEM: Google SecOps + YARA-L</text>
+
+  <!-- ============ MICROSOFT 365 + AZURE ============ -->
+  <rect x="235" y="234" width="220" height="200" rx="10" fill="#14103a" stroke="#0078d4" stroke-width="2"/>
+  <rect x="235" y="234" width="220" height="26" rx="10" fill="#0f6cbd"/>
+  <rect x="235" y="248" width="220" height="12" fill="#0f6cbd"/>
+  <text x="345" y="252" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">MICROSOFT 365 + AZURE</text>
+  <text x="245" y="278" font-size="9" fill="#a5b4fc">📧 Exchange Online (6.200 caixas)</text>
+  <text x="245" y="294" font-size="9" fill="#a5b4fc">📁 SharePoint + OneDrive</text>
+  <text x="245" y="310" font-size="9" fill="#a5b4fc">🪟 Azure VMs (DC, apps)</text>
+  <text x="245" y="326" font-size="9" fill="#a5b4fc">🔐 Entra ID (2.800 usuários)</text>
+  <text x="245" y="346" font-size="9" font-weight="bold" fill="#818cf8">SecOps (Curso 2):</text>
+  <text x="245" y="362" font-size="9" fill="#a5b4fc">📡 Microsoft Sentinel (SIEM/SOAR)</text>
+  <text x="245" y="378" font-size="9" fill="#a5b4fc">🛡️ Defender XDR (MDE+MDI+MDO)</text>
+  <text x="245" y="394" font-size="9" fill="#a5b4fc">☁️ Defender for Cloud (CSPM)</text>
+  <text x="245" y="414" font-size="8" fill="#0078d4">SIEM: Sentinel + KQL Analytics</text>
+
+  <!-- ============ AWS ============ -->
+  <rect x="470" y="234" width="220" height="200" rx="10" fill="#1f1000" stroke="#ff9900" stroke-width="2"/>
+  <rect x="470" y="234" width="220" height="26" rx="10" fill="#cc7a00"/>
+  <rect x="470" y="248" width="220" height="12" fill="#cc7a00"/>
+  <text x="580" y="252" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">AMAZON AWS (Multi-Conta)</text>
+  <text x="480" y="278" font-size="9" fill="#fcd34d">🖥️ EC2 (core banking workloads)</text>
+  <text x="480" y="294" font-size="9" fill="#fcd34d">🐳 EKS (containerized services)</text>
+  <text x="480" y="310" font-size="9" fill="#fcd34d">🪣 S3 (dados financeiros)</text>
+  <text x="480" y="326" font-size="9" fill="#fcd34d">⚡ Lambda (APIs e automações)</text>
+  <text x="480" y="346" font-size="9" font-weight="bold" fill="#fbbf24">SecOps (Curso 3):</text>
+  <text x="480" y="362" font-size="9" fill="#fcd34d">🔍 GuardDuty (org-wide)</text>
+  <text x="480" y="378" font-size="9" fill="#fcd34d">🏛️ Security Hub + Config</text>
+  <text x="480" y="394" font-size="9" fill="#fcd34d">🕵️ Amazon Detective</text>
+  <text x="480" y="414" font-size="8" fill="#ff9900">4 Contas: Mgmt/Audit/Logs/Prod</text>
+
+  <!-- ============ ON-PREMISES ============ -->
+  <rect x="705" y="234" width="275" height="200" rx="10" fill="#0f1a0f" stroke="#22c55e" stroke-width="2" stroke-dasharray="6,3"/>
+  <rect x="705" y="234" width="275" height="26" rx="10" fill="#15803d"/>
+  <rect x="705" y="248" width="275" height="12" fill="#15803d"/>
+  <text x="843" y="252" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">ON-PREMISES / DATACENTER</text>
+  <text x="715" y="278" font-size="9" fill="#86efac">🏗️ VMware vSphere 7.0</text>
+  <text x="715" y="294" font-size="9" fill="#86efac">🗄️ Core Banking Legado (Tópus)</text>
+  <text x="715" y="310" font-size="9" fill="#86efac">🏢 12 filiais (VPN + MPLS)</text>
+  <text x="715" y="326" font-size="9" fill="#86efac">🖥️ 2.800 endpoints Windows</text>
+  <text x="715" y="346" font-size="9" font-weight="bold" fill="#4ade80">DevSecOps (Curso 4):</text>
+  <text x="715" y="362" font-size="9" fill="#86efac">🔒 Kubernetes cluster (EKS/AKS)</text>
+  <text x="715" y="378" font-size="9" fill="#86efac">🦅 Falco (runtime security)</text>
+  <text x="715" y="394" font-size="9" fill="#86efac">🏛️ HashiCorp Vault (secrets)</text>
+  <text x="715" y="414" font-size="8" fill="#16a34a">Conectores: Bindplane / Arc / AMA</text>
+
+  <!-- ============ SOC CENTRALIZADO ============ -->
+  <rect x="20" y="450" width="960" height="90" rx="10" fill="#0c1628" stroke="#6366f1" stroke-width="2"/>
+  <text x="500" y="472" text-anchor="middle" font-size="13" font-weight="bold" fill="#a5b4fc">SOC CENTRALIZADO — BANCO MERIDIAN</text>
+  <text x="100" y="498" text-anchor="middle" font-size="9" fill="#818cf8">SIEM/SOAR</text>
+  <text x="100" y="513" text-anchor="middle" font-size="9" fill="#64748b">Chronicle + Sentinel</text>
+  <text x="100" y="526" text-anchor="middle" font-size="9" fill="#64748b">+GuardDuty</text>
+  <text x="280" y="498" text-anchor="middle" font-size="9" fill="#818cf8">EDR/XDR</text>
+  <text x="280" y="513" text-anchor="middle" font-size="9" fill="#64748b">Defender XDR</text>
+  <text x="280" y="526" text-anchor="middle" font-size="9" fill="#64748b">+ CrowdStrike</text>
+  <text x="460" y="498" text-anchor="middle" font-size="9" fill="#818cf8">Threat Intel</text>
+  <text x="460" y="513" text-anchor="middle" font-size="9" fill="#64748b">Mandiant +</text>
+  <text x="460" y="526" text-anchor="middle" font-size="9" fill="#64748b">VirusTotal</text>
+  <text x="630" y="498" text-anchor="middle" font-size="9" fill="#818cf8">CSPM/CNAPP</text>
+  <text x="630" y="513" text-anchor="middle" font-size="9" fill="#64748b">Wiz + Prowler</text>
+  <text x="630" y="526" text-anchor="middle" font-size="9" fill="#64748b">+Defender Cloud</text>
+  <text x="810" y="498" text-anchor="middle" font-size="9" fill="#818cf8">IAM/CIEM</text>
+  <text x="810" y="513" text-anchor="middle" font-size="9" fill="#64748b">Entra PIM +</text>
+  <text x="810" y="526" text-anchor="middle" font-size="9" fill="#64748b">AWS IAM AA</text>
+
+  <!-- ============ COMPLIANCE ============ -->
+  <rect x="20" y="556" width="960" height="80" rx="10" fill="#160d2a" stroke="#9333ea" stroke-width="1.5"/>
+  <text x="500" y="577" text-anchor="middle" font-size="12" font-weight="bold" fill="#c084fc">CONFORMIDADE E REGULAÇÃO — BANCO MERIDIAN</text>
+  <text x="130" y="600" text-anchor="middle" font-size="10" fill="#a78bfa">BACEN 4.893</text>
+  <text x="130" y="616" text-anchor="middle" font-size="9" fill="#64748b">Política de Ciberseg.</text>
+  <text x="280" y="600" text-anchor="middle" font-size="10" fill="#a78bfa">CMN 4.658</text>
+  <text x="280" y="616" text-anchor="middle" font-size="9" fill="#64748b">Contratação Cloud</text>
+  <text x="430" y="600" text-anchor="middle" font-size="10" fill="#a78bfa">LGPD (Lei 13.709)</text>
+  <text x="430" y="616" text-anchor="middle" font-size="9" fill="#64748b">Proteção de Dados</text>
+  <text x="580" y="600" text-anchor="middle" font-size="10" fill="#a78bfa">ISO 27001:2022</text>
+  <text x="580" y="616" text-anchor="middle" font-size="9" fill="#64748b">SGSI Corporativo</text>
+  <text x="730" y="600" text-anchor="middle" font-size="10" fill="#a78bfa">CIS Benchmarks</text>
+  <text x="730" y="616" text-anchor="middle" font-size="9" fill="#64748b">AWS · Azure · GCP</text>
+  <text x="880" y="600" text-anchor="middle" font-size="10" fill="#a78bfa">MITRE ATT&amp;CK</text>
+  <text x="880" y="616" text-anchor="middle" font-size="9" fill="#64748b">Framework Global</text>
+
+  <!-- Setas de log -->
+  <line x1="120" y1="434" x2="120" y2="450" stroke="#4285f4" stroke-width="1.5" marker-end="url(#arr-log)"/>
+  <line x1="345" y1="434" x2="345" y2="450" stroke="#0078d4" stroke-width="1.5" marker-end="url(#arr-log)"/>
+  <line x1="580" y1="434" x2="580" y2="450" stroke="#ff9900" stroke-width="1.5" marker-end="url(#arr-log)"/>
+  <line x1="843" y1="434" x2="843" y2="450" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arr-log)"/>
+
+  <!-- Setas internet → borda -->
+  <line x1="500" y1="142" x2="500" y2="156" stroke="#ef4444" stroke-width="1.5" marker-end="url(#arr-log)"/>
+
+  <defs>
+    <marker id="arr-log" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#475569"/>
+    </marker>
+  </defs>
+</svg>
