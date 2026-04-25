@@ -667,6 +667,23 @@ O campo `DETALHE` do Tópus contém informações críticas para forensics (ex: 
 | Q3    | 3 eventos: 2x OPR0089 (senha incorreta) + 1x OPR0099 (horário)                |
 | Q4    | USER_LOGIN (maioria), NETWORK_CONNECTION, USER_CHANGE_PERMISSIONS              |
 
+**Por que esses resultados confirmam que o parser está correto:**
+- Q1 (campos populados): Um campo vazio indica que a coluna CSV não foi extraída corretamente.
+  Se `principal.user.userid` estiver vazio, o parser está referenciando o campo errado.
+- Q3 (3 bloqueios): Esta é a verificação de integridade dos dados — os 3 eventos de FALHA
+  no arquivo de amostra devem aparecer todos como `BLOCK`. Se aparecerem 0 ou 1, o mapeamento
+  condicional do `security_result.action` está com erro de capitalização.
+- Q4 (diversidade de tipos): Confirma que o mapeamento condicional de `metadata.event_type`
+  está funcionando para todos os 4 tipos de evento do Tópus.
+
+**Variações aceitáveis:**
+- Usar `NETWORK_HTTP` em vez de `NETWORK_CONNECTION` para eventos de TRANSACAO é aceitável,
+  pois transações bancárias podem ser modeled como HTTP requests para o core banking.
+- Mapear `security_result.category` em vez de `category_details` para o campo ACAO é
+  aceitável se o aluno justificar a escolha de semântica.
+- Adicionar campos extras não especificados (ex: `target.application`) é aceito desde que
+  não conflite com os campos obrigatórios do gabarito.
+
 ### Gabarito — Erros Comuns e Soluções
 
 | Erro Comum                               | Causa                                    | Diagnóstico e Solução                                              |

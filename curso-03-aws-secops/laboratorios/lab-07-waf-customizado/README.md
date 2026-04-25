@@ -7,7 +7,114 @@
 
 ---
 
-## Contexto
+## Seção 1 — Contexto Situacional
+
+O Banco Meridian lançou o portal de internet banking há três meses. Nas primeiras semanas após o lançamento, o time de infraestrutura recebeu relatórios de lentidão intermitente — que depois foram identificados como tentativas de ataque: bots fazendo scraping de dados de taxa de câmbio, scripts tentando enumerar contas por força bruta no endpoint de login, e uma tentativa de SQL injection que foi bloqueada apenas pelo firewall de banco de dados.
+
+O portal está crescendo: 45.000 clientes ativos, com pico de 8.000 requisições por segundo durante o horário comercial. Não há WAF configurado — o único controle de borda é um Security Group restrito. A ausência de WAF é um finding CRITICAL no Security Hub (controle CIS 10.1 — WAF em aplicações web críticas).
+
+O CISO determinou que o WAF precisa estar operacional antes do próximo lançamento de feature, que acontecerá em 14 dias.
+
+---
+
+## Seção 2 — Situação Inicial
+
+É terça-feira, 22 de abril de 2026, 14h00. Você abre o relatório semanal de segurança da aplicação gerado pelo time de infraestrutura:
+
+```
+INTERNET BANKING — RELATÓRIO DE TRÁFEGO (14-21/04/2026)
+────────────────────────────────────────────────────────────────
+ Total de requisições:    12.847.500
+ Requisições suspeitas identificadas manualmente: 284.300 (2.2%)
+ Tentativas de login com senha incorreta:          189.400
+ IPs com > 1.000 reqs/hora:                        47
+
+ Ataques identificados (sem bloqueio automático):
+ ├── SQL Injection tentativas:  1.247
+ ├── XSS tentativas:              892
+ ├── Path traversal tentativas:   345
+ ├── Bot scraping de cotações:  31.200 requisições
+ └── Credential stuffing no /login: 14.800 tentativas
+
+ WAF ativo:      NÃO
+ Rate limiting:  NÃO (apenas no nginx — sem granularidade por IP)
+────────────────────────────────────────────────────────────────
+```
+
+Mariana comenta na reunião de segurança das 14h30:
+
+> "Esses números são alarmantes. Temos mais de 14 mil tentativas de credential stuffing na semana sem nenhum bloqueio automático. Se o atacante acertar uma credencial válida, não temos nenhuma defesa de borda. Precisamos do WAF hoje."
+
+Carlos adiciona:
+
+> "Os bots de scraping de cotações estão gerando 31 mil requisições extras por semana — isso é custo de infraestrutura e risco de exposição de dados de mercado. Um rate limit teria bloqueado isso completamente."
+
+---
+
+## Seção 3 — Problema Identificado
+
+**14h45 — Análise dos logs do ALB para quantificar o problema:**
+
+```bash
+# Analisar logs do ALB para identificar padrões de ataque
+aws logs filter-log-events \
+  --log-group-name /meridian/alb/access-logs \
+  --filter-pattern '{ $.request_uri = "/login" && $.request_processing_time > 0.5 }' \
+  --query 'events[0:10].{IP:message}' \
+  --start-time $(date -d '7 days ago' +%s000)
+```
+
+O diagnóstico identifica 5 problemas distintos:
+
+1. **Sem proteção OWASP Top 10:** SQL injection, XSS e path traversal chegam ao servidor de aplicação sem filtragem de borda
+2. **Sem rate limiting por IP:** um único IP pode fazer milhares de requisições ao `/login` em minutos — credential stuffing sem fricção
+3. **Sem bloqueio geográfico:** o BACEN exige que o internet banking só seja acessível a partir do Brasil (clientes estrangeiros devem usar canais específicos)
+4. **Sem bot management:** scrapers automatizados consomem recursos e expõem dados de mercado sem controle
+5. **Sem logging estruturado de WAF:** sem WAF, não há como rastrear ataques bloqueados nem gerar relatórios para auditoria
+
+**Mapeamento MITRE ATT&CK:**
+- **T1110.004** (Credential Stuffing) → resolvido por Rate Limiting no `/login`
+- **T1190** (Exploit Public-Facing Application) → resolvido por Managed Rules OWASP
+- **T1596** (Search Open Technical Databases) → resolvido por Bot Control e Rate Limiting
+- **T1530** (Data from Cloud Storage Object) → rate limiting impede scraping massivo
+
+---
+
+## Seção 4 — Roteiro de Atividades
+
+**Objetivo geral:** Implementar o AWS WAF v2 completo para o portal de internet banking, com Managed Rules para OWASP Top 10, Rate Limiting por IP para o endpoint de login, bloqueio geográfico, WAF Logging centralizado, e testes de efetividade.
+
+**Atividades deste laboratório:**
+
+1. Criar a Web ACL base com default action Allow
+2. Adicionar AWS Managed Rule Groups (Core Rule Set, Known Bad Inputs, SQL Database)
+3. Criar regra customizada de Rate Limiting no `/login` — 100 reqs/5min por IP
+4. Criar regra de bloqueio geográfico (apenas BR)
+5. Criar regra de bloqueio de IPs maliciosos via IP Set
+6. Associar o WAF ao ALB do internet banking
+7. Configurar WAF Logging com Kinesis Firehose → S3 centralizado
+8. Executar testes de efetividade das regras criadas
+9. Criar dashboard CloudWatch para métricas do WAF
+
+---
+
+## Seção 5 — Proposição do Desafio
+
+Ao final do laboratório, Carlos vai executar uma série de testes de ataque contra o ALB:
+
+1. Um payload SQL injection: `' OR 1=1 --` no campo de login
+2. Um payload XSS: `<script>alert('xss')</script>` em campo de formulário
+3. 150 requisições ao `/login` em 30 segundos do mesmo IP (credential stuffing)
+4. Uma requisição com User-Agent de scanner conhecido: `sqlmap/1.6`
+5. Uma requisição vindo de IP de fora do Brasil (simulado via header `x-forwarded-for`)
+
+Para cada teste, você deve mostrar no painel do WAF o request bloqueado, a regra que bloqueou, e o log estruturado no S3.
+
+**Critério de aprovação:** Os 5 testes devem ser bloqueados pelo WAF com ação `BLOCK` — não `ALLOW` ou `COUNT`. Requisições com ação `COUNT` significam que a regra está em modo de monitoramento, não de bloqueio.
+
+---
+
+## Contexto Técnico
 
 O Banco Meridian lançou um novo portal de internet banking em produção. Você precisa configurar o AWS WAF v2 para proteger a aplicação contra o OWASP Top 10, implementar rate limiting geográfico, configurar logging completo e realizar testes de efetividade das regras.
 
@@ -505,14 +612,134 @@ echo "Cleanup concluído"
 
 ---
 
-## Gabarito — Validação das Regras
+## Seção 9 — Gabarito Completo com Raciocínio
 
-| Regra | Teste | Status HTTP Esperado |
-|---|---|---|
-| AWSManagedRulesSQLiRuleSet | `?q=1' OR 1=1--` | 403 |
-| AWSManagedRulesCommonRuleSet | `<script>alert(1)</script>` | 403 |
-| MeridianBlockScanners | User-Agent: `sqlmap/1.7` | 403 |
-| MeridianRateLimitLogin | 60+ requests em 5 min para `/api/auth` | 403 após o 50° |
-| MeridianGeoBlock | Request de IP russo (simulado) | 403 |
-| Request Legítima | Browser normal, URL válida | 200 |
-| WAF Logging | Verificar bucket WAF logs | Logs presentes em S3 |
+### Criação da Web ACL — Resposta Correta
+
+**Por que default action = ALLOW (não BLOCK):**
+Uma Web ACL com `DefaultAction: BLOCK` bloquearia TODAS as requisições que não correspondem a nenhuma regra de Allow explícita. No contexto do internet banking com 45.000 clientes, essa configuração quebraria o acesso legítimo imediatamente. A abordagem correta é:
+- `DefaultAction: ALLOW` — tudo passa por padrão
+- Regras de `BLOCK` específicas para padrões maliciosos conhecidos
+- Regras de Rate Limit para proteção adaptativa
+
+O resultado é: requisições legítimas passam normalmente, ataques conhecidos são bloqueados.
+
+**Verificação correta:**
+```bash
+aws wafv2 get-web-acl \
+  --name MeridianInternetBanking \
+  --scope REGIONAL \
+  --id $WEB_ACL_ID \
+  --region sa-east-1 \
+  --query 'WebACL.{DefaultAction:DefaultAction,NumRules:Rules|length(@)}'
+# Esperado: {"DefaultAction": {"Allow": {}}, "NumRules": 5 ou mais}
+```
+
+---
+
+### Rate Limiting no /login — Resposta Correta
+
+**Configuração correta:**
+```json
+{
+  "Name": "MeridianRateLimitLogin",
+  "Priority": 1,
+  "Statement": {
+    "RateBasedStatement": {
+      "Limit": 100,
+      "AggregateKeyType": "IP",
+      "ScopeDownStatement": {
+        "ByteMatchStatement": {
+          "FieldToMatch": {"UriPath": {}},
+          "PositionalConstraint": "STARTS_WITH",
+          "SearchString": "/login",
+          "TextTransformations": [{"Priority": 0, "Type": "LOWERCASE"}]
+        }
+      }
+    }
+  },
+  "Action": {"Block": {}},
+  "VisibilityConfig": {"SampledRequestsEnabled": true, ...}
+}
+```
+
+**Por que 100 requisições em 5 minutos:** O WAF conta requisições em janelas de 5 minutos. Um usuário legítimo fazendo login com erro de senha tipicamente faz 3-5 tentativas. Um atacante de credential stuffing faz centenas por minuto. O limite de 100 em 5 minutos permite 20 tentativas por minuto — muito acima do comportamento humano, mas bem abaixo do comportamento de bot.
+
+**Por que `ScopeDownStatement`:** Limitar o rate limit ao path `/login` evita bloquear clientes legítimos navegando outras páginas do portal. Sem o `ScopeDownStatement`, o limite se aplicaria a TODAS as requisições do IP — um usuário navegando o portal ativamente poderia ser bloqueado.
+
+**Erros comuns:**
+- Usar `AggregateKeyType: FORWARDED_IP` em vez de `IP`: `FORWARDED_IP` usa o cabeçalho `X-Forwarded-For`, que pode ser facilmente falsificado por um atacante — usar `IP` (IP real da conexão) é mais seguro
+- Limite muito baixo (< 30): bloqueia usuários legítimos com conexão lenta que recarregam a página
+- Esquecer o `TextTransformations: LOWERCASE`: `/Login` e `/LOGIN` não corresponderiam ao padrão `/login` sem essa transformação
+
+---
+
+### Bloqueio Geográfico — Resposta Correta
+
+**Por que GeoMatchStatement (não GeoBlock via IP Set):**
+O `GeoMatchStatement` usa a banco de dados de geolocalização da AWS, atualizada automaticamente. Um IP Set manual exigiria atualização constante com bilhões de IPs — inviável. A AWS mantém esse banco atualizado automaticamente.
+
+```json
+{
+  "Name": "MeridianGeoBlock",
+  "Priority": 2,
+  "Statement": {
+    "NotStatement": {
+      "Statement": {
+        "GeoMatchStatement": {
+          "CountryCodes": ["BR"]
+        }
+      }
+    }
+  },
+  "Action": {"Block": {}}
+}
+```
+
+**Por que `NotStatement` com `CountryCodes: ["BR"]` em vez de listar todos os países bloqueados:** Listar todos os países não-BR exigiria 194 entradas e precisaria ser atualizado quando novos países surgem ou são extintos. `NotStatement` com `CountryCodes: ["BR"]` bloqueia automaticamente qualquer país que não seja Brasil — mais simples e à prova de futuro.
+
+---
+
+### Validação das Regras — Resultados Corretos
+
+| Regra | Teste | Status HTTP Correto | Regra que bloqueia |
+|---|---|---|---|
+| `AWSManagedRulesSQLiRuleSet` | `?q=1' OR 1=1--` | `403 Forbidden` | `SQLi_BODY` ou `SQLi_QUERYSTRING` |
+| `AWSManagedRulesCommonRuleSet` | `<script>alert(1)</script>` | `403 Forbidden` | `XSS_BODY` |
+| `MeridianBlockScanners` | User-Agent: `sqlmap/1.7` | `403 Forbidden` | Regra customizada UserAgent |
+| `MeridianRateLimitLogin` | 150 reqs ao `/login` em 30s | `403` após a 100ª requisição | RateBased rule |
+| `MeridianGeoBlock` | IP fora do Brasil | `403 Forbidden` | GeoMatch NOT BR |
+| Request legítima | GET /home com browser normal | `200 OK` | Nenhuma — DefaultAction Allow |
+| WAF Logging | Verificar S3 após 5 min | Logs `.json.gz` no bucket | N/A |
+
+**Nota sobre `COUNT` vs `BLOCK`:** Se qualquer teste retornar `200 OK` em vez de `403`, a regra está em modo `COUNT` (monitoramento) em vez de `BLOCK`. Verificar a `Action` na regra — deve ser `{"Block": {}}`, não `{"Count": {}}`.
+
+**Interpretação do log WAF:**
+```json
+{
+  "timestamp": 1713802800000,
+  "action": "BLOCK",              // BLOCK = regra funcionando
+  "httpSourceId": "alb-meridian-prod",
+  "terminatingRuleId": "MeridianRateLimitLogin",
+  "terminatingRuleType": "RATE_BASED",
+  "httpRequest": {
+    "clientIp": "189.45.132.77",  // IP do atacante
+    "uri": "/login",              // Endpoint alvo
+    "method": "POST",
+    "requestId": "1-6603e3f0-..."
+  },
+  "rateBasedRuleList": [{
+    "rateBasedRuleName": "MeridianRateLimitLogin",
+    "limitKey": "189.45.132.77", // IP que disparou o limite
+    "maxRateAllowed": 100,        // Limite configurado
+    "evaluationWindowSec": 300    // Janela de 5 minutos
+  }]
+}
+```
+
+**Critérios de Aprovação:**
+- Web ACL associada ao ALB: OBRIGATÓRIO
+- Todos os 5 testes retornando 403: OBRIGATÓRIO
+- WAF Logging ativo com logs visíveis no S3: OBRIGATÓRIO
+- Rate limit bloqueando após o limite correto (100 requisições): OBRIGATÓRIO
+- GeoBlock funcionando para IPs não-BR: OBRIGATÓRIO
