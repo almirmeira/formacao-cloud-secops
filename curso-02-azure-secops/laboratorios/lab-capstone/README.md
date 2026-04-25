@@ -119,7 +119,18 @@ Ao final deste lab:
 
 ### Queries de Investigação a Executar
 
+**O que este passo faz (visão geral):** Esta seção constrói, fase por fase, a cadeia de evidências do ataque da Operação Guaraná. Cada query consulta uma tabela diferente do Microsoft Sentinel — EmailEvents, SigninLogs, OfficeActivity e AuditLogs — e juntas constroem a narrativa forense completa. A ordem de execução segue a kill chain do atacante: primeiro o vetor de entrada, depois o movimento dentro do ambiente, depois a persistência.
+
+**Por que executar as queries nesta ordem:** A investigação forense segue o princípio de "anchor and expand" — você parte de um evento âncora conhecido (o e-mail de phishing) e expande para eventos subsequentes usando os artefatos encontrados (o IP do atacante, o usuário comprometido). Executar fora de ordem — por exemplo, começar pela Fase 5 (OAuth App) sem entender a Fase 1 — torna impossível distinguir atividade maliciosa de atividade legítima, pois sem o contexto do comprometimento inicial qualquer registro de aplicação OAuth pareceria normal.
+
+---
+
 **Fase 1 — E-mail de phishing**:
+
+**O que este passo faz:** Consulta a tabela `EmailEvents` (Microsoft Defender for Office 365) para localizar o e-mail de phishing que iniciou o ataque. O filtro por `SenderFromDomain` com "microsoftsuporte" captura o domínio de typosquatting utilizado pelo Grupo Lazarus-BR — um domínio que imita suporte da Microsoft mas termina em `.ru`. Este é o ponto zero da linha do tempo: sem confirmar que o e-mail foi entregue e aberto, toda a investigação subsequente é especulação.
+
+**Por que esta é a primeira query:** O e-mail de phishing é o único evento que ocorreu antes da conta ser comprometida — é o único ponto da cadeia onde o atacante estava completamente fora do ambiente. Confirmar a entrega (DeliveryAction = Delivered) e o tipo de ameaça (ThreatTypes) estabelece que não houve comprometimento por outros vetores (ex.: credencial vazada em breach externo), o que importa para o relatório ao BACEN.
+
 ```kql
 EmailEvents
 | where TimeGenerated >= datetime(2025-04-07 10:00)
@@ -128,7 +139,16 @@ EmailEvents
 | project TimeGenerated, SenderFromAddress, Subject, DeliveryAction, ThreatTypes
 ```
 
+**O que confirma que funcionou:** A query deve retornar pelo menos 1 linha com `DeliveryAction = Delivered` (o e-mail chegou à caixa de entrada) e `ThreatTypes` contendo "Phish". Se `DeliveryAction = Blocked`, o ataque teria sido impedido pelo Defender for Office 365 — mas os logs posteriores mostram que o acesso ocorreu, portanto o e-mail foi entregue. O timestamp desta linha é o T=0 da sua timeline MITRE ATT&CK.
+
+---
+
 **Fase 2 — Login com token roubado**:
+
+**O que este passo faz:** Consulta `SigninLogs` para identificar o primeiro login bem-sucedido do atacante usando o token OAuth roubado via proxy AiTM. O filtro `Location !contains "BR"` é o sinal de anomalia crítico: a conta de ana.lima nunca realizou logins fora do Brasil antes deste incidente. A combinação de IP russo + autenticação sem MFA completada (o token já passou pelo MFA no proxy) é a assinatura técnica do ataque AiTM.
+
+**Por que este passo vem imediatamente após a Fase 1:** O login com token roubado ocorreu apenas 5 minutos após a entrega do e-mail (10:28 → 10:33). Esta sequência confirma que a vítima clicou no link imediatamente — informação relevante para o relatório e para o treinamento de conscientização. O IP `185.234.218.55` encontrado aqui será o IOC pivot para investigar as fases subsequentes.
+
 ```kql
 SigninLogs
 | where TimeGenerated >= datetime(2025-04-07 10:25)
@@ -138,13 +158,31 @@ SigninLogs
           AuthenticationRequirement, DeviceDetail, RiskLevelDuringSignIn
 ```
 
+**O que confirma que funcionou:** A query retorna pelo menos 1 linha com `IPAddress = 185.234.218.55`, `Location` contendo "Russia" ou equivalente, e `AuthenticationRequirement = singleFactorAuthentication` — confirmando o bypass de MFA característico do AiTM. Se `DeviceDetail` mostrar device desconhecido (GUID vazio ou zeros), reforça que não é um device legítimo de ana.lima.
+
+---
+
 **Fase 3 — Exfiltração OneDrive** (referência ao Módulo 10):
+
+**O que este passo faz:** Consulta `OfficeActivity` para mapear o volume e o período da exfiltração de arquivos. O Módulo 10 contém a query completa com o pivot pelo IP `5.2.67.44` — IP de saída diferente do login, indicando que o atacante usou infraestrutura separada para a exfiltração (prática comum de APTs para dificultar correlação). O resultado esperado é um pico de 3.247 operações `FileDownloaded` entre segunda 10:45 e terça 18:00.
+
+**Por que esta fase ocorre horas após o login:** Os atacantes frequentemente fazem reconhecimento silencioso antes de iniciar a exfiltração em massa — enumerando pastas, identificando documentos de alto valor (contratos, dados de clientes, credenciais). A exfiltração em si ocorre em horário comercial para se camuflar no tráfego legítimo de downloads de funcionários. Este padrão é documentado no relatório FS-ISAC que originou a inteligência sobre o Grupo Lazarus-BR.
+
 ```kql
 // Usar query da Seção "Fase 3" do Módulo 10
 // Resultado: pico de downloads entre Seg 10:45 e Ter 18:00
 ```
 
+**O que confirma que funcionou:** A query do Módulo 10 deve retornar registros com `Operation = FileDownloaded` e `ClientIP = 5.2.67.44` totalizando aproximadamente 3.247 eventos. A distribuição temporal deve mostrar o padrão de "exfiltração durante horário comercial" — não um burst único, mas downloads distribuídos ao longo de horas para evitar detecção por volume.
+
+---
+
 **Fase 4 — Regra de e-mail**:
+
+**O que este passo faz:** Consulta `OfficeActivity` por operações de criação de regras de inbox (Operation = "New-InboxRule"). Esta é a evidência da persistência de coleta de informações: mesmo que a sessão do atacante fosse encerrada após a exfiltração inicial, a regra de encaminhamento continuaria enviando todos os e-mails futuros de ana.lima para `attacker@external-domain.ru`. Esta query confirma que a exfiltração não terminou com a sessão — ela está acontecendo **agora**, enquanto você investiga.
+
+**Por que esta fase vem após a exfiltração:** A criação da regra de encaminhamento ocorreu no dia seguinte à exfiltração inicial (2025-04-08 vs 2025-04-07), confirmando que o atacante retornou ao ambiente e estabeleceu mecanismo de coleta passiva e persistente. Este comportamento mapeia para a tática "Persistence" no MITRE ATT&CK — o atacante estava se preparando para manter acesso mesmo após uma eventual detecção e reset de senha.
+
 ```kql
 OfficeActivity
 | where TimeGenerated >= datetime(2025-04-08 08:00)
@@ -153,7 +191,16 @@ OfficeActivity
 | project TimeGenerated, UserId, ClientIP, Parameters
 ```
 
+**O que confirma que funcionou:** A query retorna 1 linha com `Operation = New-InboxRule` e o campo `Parameters` contendo o endereço de destino `attacker@external-domain.ru`. A presença deste registro confirma que a ação de contenção imediata (Etapa 5 do Roteiro de Atividades — executar o playbook) é urgente: cada e-mail recebido por ana.lima desde 2025-04-08 08:12 foi copiado para o atacante.
+
+---
+
 **Fase 5 — OAuth App**:
+
+**O que este passo faz:** Consulta `AuditLogs` para identificar o registro de uma aplicação OAuth maliciosa e a concessão de permissões excessivas (`Mail.Read`, `Files.ReadWrite.All`) pela conta comprometida de ana.lima. Este é o passo de persistência técnica mais grave: um OAuth App com essas permissões pode acessar e-mails e arquivos da conta indefinidamente, mesmo após o reset de senha da conta humana — pois o app tem seu próprio token de acesso independente das credenciais do usuário.
+
+**Por que esta é a última fase investigada antes da timeline completa:** O registro do OAuth App (Fase 5) representa a conversão de acesso temporário (sessão/token) em acesso permanente (application). Investigar esta fase por último permite que o analista confirme que existe um segundo vetor de acesso persistente além da regra de e-mail (Fase 4). Ambos precisam ser revogados — esquecer o OAuth App enquanto reseta a senha é um erro comum que deixa o atacante com acesso após a "contenção".
+
 ```kql
 AuditLogs
 | where TimeGenerated >= datetime(2025-04-08 14:00)
@@ -162,7 +209,16 @@ AuditLogs
 | project TimeGenerated, OperationName, TargetResources
 ```
 
+**O que confirma que funcionou:** A query retorna 2 linhas: uma com `OperationName = Add application` (criação do app) e outra com `Add app role assignment to service principal` (concessão de permissões). O campo `TargetResources` da segunda linha deve conter o AppID `4f3d9e2b-8c1a` e as permissões concedidas. Se `TargetResources` aparecer vazio ou truncado, expanda com `| extend Details = tostring(TargetResources)` para visualizar o JSON completo.
+
+---
+
 **Timeline Completa**:
+
+**O que este passo faz:** Executa uma query `union` que consolida eventos de 4 tabelas diferentes (EmailEvents, SigninLogs, OfficeActivity, AuditLogs) em uma única linha do tempo ordenada cronologicamente. Esta query é o "produto final" da fase de investigação — ela responde à pergunta central do incidente: "O que aconteceu, em que ordem, e por quanto tempo?" O resultado desta query é o insumo direto para o Entregável 1 (Timeline MITRE ATT&CK).
+
+**Por que executar a timeline apenas após as queries individuais:** As queries das Fases 1 a 5 são a validação de que cada tabela tem os dados esperados e que os filtros estão corretos. A query de timeline combina esses filtros validados — executá-la sem antes confirmar as queries individuais é como somar números sem verificar cada parcela. Se a timeline mostrar fases faltando, você saberá exatamente qual query individual investigar.
+
 ```kql
 // Usar a query de Timeline do Módulo 10 para montar a sequência completa
 let user = "ana.lima@bancomeridian-lab.onmicrosoft.com";
@@ -174,6 +230,8 @@ union
     (AuditLogs | where InitiatedBy.user.userPrincipalName == user | where OperationName contains "application" | project TimeGenerated, Phase = "Fase 5 - OAuth App")
 | sort by TimeGenerated asc
 ```
+
+**O que confirma que funcionou:** A query retorna pelo menos 5 grupos de eventos (um por fase) ordenados cronologicamente, com a Fase 1 como o registro mais antigo (2025-04-07 ~10:28) e a Fase 5 como o mais recente (~14:33 do dia seguinte). Se alguma fase aparecer ausente, verifique se o filtro da query individual correspondente retorna resultados — o problema está no filtro, não na timeline em si.
 
 ---
 

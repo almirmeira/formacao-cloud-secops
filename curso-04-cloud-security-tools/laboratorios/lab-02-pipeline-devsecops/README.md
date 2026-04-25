@@ -15,13 +15,17 @@ O time de DevOps do Banco Meridian vai lançar uma nova API financeira em contai
 
 ## 2. Situação Inicial
 
-O repositório GitHub da API financeira existe mas não tem nenhum controle de segurança no pipeline. O time de desenvolvimento quer fazer o primeiro deploy na próxima semana e o CISO bloqueou o deploy até que o pipeline de segurança esteja implementado.
+O repositório GitHub da API financeira existe mas não tem nenhum controle de segurança no pipeline. O time de desenvolvimento quer fazer o primeiro deploy na próxima semana e o CISO bloqueou o deploy até que o pipeline de segurança esteja implementado. O código Terraform criará recursos AWS (ECS, S3, IAM). A imagem Docker pode ter CVEs. Secrets podem estar hardcoded. Sem o pipeline, esses problemas só serão descobertos em produção.
 
 ---
 
 ## 3. Problema Identificado
 
-O código Terraform criará recursos AWS (ECS, S3, IAM). A imagem Docker pode ter CVEs. Secrets podem estar hardcoded. Sem o pipeline, esses problemas só serão descobertos em produção.
+Sem controle de segurança no pipeline:
+- Qualquer desenvolvedor pode criar recursos AWS inseguros via Terraform
+- Imagens Docker com CVEs críticas podem chegar ao cluster Kubernetes
+- Secrets hardcoded podem ser expostos no registro de imagens
+- Sem SBOM, é impossível responder "quais imagens são afetadas por CVE-2024-XXXXX?"
 
 ---
 
@@ -30,18 +34,18 @@ O código Terraform criará recursos AWS (ECS, S3, IAM). A imagem Docker pode te
 1. Criar repositório GitHub com estrutura do projeto
 2. Escrever Terraform com recurso intencionalmente inseguro
 3. Configurar Checkov com arquivo checkov.yaml
-4. Adicionar step Checkov no GitHub Actions (falha em CRITICAL/HIGH)
-5. Adicionar step tfsec (warn em HIGH)
-6. Criar Dockerfile para a API
-7. Adicionar step de build Docker
-8. Adicionar step Trivy scan na imagem (falha em CRITICAL CVE)
-9. Adicionar step Syft para gerar SBOM
-10. Adicionar step Cosign sign (keyless)
-11. Push para GitHub Container Registry (somente se tudo passou)
-12. Verificar assinatura Cosign antes do "deploy"
-13. Testar o pipeline com commit inseguro (deve falhar)
-14. Corrigir o Terraform e verificar que o pipeline passa
-15. Verificar o relatório final no GitHub Security
+4. Criar Dockerfile multi-stage com usuário não-root
+5. Criar política Rego para validação adicional
+6. Criar o workflow GitHub Actions completo
+7. Fazer push e criar PR
+8. Verificar falha do pipeline (Terraform inseguro)
+9. Verificar comentário automático na PR
+10. Corrigir o Terraform e verificar aprovação
+11. Verificar SBOM no GitHub Security
+12. Verificar assinatura Cosign
+13. Verificar GitHub Code Scanning
+14. Testar Trivy scan localmente
+15. Documentar o pipeline para o CISO
 
 ---
 
@@ -55,9 +59,9 @@ Ao final deste laboratório, você terá um pipeline completo `.github/workflows
 
 ### Passo 1: Criar Repositório GitHub
 
-**O que este passo faz:** Cria o repositório GitHub que é o ponto central do pipeline DevSecOps. A estrutura de diretórios tem separação deliberada de responsabilidades: `terraform/` (o que Checkov e tfsec escaneiam), `.github/workflows/` (o pipeline de segurança CI/CD), `policy/` (políticas OPA/Rego customizadas do Banco Meridian), e `app/` (código da API que o Trivy escaneia na imagem Docker). Essa separação limita o raio de impacto se um componente for comprometido — um atacante que vaza secrets do `app/` não tem acesso automático às políticas de segurança do `policy/`.
+**O que este passo faz:** Cria o repositório GitHub que será o ponto central do pipeline DevSecOps do Banco Meridian. A estrutura de diretórios que criaremos (`terraform/`, `.github/workflows/`, `policy/`, `app/`) separa as preocupações: IaC fica em `terraform/`, as automações CI/CD ficam em `.github/workflows/`, as políticas OPA ficam em `policy/`, e o código da API fica em `app/`. Essa separação é uma prática de segurança — limita o raio de impacto se um componente for comprometido.
 
-**Por que repositório público neste lab:** GitHub Actions tem 2.000 minutos/mês gratuitos para repositórios públicos. Em produção, o Banco Meridian usaria repositório privado no GitHub Enterprise com RBAC e branch protection obrigatória.
+**Por que agora:** O repositório é a base de todo o laboratório. Todas as ferramentas (Checkov, tfsec, Trivy, Cosign) serão configuradas como etapas de um workflow do GitHub Actions que roda automaticamente a cada commit. Sem o repositório, não há pipeline.
 
 ```bash
 # Pré-requisitos
@@ -77,11 +81,12 @@ mkdir -p terraform .github/workflows policy app
 echo "Repositório criado e estrutura de diretórios inicializada"
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
-✓ Created repository seu-usuario/bancomeridian-api-lab02 on GitHub
+Created repository seu-usuario/bancomeridian-api-lab02 on GitHub
   https://github.com/seu-usuario/bancomeridian-api-lab02
 ```
+O `--remote=origin` significa que o repositório local já está vinculado ao GitHub — você pode confirmar com `git remote -v`. O flag `--public` é necessário para usar o GitHub Actions gratuito neste laboratório; em produção, o Banco Meridian usaria um repositório privado com GitHub Teams ou GitHub Enterprise.
 
 **Troubleshooting:** Se `gh` não estiver instalado: `brew install gh` ou `sudo apt install gh`, depois `gh auth login`.
 
@@ -89,8 +94,11 @@ echo "Repositório criado e estrutura de diretórios inicializada"
 
 ### Passo 2: Criar Terraform com Recurso Inseguro
 
+**O que este passo faz:** Cria dois recursos Terraform — um bucket S3 intencionalmente inseguro (sem block public access, sem logging, sem criptografia KMS) e um bucket S3 seguro com todas as configurações corretas. O bucket inseguro é proposital: ele vai fazer o Checkov falhar no Passo 8, demonstrando que o pipeline bloqueia código problemático antes que chegue à AWS. Os IDs dos checks do Checkov que vão falhar estão documentados nos comentários do código (`CKV_AWS_19`, `CKV_AWS_18`, `CKV_AWS_145`).
+
+**Por que agora:** Você precisa ter código Terraform com problema real para o pipeline ter algo para detectar e bloquear. O bucket seguro serve como referência de "como deve ser feito" e passará em todos os checks.
+
 ```bash
-# terraform/main.tf — com bucket inseguro para demonstrar falha do pipeline
 cat > terraform/main.tf << 'TF'
 terraform {
   required_version = ">= 1.0"
@@ -106,21 +114,16 @@ provider "aws" {
   region = var.aws_region
 }
 
-# ================================================================
 # BUCKET INSEGURO — para demonstração do pipeline falhando
 # Este bucket INTENCIALMENTE vai falhar no Checkov:
 #   CKV_AWS_19: sem block public access
 #   CKV_AWS_18: sem access logging
 #   CKV_AWS_145: sem criptografia KMS
-# ================================================================
 resource "aws_s3_bucket" "api_storage_inseguro" {
   bucket = "${var.project_name}-storage-inseguro"
-  # Propositalmente sem configurações de segurança
 }
 
-# ================================================================
 # BUCKET SEGURO — para demonstração do pipeline passando
-# ================================================================
 resource "aws_s3_bucket" "api_storage_seguro" {
   bucket = "${var.project_name}-storage-seguro"
   tags   = var.default_tags
@@ -155,7 +158,6 @@ resource "aws_s3_bucket_versioning" "api_storage_seguro" {
 }
 TF
 
-# terraform/variables.tf
 cat > terraform/variables.tf << 'TF'
 variable "aws_region" {
   description = "AWS region"
@@ -188,15 +190,14 @@ echo "Terraform criado — inclui recurso inseguro (propositalmente) para teste 
 
 ### Passo 3: Configurar Checkov
 
-**O que este passo faz:** Cria o arquivo de configuração do Checkov (`checkov.yaml`) que define as regras de scan para o Banco Meridian. A configuração centraliza decisões importantes: quais frameworks verificar (terraform, dockerfile), quais checks suprimir globalmente com justificativa, e o threshold de severidade que falha o pipeline. Sem este arquivo, o Checkov usaria defaults que podem incluir checks irrelevantes (gerando ruído) ou omitir checks críticos para o contexto bancário.
+**O que este passo faz:** Cria o arquivo de configuração `checkov.yaml` que define o comportamento do Checkov no pipeline. As opções mais importantes: `hard-fail-on: [CRITICAL, HIGH]` faz o pipeline falhar completamente se encontrar misconfigurations críticas ou de alta severidade; `soft-fail-on: [MEDIUM, LOW]` apenas gera avisos para problemas menores sem bloquear. Os `skip-path` evitam que o Checkov analise o diretório `.terraform/` que contém providers baixados automaticamente, não código customizado do time.
 
-**Por que usar arquivo de configuração em vez de flags na linha de comando:** Um arquivo `checkov.yaml` no repositório é versionado via git — qualquer mudança nos critérios de segurança é rastreável, revisada via PR, e auditável. Flags na linha de comando são frágeis e invisíveis — um desenvolvedor pode silenciosamente remover um `--check` crítico sem revisão. O CISO do Banco Meridian exige que as regras de segurança do pipeline sejam tratadas como código.
+**Por que agora:** O `checkov.yaml` precisa existir antes de criar o workflow do GitHub Actions, porque o workflow o referenciará. Definir o comportamento de falha em um arquivo de configuração é melhor do que hardcodá-lo nos flags da linha de comando — centraliza a política de segurança em um único lugar versionável.
 
 ```bash
 cat > checkov.yaml << 'YAML'
 # checkov.yaml — configuração do Banco Meridian
 
-# Frameworks a verificar
 framework:
   - terraform
   - dockerfile
@@ -212,15 +213,12 @@ soft-fail-on:
   - MEDIUM
   - LOW
 
-# Checks suprimidos com justificativa (nenhum no momento)
 skip-check: []
 
-# Diretórios a ignorar
 skip-path:
   - .terraform/
   - terraform/.terraform/
 
-# Output: todos os formatos
 output:
   - cli
   - json
@@ -235,10 +233,16 @@ echo "checkov.yaml configurado"
 
 ### Passo 4: Criar Dockerfile para a API
 
+**O que este passo faz:** Cria o Dockerfile da API financeira do Banco Meridian usando o padrão multi-stage e usuário não-root. O multi-stage (`FROM python:3.11-slim AS builder` → `FROM python:3.11-slim`) é uma técnica de segurança: o stage de build tem as ferramentas de compilação, mas o stage final (runtime) copia apenas os binários compilados, sem ferramentas de desenvolvimento. O `useradd -r appuser` e `USER appuser` garantem que o processo principal do container nunca rode como root — isso previne que um atacante que obtenha RCE no container consiga instalar pacotes, modificar arquivos de sistema, ou tentar container escape via syscalls privilegiadas.
+
+**Por que agora:** O Dockerfile precisa existir antes de configurar o pipeline que vai fazer o build e scan da imagem. O Checkov também analisa Dockerfiles — um com `USER root` explícito falharia no check `CKV_DS_4`.
+
 ```bash
+mkdir -p app
+
 cat > app/Dockerfile << 'DOCKERFILE'
 # Dockerfile seguro — Banco Meridian API
-# Segue boas práticas: não-root, multi-stage, imagem mínima
+# Boas práticas: não-root, multi-stage, imagem mínima
 
 # Stage 1: Build
 FROM python:3.11-slim AS builder
@@ -247,22 +251,19 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Stage 2: Runtime (imagem mínima)
+# Stage 2: Runtime (sem ferramentas de build)
 FROM python:3.11-slim
 
-# Criar usuário não-root (CKV_DS_4 — não usar root)
+# Criar usuário não-root (atende CKV_DS_4)
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-# Copiar dependências do stage de build
 COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser app/ .
 
-# Usar usuário não-root
 USER appuser
 
-# Healthcheck
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
 
@@ -271,13 +272,11 @@ EXPOSE 8080
 CMD ["python", "main.py"]
 DOCKERFILE
 
-# Criar requirements.txt simples
 cat > app/requirements.txt << 'REQ'
 fastapi==0.109.0
 uvicorn==0.27.0
 REQ
 
-# Criar main.py simples
 cat > app/main.py << 'PY'
 from fastapi import FastAPI
 
@@ -303,27 +302,19 @@ echo "Dockerfile e aplicação criados"
 
 ### Passo 5: Criar Política Rego para Validação Adicional
 
-**O que este passo faz:** Cria uma política OPA/Rego customizada que verifica regras de segurança específicas do Banco Meridian — regras que o Checkov não tem nativamente. Enquanto o Checkov verifica conformidade com benchmarks genéricos (CIS, NIST), a política Rego implementa requisitos do negócio: por exemplo, todo bucket S3 deve ter a tag `Owner` definida (para accountability) e deve ter nome prefixado com `bancomeridian-` (para identificação clara de propriedade em ambientes multi-conta).
+**O que este passo faz:** Cria uma política OPA/Rego que valida se todo bucket S3 no Terraform tem um recurso `aws_s3_bucket_public_access_block` correspondente. A lógica em linguagem natural: "Se existe um recurso `aws_s3_bucket` e não existe nenhum `aws_s3_bucket_public_access_block` no mesmo plano Terraform, gere uma violação". O Rego é a linguagem declarativa do Open Policy Agent — você descreve o que é uma violação, não como encontrá-la. A regra `deny[msg]` coleta todas as mensagens e as retorna ao avaliador.
 
-**Entendendo a sintaxe Rego:**
-- `package terraform.aws.s3` — escopo da política (Conftest usa o nome do package para agrupar checks)
-- `violations[msg] { ... }` — define um conjunto de violations; o pipeline falha se este conjunto NÃO for vazio
-- `resource := input.resource_changes[_]` — itera sobre todos os recursos no plan.json
-- `resource.type == "aws_s3_bucket"` — filtra apenas buckets S3
-- `not has_owner_tag(resource)` — chama a função auxiliar que verifica a existência da tag `Owner`
-- `msg := sprintf(...)` — gera mensagem de erro descritiva que aparece no log do pipeline
-
-**Por que OPA/Rego além do Checkov:** O Checkov verifica segurança técnica de infraestrutura. O OPA verifica políticas de governança de negócio. Eles são complementares: Checkov diz "este bucket não tem criptografia" (segurança técnica); OPA diz "este bucket não está tagueado para accountability" (governança). Um banco regulado pelo BACEN precisa de ambas as camadas.
+**Por que agora:** O Checkov verifica misconfigurations dentro de um recurso, mas não verifica relacionamentos entre recursos. Esta política Rego cobre essa lacuna: ela verifica se o recurso de segurança complementar existe para cada bucket. Juntos, Checkov e OPA oferecem cobertura mais ampla.
 
 ```bash
 cat > policy/s3_security.rego << 'REGO'
 package terraform.aws.s3
 
+# Regra: todo bucket S3 deve ter block public access configurado
 violations[msg] {
     resource := input.resource_changes[_]
     resource.type == "aws_s3_bucket"
 
-    # Verifica se não tem block public access configurado
     not input.resource_changes[_].type == "aws_s3_bucket_public_access_block"
 
     msg := sprintf(
@@ -344,24 +335,20 @@ echo "Política Rego criada"
 
 ### Passo 6: Criar o Workflow GitHub Actions Completo
 
-**O que este passo faz:** Cria o arquivo de workflow do GitHub Actions — o núcleo do pipeline DevSecOps. Este workflow executa automaticamente em dois gatilhos: a cada Pull Request para `main` (para bloquear código inseguro ANTES do merge) e a cada push em `main` (para builds e assinatura de imagens em produção). O pipeline tem 5 jobs que executam em paralelo onde possível, e um job final `security-gate` que consolida todos os resultados e decide se o PR pode ser mergeado.
+**O que este passo faz:** Cria o arquivo principal do pipeline DevSecOps — `.github/workflows/security.yml`. Este workflow orquestra 4 jobs:
 
-**Arquitetura do pipeline:**
-- **Job `checkov`:** Scan de IaC com Checkov (verifica se o Terraform tem misconfigurations)
-- **Job `tfsec`:** Segundo scan de IaC com tfsec (perspectiva complementar)
-- **Job `conftest-opa`:** Valida políticas de negócio customizadas via OPA/Rego
-- **Job `trivy-image`:** Escaneia a imagem Docker para CVEs e segredos
-- **Job `sign-image`:** Assina a imagem com Cosign (keyless) para supply chain security
-- **Job `security-gate`:** Verifica se TODOS os jobs acima passaram — bloqueia o merge se qualquer um falhou
+**Job `checkov`** (IaC Security Scan): analisa o Terraform, **bloqueia o merge** se encontrar CRITICAL/HIGH via `continue-on-error: false`, publica comentário automático na PR com os findings, salva resultados como artefato por 90 dias.
 
-**Por que o security-gate é o passo mais importante:** Um pipeline sem gate permite que um desenvolvedor ignore um job com falha. O `security-gate` usa `needs: [checkov, tfsec, conftest-opa, trivy-image]` e `if: failure()` para garantir que SE qualquer job crítico falhou, o gate falha também — tornando impossível mergear código que violou qualquer política de segurança. Esta é a implementação técnica do princípio "Security as Code" do CISO do Banco Meridian.
+**Job `tfsec`**: complementa o Checkov como segunda perspectiva. O `soft_fail: true` significa que o tfsec **nunca bloqueia** — apenas gera warnings no GitHub Code Scanning via SARIF.
+
+**Job `container-security`**: executa somente em push ao main (não em PRs). Sequência: build → Trivy CVE scan (bloqueia em CRITICAL) → Trivy secrets scan (bloqueia) → Syft SBOM (salvo 365 dias como evidência BACEN) → push para GHCR → Cosign sign keyless → Cosign verify.
+
+**Job `security-gate`**: verifica o resultado dos jobs críticos e falha o workflow se o Checkov falhou, garantindo que o status do PR apareça como bloqueado no GitHub.
+
+**Por que agora:** Este é o passo central do laboratório. Todos os passos anteriores prepararam os arquivos que este workflow vai processar. O workflow é disparado automaticamente quando você criar a PR no Passo 7.
 
 ```bash
 cat > .github/workflows/security.yml << 'WORKFLOW'
-# .github/workflows/security.yml
-# Pipeline DevSecOps Completo — Banco Meridian
-# Módulos: Checkov + tfsec + Docker Build + Trivy + Syft + Cosign
-
 name: DevSecOps Security Pipeline
 
 on:
@@ -382,10 +369,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}/api
 
 jobs:
-  # ════════════════════════════════════════════════════════
   # JOB 1: CHECKOV — IaC Security Scan
   # Falha em CRITICAL/HIGH, warn em MEDIUM/LOW
-  # ════════════════════════════════════════════════════════
   checkov:
     name: "IaC: Checkov Scan"
     runs-on: ubuntu-latest
@@ -396,7 +381,7 @@ jobs:
       - name: Instalar Checkov
         run: pip install checkov
 
-      - name: Executar Checkov
+      - name: Executar Checkov (falha em CRITICAL/HIGH)
         id: checkov
         run: |
           mkdir -p checkov-results
@@ -424,13 +409,13 @@ jobs:
               const failed = results.results?.failed_checks?.filter(c =>
                 ['CRITICAL', 'HIGH'].includes(c.severity)) || [];
               body += failed.length > 0
-                ? `❌ **${failed.length} findings CRITICAL/HIGH**\n\n` +
+                ? `FALHOU: ${failed.length} findings CRITICAL/HIGH\n\n` +
                   failed.slice(0, 10).map(c =>
-                    `- \`[${c.check_id}]\` ${c.check.name} em \`${c.file_path}:${c.file_line_range[0]}\``
+                    `- [${c.check_id}] ${c.check.name} em ${c.file_path}:${c.file_line_range[0]}`
                   ).join('\n')
-                : '✅ Sem findings CRITICAL/HIGH — IaC aprovado';
+                : 'APROVADO: Sem findings CRITICAL/HIGH';
             } catch(e) {
-              body += `⚠️ Erro ao processar relatório: ${e.message}`;
+              body += `Erro ao processar relatório: ${e.message}`;
             }
             github.rest.issues.createComment({
               issue_number: context.issue.number,
@@ -447,10 +432,7 @@ jobs:
           path: checkov-results/
           retention-days: 90
 
-  # ════════════════════════════════════════════════════════
-  # JOB 2: TFSEC — Terraform Security Scanner
-  # Apenas warn (não bloqueia — complementar ao Checkov)
-  # ════════════════════════════════════════════════════════
+  # JOB 2: TFSEC — Terraform Security Scanner (apenas warn)
   tfsec:
     name: "IaC: tfsec Scan"
     runs-on: ubuntu-latest
@@ -473,10 +455,8 @@ jobs:
           sarif_file: tfsec.sarif
           category: tfsec
 
-  # ════════════════════════════════════════════════════════
   # JOB 3: CONTAINER — Build + Scan + SBOM + Sign
-  # Executa somente no push ao main (não em PR)
-  # ════════════════════════════════════════════════════════
+  # Executa somente no push ao main
   container-security:
     name: "Container: Build, Scan, Sign"
     runs-on: ubuntu-latest
@@ -496,8 +476,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # STEP 5: Build da imagem (sem push ainda)
-      - name: Build imagem Docker
+      - name: Build imagem Docker (sem push ainda)
         uses: docker/build-push-action@v5
         with:
           context: ./app
@@ -505,10 +484,7 @@ jobs:
           push: false
           load: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
-      # STEP 6: Trivy scan — falha se CRITICAL CVE
       - name: Trivy — Vulnerability Scan (falha em CRITICAL)
         uses: aquasecurity/trivy-action@master
         with:
@@ -534,7 +510,6 @@ jobs:
           sarif_file: trivy-image.sarif
           category: trivy-image
 
-      # STEP 7: Syft — Gerar SBOM
       - name: Syft — Gerar SBOM CycloneDX
         uses: anchore/syft-action@v0.16.0
         with:
@@ -549,7 +524,6 @@ jobs:
           path: sbom.cyclonedx.json
           retention-days: 365
 
-      # STEP 8: Push para GHCR (somente se scan passou)
       - name: Push imagem para GHCR
         uses: docker/build-push-action@v5
         id: push
@@ -565,7 +539,6 @@ jobs:
             security.trivy.status=passed
             security.scan.date=${{ github.run_started_at }}
 
-      # STEP 8 (continuação): Cosign — Assinar imagem
       - name: Instalar Cosign
         uses: sigstore/cosign-installer@v3
 
@@ -575,18 +548,7 @@ jobs:
         run: |
           cosign sign --yes \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
-          echo "Imagem assinada: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
 
-      - name: Cosign — Anexar SBOM como attestation
-        env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          cosign attest --yes \
-            --type cyclonedx \
-            --predicate sbom.cyclonedx.json \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
-
-      # STEP 10: Verificação da assinatura antes do deploy
       - name: Cosign — Verificar assinatura (pré-deploy)
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -595,24 +557,9 @@ jobs:
             --certificate-identity-regexp="https://github.com/${{ github.repository }}.*" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}
-          echo "✓ Assinatura verificada — imagem autorizada para deploy"
+          echo "Verificado — imagem autorizada para deploy"
 
-      - name: Sumário de segurança
-        run: |
-          echo "## Sumário do Pipeline de Segurança" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Etapa | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|:------|:------:|" >> $GITHUB_STEP_SUMMARY
-          echo "| Checkov IaC | ✅ Passou |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trivy image scan | ✅ Passou |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trivy secrets scan | ✅ Passou |" >> $GITHUB_STEP_SUMMARY
-          echo "| SBOM gerado | ✅ CycloneDX |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cosign sign | ✅ Keyless OIDC |" >> $GITHUB_STEP_SUMMARY
-          echo "| Cosign verify | ✅ Verificado |" >> $GITHUB_STEP_SUMMARY
-
-  # ════════════════════════════════════════════════════════
   # JOB 4: SECURITY GATE — Decisão Final
-  # ════════════════════════════════════════════════════════
   security-gate:
     name: Security Gate Final
     runs-on: ubuntu-latest
@@ -625,85 +572,80 @@ jobs:
           echo "tfsec: ${{ needs.tfsec.result }}"
 
           if [[ "${{ needs.checkov.result }}" == "failure" ]]; then
-            echo "❌ SECURITY GATE: FALHOU — Checkov encontrou CRITICAL/HIGH"
-            echo "O PR não pode ser mergeado. Corrija os findings de IaC security."
+            echo "SECURITY GATE: FALHOU — Checkov encontrou CRITICAL/HIGH"
             exit 1
           fi
 
-          echo "✅ SECURITY GATE: APROVADO — Sem blocking findings"
+          echo "SECURITY GATE: APROVADO — Sem blocking findings"
 WORKFLOW
 
-echo "Workflow GitHub Actions criado: .github/workflows/security.yml"
+echo "Workflow GitHub Actions criado"
 ```
 
 ---
 
 ### Passo 7: Fazer Push e Criar PR
 
-**O que este passo faz:** Faz commit de todos os arquivos criados e abre uma Pull Request para a branch `main`. Este é o momento em que o pipeline de segurança é acionado pela primeira vez no contexto real — o GitHub detecta o PR e invoca automaticamente o workflow `.github/workflows/security.yml`. O commit message segue o padrão Conventional Commits (`feat:`) que muitas organizações usam para rastrear mudanças por tipo.
+**O que este passo faz:** Faz commit de todos os arquivos criados, cria uma branch `feature/devsecops-pipeline` e abre uma Pull Request no GitHub. A PR é o evento que dispara o workflow — o GitHub Actions roda os jobs `checkov`, `tfsec` e `security-gate` automaticamente quando a PR é criada. A PR é criada intencionalmente com o Terraform inseguro para observar o pipeline bloquear.
 
-**O que esperar:** O pipeline iniciará em ~30 segundos após o `gh pr create`. Você verá os checks aparecerem no PR no GitHub como "In progress". Como o `terraform/main.tf` contém um bucket S3 intencionalmente inseguro (sem criptografia, sem block public access), o job `checkov` **vai falhar** — e isso é o comportamento correto. O próximo passo (Passo 8) vai analisar e interpretar esta falha.
+**Por que agora:** Você precisa de uma PR para ver o pipeline em ação e confirmar que o bloqueio funciona antes de corrigir o código.
 
 ```bash
-# Adicionar todos os arquivos
 git add .
-git commit -m "feat: adicionar pipeline DevSecOps com Checkov + Trivy + Cosign
+git commit -m "feat: adicionar pipeline DevSecOps — Terraform inseguro intencional para demo"
 
-- terraform/main.tf com bucket inseguro (para testar falha do pipeline)
-- Dockerfile multi-stage com usuário não-root
-- Checkov configurado para falhar em CRITICAL/HIGH
-- GitHub Actions workflow completo
-- SBOM gerado com Syft
-- Assinatura de imagem com Cosign keyless"
-
-# Push para branch feature
 git checkout -b feature/devsecops-pipeline
 git push -u origin feature/devsecops-pipeline
 
-# Criar PR
 gh pr create \
   --title "feat: implementar pipeline DevSecOps completo" \
   --body "Pipeline com Checkov, tfsec, Trivy, Syft e Cosign.
 
-**⚠️ ATENÇÃO:** Este PR contém um recurso Terraform intencionalmente inseguro para demonstrar o bloqueio do pipeline.
-
-Esperado: Checkov deve FALHAR e bloquear o merge."
+AVISO: Contém Terraform intencionalmente inseguro para demonstrar o bloqueio."
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
 https://github.com/seu-usuario/bancomeridian-api-lab02/pull/1
 ```
 
 ---
 
-### Passo 8: Verificar Falha do Pipeline (Terraform Inseguro)
+### Passo 8: Verificar Falha do Pipeline
+
+**O que este passo faz:** Aguarda a execução do workflow e confirma que o Checkov detectou os 3 findings CRITICAL/HIGH no arquivo Terraform inseguro. O `gh run watch` mostra o progresso em tempo real. O `gh pr checks` exibe o status final — você deve ver Checkov com `FAILURE` e Security Gate com `FAILURE`. O tfsec aparece como `SUCCESS` por ter `soft_fail: true`.
+
+**Por que agora:** Esta é a verificação de que o bloqueio funciona. Se o Checkov não falhou, há algo errado no workflow e você precisa investigar antes de continuar.
 
 ```bash
 # Aguardar execução do workflow (2-3 minutos)
 gh run watch
 
-# Verificar status
+# Verificar status final
 gh pr checks
+```
 
-# Resultado esperado:
-# ❌ IaC: Checkov Scan — FAILURE
-#    Findings: CKV_AWS_19, CKV_AWS_18, CKV_AWS_145
-# ✓ IaC: tfsec Scan — SUCCESS (apenas warn)
-# ❌ Security Gate Final — FAILURE (dependente do Checkov)
+**O que você deve ver:**
+```
+FALHA: IaC: Checkov Scan    — Reason: CKV_AWS_19, CKV_AWS_18, CKV_AWS_145
+OK:    IaC: tfsec Scan      — SUCCESS (apenas warn)
+FALHA: Security Gate Final  — FAILURE (dependente do Checkov)
 ```
 
 ---
 
 ### Passo 9: Verificar Comentário Automático na PR
 
+**O que este passo faz:** Verifica o comentário automático publicado na PR pelo GitHub Actions. O step lê o JSON do Checkov e formata uma mensagem com a lista de findings CRITICAL/HIGH: ID do check, nome descritivo, arquivo e linha. Esse comentário é o que o desenvolvedor vê quando o pipeline bloqueia o código — ele explica exatamente o que precisa ser corrigido, tornando o DevSecOps colaborativo e não apenas restritivo.
+
+**Por que agora:** Validar que o comentário foi publicado confirma que o feedback loop está funcionando. Um pipeline que bloqueia sem explicar o motivo cria fricção desnecessária entre os times de desenvolvimento e segurança.
+
 ```bash
-# Ver comentários na PR
 gh pr view --comments
 
-# Esperado: comentário automático do GitHub Actions com os findings:
+# Esperado:
 # "## Checkov IaC Security Scan
-# ❌ 3 findings CRITICAL/HIGH
+# FALHOU: 3 findings CRITICAL/HIGH
 # - [CKV_AWS_19] S3 bucket sem block public access em terraform/main.tf:10
 # - [CKV_AWS_18] S3 bucket sem access logging em terraform/main.tf:10
 # - [CKV_AWS_145] S3 bucket sem criptografia KMS em terraform/main.tf:10"
@@ -713,22 +655,14 @@ gh pr view --comments
 
 ### Passo 10: Corrigir o Terraform e Verificar Aprovação
 
-**O que este passo faz:** Demonstra o ciclo completo de "shift-left em ação": o desenvolvedor recebe feedback sobre a misconfiguration diretamente no PR (via comentário do Checkov), corrige o código, faz novo push na mesma branch, e o pipeline re-executa automaticamente — desta vez aprovando. Este ciclo é a prova prática do valor do shift-left: a correção ocorre em minutos, no contexto do código, antes de qualquer deploy.
+**O que este passo faz:** Corrige o bucket Terraform inseguro adicionando os 3 recursos que estavam faltando. Cada recurso resolve um dos 3 checks que falhavam no Checkov: `aws_s3_bucket_public_access_block` resolve CKV_AWS_19, `aws_s3_bucket_server_side_encryption_configuration` resolve CKV_AWS_145, `aws_s3_bucket_logging` resolve CKV_AWS_18. Depois do commit e push, o GitHub Actions detecta automaticamente o novo commit na PR e reroda o pipeline.
 
-**O que o aluno aprende com este passo:** O pipeline não é uma barreira — é um assistente. Ao corrigir o bucket S3 adicionando as configurações de segurança necessárias (block public access, criptografia, logging), o desenvolvedor está aprendendo na prática o que as políticas CIS/BACEN exigem, e o porquê de cada configuração. Este é o verdadeiro objetivo do shift-left: educar enquanto bloqueia.
+**Por que agora:** A correção demonstra o ciclo completo do DevSecOps: detectar → reportar → corrigir → verificar. Este é o fluxo que o Banco Meridian usará em produção para todo código novo.
 
 ```bash
-# Editar terraform/main.tf — remover o bucket inseguro
-# (O bucket inseguro era para demonstração — remova ou adicione as configurações)
-
-# Opção 1: Remover o recurso inseguro
-grep -n "inseguro" terraform/main.tf
-# Deletar as linhas do bloco aws_s3_bucket inseguro
-
-# Opção 2: Adicionar configurações de segurança ao bucket inseguro
 cat >> terraform/main.tf << 'TF'
 
-# Adicionando configurações de segurança ao bucket anteriormente inseguro
+# Correção dos findings Checkov no bucket inseguro
 resource "aws_s3_bucket_public_access_block" "api_storage_inseguro_fix" {
   bucket                  = aws_s3_bucket.api_storage_inseguro.id
   block_public_acls       = true
@@ -753,37 +687,32 @@ resource "aws_s3_bucket_logging" "api_storage_inseguro_fix" {
 }
 TF
 
-# Commit a correção
 git add terraform/main.tf
-git commit -m "fix: adicionar configurações de segurança ao bucket S3
-
-Resolvendo findings Checkov:
-- CKV_AWS_19: block public access habilitado
-- CKV_AWS_18: access logging habilitado
-- CKV_AWS_145: criptografia KMS habilitada"
-
+git commit -m "fix: resolver findings Checkov CKV_AWS_19, CKV_AWS_18, CKV_AWS_145"
 git push
 
-# Aguardar pipeline rerrodar
 gh run watch
 gh pr checks
 
-# Resultado esperado agora:
-# ✅ IaC: Checkov Scan — SUCCESS
-# ✅ IaC: tfsec Scan — SUCCESS
-# ✅ Security Gate Final — SUCCESS
-# → PR APROVADO para merge
+# Resultado esperado:
+# OK: IaC: Checkov Scan   — SUCCESS
+# OK: IaC: tfsec Scan     — SUCCESS
+# OK: Security Gate Final — SUCCESS
+# PR APROVADO para merge
 ```
 
 ---
 
 ### Passo 11: Verificar SBOM no GitHub Security
 
+**O que este passo faz:** Após o merge no main, o job `container-security` executa e gera o SBOM (Software Bill of Materials) da imagem Docker usando o Syft. O SBOM é um inventário completo de todos os componentes de software na imagem — sistema operacional, bibliotecas Python (fastapi, uvicorn), dependências transitivas, e suas versões exatas. O formato CycloneDX é um padrão aberto suportado por ferramentas de análise. O SBOM é salvo por 365 dias como evidência — se uma CVE nova for descoberta 6 meses depois, você pode verificar quais imagens implantadas são afetadas.
+
+**Por que agora:** O SBOM só é gerado após o merge no main (o job `container-security` tem `if: github.ref == 'refs/heads/main'`). Este passo verifica que o artefato foi gerado corretamente.
+
 ```bash
-# Após merge no main, verificar os artefatos criados
 gh run list --limit 5
 
-# Baixar o SBOM gerado
+# Baixar o SBOM
 gh run download --name sbom-$(git rev-parse HEAD)
 ls sbom.cyclonedx.json
 
@@ -793,9 +722,8 @@ import json, sys
 sbom = json.load(sys.stdin)
 components = sbom.get('components', [])
 print(f'Componentes no SBOM: {len(components)}')
-print('Primeiros 10:')
 for c in components[:10]:
-    print(f'  - {c.get(\"name\", \"?\")}:{c.get(\"version\", \"?\")}')
+    print(f'  - {c.get(\"name\",\"?\")}:{c.get(\"version\",\"?\")}')
 "
 ```
 
@@ -803,12 +731,14 @@ for c in components[:10]:
 
 ### Passo 12: Verificar Assinatura Cosign
 
+**O que este passo faz:** Verifica localmente a assinatura Cosign da imagem publicada no GHCR. O Cosign keyless usa OIDC — em vez de gerenciar uma chave privada, a assinatura é associada à identidade do workflow do GitHub Actions (via OIDC token) e registrada no Rekor, um log de transparência imutável e público. O parâmetro `--certificate-identity-regexp` verifica que a assinatura veio exatamente do workflow deste repositório, e `--certificate-oidc-issuer` verifica que o token OIDC foi emitido pelo GitHub Actions.
+
+**Por que agora:** A verificação da assinatura é o passo final do ciclo de Supply Chain Security. Ela garante que a imagem a ser deployada é exatamente a imagem que passou pelo pipeline de segurança — nenhum atacante pode injetar uma imagem não assinada no fluxo de deploy.
+
 ```bash
-# Instalar Cosign (se não instalado)
 brew install cosign || \
   curl -O -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64"
 
-# Verificar a assinatura da imagem publicada
 IMAGE="ghcr.io/$(gh api /user --jq '.login')/bancomeridian-api-lab02/api:latest"
 echo "Verificando: $IMAGE"
 
@@ -816,17 +746,17 @@ cosign verify \
   --certificate-identity-regexp="https://github.com/$(gh api /user --jq '.login')/bancomeridian-api-lab02.*" \
   --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
   $IMAGE | python3 -m json.tool
-
-# Resultado esperado: JSON com informações da assinatura incluindo
-# o commit SHA, repositório e timestamp
 ```
 
 ---
 
 ### Passo 13: Verificar GitHub Code Scanning
 
+**O que este passo faz:** Consulta os alertas do GitHub Code Scanning populados pelos arquivos SARIF enviados pelos jobs `tfsec` e `trivy`. O Code Scanning é o painel de segurança nativo do GitHub — consolida findings de múltiplas ferramentas em uma interface unificada, com rastreamento de status (aberto/resolvido), filtros por severidade e branch.
+
+**Por que agora:** O Code Scanning persiste os findings além da execução do workflow — enquanto os artifacts têm retenção de 90 dias, os alertas do Code Scanning ficam vinculados ao repositório e podem ser consultados a qualquer momento pelo time de segurança.
+
 ```bash
-# Ver alertas no GitHub Code Scanning (SARIF)
 gh api repos/$(gh api /user --jq '.login')/bancomeridian-api-lab02/code-scanning/alerts \
   --jq '.[] | "\(.rule.description) — \(.most_recent_instance.location.path)"' | head -20
 ```
@@ -835,12 +765,14 @@ gh api repos/$(gh api /user --jq '.login')/bancomeridian-api-lab02/code-scanning
 
 ### Passo 14: Testar Trivy Scan Localmente
 
+**O que este passo faz:** Executa o Trivy localmente para simular o que o pipeline fará — detectando CVEs e secrets antes do push. O `--exit-code 1` faz o comando retornar erro se encontrar vulnerabilidades, o que pode ser integrado em git hooks de pré-push. Testar localmente economiza tempo de pipeline e implementa o princípio "shift left" do DevSecOps: mover os controles de segurança o mais cedo possível no ciclo de desenvolvimento.
+
+**Por que agora:** Executar o Trivy antes do commit é mais eficiente do que descobrir o problema no pipeline após o push. Um desenvolvedor que testa localmente antes de commitar fecha o ciclo de feedback em segundos em vez de minutos.
+
 ```bash
-# Instalar Trivy
 brew install trivy || \
   curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
 
-# Scan da imagem localmente (antes de enviar para CI)
 docker build -t bancomeridian-api-test ./app/
 
 # Scan de vulnerabilidades
@@ -857,14 +789,13 @@ trivy config ./terraform/ --severity HIGH,CRITICAL
 
 ### Passo 15: Documentar o Pipeline para o CISO
 
+**O que este passo faz:** Cria o arquivo `DEVSECOPS-PIPELINE.md` com a documentação completa do pipeline — uma tabela com cada etapa de segurança, o que verifica, e a ação em caso de falha. A seção "Evidências para Auditoria BACEN" mapeia cada artefato gerado para o artigo específico do BACEN 4.893 que ele atende. Este documento é o entregável formal para o CISO e para a auditoria BACEN — transforma o pipeline técnico em evidência de conformidade.
+
+**Por que agora:** O pipeline está funcionando. Agora ele precisa ser documentado de forma que o CISO e os auditores possam entender o que ele faz, por que faz, e quais evidências ele gera. Sem documentação, o pipeline existe mas não prova conformidade.
+
 ```bash
 cat > DEVSECOPS-PIPELINE.md << 'DOC'
 # Pipeline DevSecOps — Banco Meridian API Financeira
-
-## Visão Geral
-
-Este repositório implementa um pipeline de segurança completo para o ciclo de
-vida da API Financeira do Banco Meridian.
 
 ## Etapas de Segurança
 
@@ -882,16 +813,9 @@ vida da API Financeira do Banco Meridian.
 
 ## Evidências para Auditoria BACEN 4.893
 
-- SBOM retido por 365 dias (evidência de inventário de componentes)
-- SARIF no GitHub Code Scanning (evidência de testes de vulnerabilidade)
-- Assinatura Cosign no Rekor (log imutável de cada deploy autorizado)
-- GitHub Actions logs (auditoria de quem aprovou cada deploy)
-
-## Conformidade
-
-| Artigo BACEN | Controle | Evidência |
-|:-------------|:---------|:----------|
-| Art. 5 — Testes de vulnerabilidade | Checkov + Trivy em cada PR | GitHub Actions logs |
+| Artigo BACEN | Controle | Evidência Gerada |
+|:-------------|:---------|:-----------------|
+| Art. 5 — Testes de vulnerabilidade | Checkov + Trivy em cada PR | GitHub Actions logs + SARIF |
 | Art. 6 — Monitoramento | SARIF em Code Scanning | GitHub Security |
 | Art. 8 — Controle de acesso | Apenas imagens assinadas chegam ao deploy | Cosign + Rekor |
 DOC
@@ -929,41 +853,38 @@ echo "Documentação criada e enviada para o repositório"
 
 ## 8. Gabarito Completo
 
-### Workflow Final `.github/workflows/security.yml`
-
-O arquivo completo está no Passo 6 deste laboratório.
-
-**Pontos críticos do workflow:**
-1. `checkov` tem `continue-on-error: false` — falha o job se encontrar CRITICAL/HIGH
-2. `tfsec` tem `soft_fail: true` — nunca falha o job, apenas warn
-3. Container push ocorre APENAS após scan de vulnerabilidades passar (`needs: [checkov]`)
-4. Cosign sign usa `--yes` e `id-token: write` permission para keyless OIDC
-5. `security-gate` job verifica o resultado dos jobs críticos e bloqueia o PR
-
 ### Status Esperado dos Jobs — PR com Terraform Inseguro
 
 ```
-✗ IaC: Checkov Scan           → FAILURE
+FALHA: IaC: Checkov Scan           → FAILURE
   Reason: CKV_AWS_19, CKV_AWS_18, CKV_AWS_145
 
-✓ IaC: tfsec Scan             → SUCCESS (soft fail, apenas warn)
+OK:    IaC: tfsec Scan             → SUCCESS (soft fail, apenas warn)
 
-[SKIPPED] Container: Build, Scan, Sign → SKIPPED (precisa de push ao main)
+SKIP:  Container: Build, Scan, Sign → SKIPPED (somente no push ao main)
 
-✗ Security Gate Final         → FAILURE (dependente do Checkov)
+FALHA: Security Gate Final         → FAILURE (dependente do Checkov)
 
-Pull Request: ❌ BLOCKED — "Some required status checks have not passed"
+Pull Request: BLOCKED — "Some required status checks have not passed"
 ```
+
+**Por que esta é a resposta correta:** O Checkov detecta os 3 checks que o bucket inseguro viola: `CKV_AWS_19` (sem block public access), `CKV_AWS_18` (sem access logging), `CKV_AWS_145` (sem criptografia KMS). O tfsec tem `soft_fail: true` — serve como segunda opinião no Code Scanning sem bloquear o fluxo. O job `container-security` fica SKIPPED porque tem `if: github.ref == 'refs/heads/main' && github.event_name == 'push'` — PRs não atendem essa condição.
+
+**Erro mais comum:** Esperar que o tfsec bloqueie o PR. O tfsec está configurado com `soft_fail: true` propositalmente. Usar duas ferramentas com comportamentos diferentes (uma bloqueia, outra avisa) é uma estratégia deliberada: o Checkov garante a barreira de qualidade, o tfsec oferece visibilidade adicional sem criar fricção excessiva no processo de desenvolvimento.
+
+---
 
 ### Status Esperado dos Jobs — Após Correção do Terraform
 
 ```
-✓ IaC: Checkov Scan           → SUCCESS
-✓ IaC: tfsec Scan             → SUCCESS
-✓ Security Gate Final         → SUCCESS
+OK: IaC: Checkov Scan           → SUCCESS
+OK: IaC: tfsec Scan             → SUCCESS
+OK: Security Gate Final         → SUCCESS
 
-Pull Request: ✅ READY TO MERGE
+Pull Request: READY TO MERGE
 ```
+
+---
 
 ### Verificação da Assinatura Cosign — Output Esperado
 
@@ -980,7 +901,6 @@ Pull Request: ✅ READY TO MERGE
       "type": "cosign container image signature"
     },
     "optional": {
-      "Bundle": {...},
       "Issuer": "https://token.actions.githubusercontent.com",
       "Subject": "https://github.com/usuario/bancomeridian-api-lab02/.github/workflows/security.yml@refs/heads/main",
       "githubWorkflowRef": "refs/heads/main",
@@ -989,9 +909,11 @@ Pull Request: ✅ READY TO MERGE
     }
   }
 ]
-
-✅ cosign verify: sucesso — imagem assinada pelo GitHub Actions do repositório
 ```
+
+**Por que esta é a resposta correta:** Os campos mais importantes são `Issuer` (deve ser `https://token.actions.githubusercontent.com` — confirma que foi o GitHub Actions), `Subject` (aponta para o arquivo de workflow específico e o branch `main`), e `githubWorkflowSha` (o commit SHA exato). Esses campos provam a cadeia de custódia: esta imagem foi gerada pelo workflow X, do commit Y, no branch main.
+
+**Erro mais comum:** Tentar verificar a assinatura sem os flags `--certificate-identity-regexp` e `--certificate-oidc-issuer`. Sem esses flags o Cosign aceita qualquer assinatura válida no Rekor — incluindo assinaturas de outros repositórios. Os dois flags juntos garantem que a assinatura veio especificamente do pipeline DevSecOps do Banco Meridian.
 
 ---
 
