@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1000" height="680" viewBox="0 0 1000 680" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <!-- Fundo -->
+  <rect width="1000" height="680" fill="#060d1a" rx="16"/>
+
+  <!-- Título -->
+  <text x="500" y="38" text-anchor="middle" font-size="20" font-weight="bold" fill="#f1f5f9">Roadmap de Certificações — Formação Security Operations em Nuvem</text>
+  <text x="500" y="58" text-anchor="middle" font-size="12" fill="#64748b">CECyber · Mapa de preparação por certificação · 4 cursos · 140h</text>
+  <line x1="30" y1="72" x2="970" y2="72" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- ================= LINHA DO TEMPO SUPERIOR ================= -->
+  <!-- Seta da linha do tempo -->
+  <line x1="40" y1="102" x2="960" y2="102" stroke="#334155" stroke-width="2"/>
+  <polygon points="960,97 975,102 960,107" fill="#334155"/>
+  <text x="40" y="96" font-size="10" fill="#475569">Início</text>
+  <text x="920" y="96" font-size="10" fill="#475569">Avançado</text>
+
+  <!-- Marcos da linha do tempo -->
+  <circle cx="140" cy="102" r="6" fill="#3b82f6"/>
+  <text x="140" y="120" text-anchor="middle" font-size="10" fill="#94a3b8">Módulo 01</text>
+  <circle cx="300" cy="102" r="6" fill="#3b82f6"/>
+  <text x="300" y="120" text-anchor="middle" font-size="10" fill="#94a3b8">Módulo 03</text>
+  <circle cx="500" cy="102" r="6" fill="#3b82f6"/>
+  <text x="500" y="120" text-anchor="middle" font-size="10" fill="#94a3b8">Módulo 05</text>
+  <circle cx="700" cy="102" r="6" fill="#3b82f6"/>
+  <text x="700" y="120" text-anchor="middle" font-size="10" fill="#94a3b8">Módulo 07</text>
+  <circle cx="900" cy="102" r="6" fill="#f59e0b"/>
+  <text x="900" y="120" text-anchor="middle" font-size="10" fill="#fbbf24">Capstone</text>
+
+  <!-- ================= CERTIFICAÇÃO SC-200 ================= -->
+  <rect x="30" y="135" width="220" height="200" rx="12" fill="#12102a" stroke="#7c3aed" stroke-width="2"/>
+  <rect x="30" y="135" width="220" height="30" rx="12" fill="#6d28d9"/>
+  <rect x="30" y="153" width="220" height="12" fill="#6d28d9"/>
+  <text x="140" y="155" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">Microsoft SC-200</text>
+  <text x="140" y="173" text-anchor="middle" font-size="10" fill="#c4b5fd">Security Operations Analyst</text>
+  <text x="140" y="186" text-anchor="middle" font-size="9" fill="#7c3aed">Emissor: Microsoft · Intermediário</text>
+
+  <!-- Conteúdo SC-200 -->
+  <text x="45" y="208" font-size="10" font-weight="bold" fill="#a78bfa">Domínios do Exame:</text>
+  <circle cx="50" cy="222" r="3" fill="#8b5cf6"/>
+  <text x="60" y="226" font-size="9" fill="#cbd5e1">Microsoft Sentinel (35–40%)</text>
+  <circle cx="50" cy="238" r="3" fill="#8b5cf6"/>
+  <text x="60" y="242" font-size="9" fill="#cbd5e1">Defender XDR (25–30%)</text>
+  <circle cx="50" cy="254" r="3" fill="#8b5cf6"/>
+  <text x="60" y="258" font-size="9" fill="#cbd5e1">Defender for Cloud (15–20%)</text>
+  <circle cx="50" cy="270" r="3" fill="#8b5cf6"/>
+  <text x="60" y="274" font-size="9" fill="#cbd5e1">Threat Intelligence (10–15%)</text>
+
+  <rect x="40" y="285" width="200" height="22" rx="6" fill="#3b0764" stroke="#9333ea" stroke-width="1"/>
+  <text x="140" y="300" text-anchor="middle" font-size="10" font-weight="bold" fill="#e9d5ff">✓ Curso 2: Azure SecOps (40h)</text>
+
+  <text x="140" y="328" text-anchor="middle" font-size="10" fill="#64748b">Simulado incluído no curso</text>
+
+  <!-- ================= CERTIFICAÇÃO AWS SECURITY ================= -->
+  <rect x="270" y="135" width="220" height="200" rx="12" fill="#1a1000" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="270" y="135" width="220" height="30" rx="12" fill="#d97706"/>
+  <rect x="270" y="153" width="220" height="12" fill="#d97706"/>
+  <text x="380" y="155" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">AWS Security Specialty</text>
+  <text x="380" y="173" text-anchor="middle" font-size="10" fill="#fde68a">SCS-C02 · Specialty Level</text>
+  <text x="380" y="186" text-anchor="middle" font-size="9" fill="#d97706">Emissor: AWS · Avançado</text>
+
+  <!-- Conteúdo AWS Security -->
+  <text x="285" y="208" font-size="10" font-weight="bold" fill="#fbbf24">Domínios do Exame (6):</text>
+  <circle cx="290" cy="222" r="3" fill="#f59e0b"/>
+  <text x="300" y="226" font-size="9" fill="#cbd5e1">Threat Detection (14%)</text>
+  <circle cx="290" cy="238" r="3" fill="#f59e0b"/>
+  <text x="300" y="242" font-size="9" fill="#cbd5e1">Security Logging (18%)</text>
+  <circle cx="290" cy="254" r="3" fill="#f59e0b"/>
+  <text x="300" y="258" font-size="9" fill="#cbd5e1">Infrastructure Security (20%)</text>
+  <circle cx="290" cy="270" r="3" fill="#f59e0b"/>
+  <text x="300" y="274" font-size="9" fill="#cbd5e1">IAM &amp; Governance (16%)</text>
+  <circle cx="290" cy="286" r="3" fill="#f59e0b"/>
+  <text x="300" y="290" font-size="9" fill="#cbd5e1">Data Protection (18%) + Mgmt (14%)</text>
+
+  <rect x="280" y="300" width="200" height="22" rx="6" fill="#451a03" stroke="#f59e0b" stroke-width="1"/>
+  <text x="380" y="315" text-anchor="middle" font-size="10" font-weight="bold" fill="#fde68a">✓ Curso 3: AWS Cloud SecOps (40h)</text>
+
+  <!-- ================= CERTIFICAÇÃO GOOGLE CLOUD ================= -->
+  <rect x="510" y="135" width="220" height="200" rx="12" fill="#0a1a2e" stroke="#4285f4" stroke-width="2"/>
+  <rect x="510" y="135" width="220" height="30" rx="12" fill="#1a73e8"/>
+  <rect x="510" y="153" width="220" height="12" fill="#1a73e8"/>
+  <text x="620" y="155" text-anchor="middle" font-size="10" font-weight="bold" fill="#fff">Google Cloud Security Eng.</text>
+  <text x="620" y="173" text-anchor="middle" font-size="10" fill="#bfdbfe">Professional · Cloud Security</text>
+  <text x="620" y="186" text-anchor="middle" font-size="9" fill="#4285f4">Emissor: Google · Intermediário</text>
+
+  <!-- Conteúdo Google Cloud -->
+  <text x="525" y="208" font-size="10" font-weight="bold" fill="#93c5fd">Domínios do Exame (6):</text>
+  <circle cx="530" cy="222" r="3" fill="#4285f4"/>
+  <text x="540" y="226" font-size="9" fill="#cbd5e1">Configuring Access (27%)</text>
+  <circle cx="530" cy="238" r="3" fill="#4285f4"/>
+  <text x="540" y="242" font-size="9" fill="#cbd5e1">Securing Comms &amp; Network (23%)</text>
+  <circle cx="530" cy="254" r="3" fill="#4285f4"/>
+  <text x="540" y="258" font-size="9" fill="#cbd5e1">Ensuring Data Protection (20%)</text>
+  <circle cx="530" cy="270" r="3" fill="#4285f4"/>
+  <text x="540" y="274" font-size="9" fill="#cbd5e1">Managing Operations (22%)</text>
+  <circle cx="530" cy="286" r="3" fill="#4285f4"/>
+  <text x="540" y="290" font-size="9" fill="#cbd5e1">Supporting Compliance (8%)</text>
+
+  <rect x="520" y="300" width="200" height="22" rx="6" fill="#0f2235" stroke="#3b82f6" stroke-width="1"/>
+  <text x="620" y="315" text-anchor="middle" font-size="10" font-weight="bold" fill="#93c5fd">✓ Curso 1: Google SecOps (30h)</text>
+
+  <!-- ================= CERTIFICAÇÃO CCSP ================= -->
+  <rect x="750" y="135" width="220" height="200" rx="12" fill="#0f1f12" stroke="#22c55e" stroke-width="2"/>
+  <rect x="750" y="135" width="220" height="30" rx="12" fill="#16a34a"/>
+  <rect x="750" y="153" width="220" height="12" fill="#16a34a"/>
+  <text x="860" y="155" text-anchor="middle" font-size="11" font-weight="bold" fill="#fff">CCSP</text>
+  <text x="860" y="173" text-anchor="middle" font-size="10" fill="#bbf7d0">Cloud Security Professional · ISC²</text>
+  <text x="860" y="186" text-anchor="middle" font-size="9" fill="#16a34a">Emissor: ISC² · Avançado</text>
+
+  <!-- Conteúdo CCSP -->
+  <text x="765" y="208" font-size="10" font-weight="bold" fill="#86efac">6 Domínios (CBK 2022):</text>
+  <circle cx="770" cy="222" r="3" fill="#22c55e"/>
+  <text x="780" y="226" font-size="9" fill="#cbd5e1">Cloud Concepts &amp; Architecture (17%)</text>
+  <circle cx="770" cy="238" r="3" fill="#22c55e"/>
+  <text x="780" y="242" font-size="9" fill="#cbd5e1">Cloud Data Security (20%)</text>
+  <circle cx="770" cy="254" r="3" fill="#22c55e"/>
+  <text x="780" y="258" font-size="9" fill="#cbd5e1">Cloud Platform &amp; Infrastructure (17%)</text>
+  <circle cx="770" cy="270" r="3" fill="#22c55e"/>
+  <text x="780" y="274" font-size="9" fill="#cbd5e1">Cloud Application Security (17%)</text>
+  <circle cx="770" cy="286" r="3" fill="#22c55e"/>
+  <text x="780" y="290" font-size="9" fill="#cbd5e1">Security Operations (16%) + Legal (13%)</text>
+
+  <rect x="760" y="300" width="200" height="22" rx="6" fill="#052e16" stroke="#22c55e" stroke-width="1"/>
+  <text x="860" y="315" text-anchor="middle" font-size="10" font-weight="bold" fill="#86efac">✓ Curso 4: Cloud Security Tools (30h)</text>
+
+  <!-- ================= SEÇÃO INFERIOR: OUTRAS CERTIFICAÇÕES ================= -->
+  <line x1="30" y1="352" x2="970" y2="352" stroke="#1e293b" stroke-width="1"/>
+  <text x="500" y="376" text-anchor="middle" font-size="13" font-weight="bold" fill="#94a3b8">Certificações Complementares Apoiadas pelo Programa</text>
+
+  <!-- CompTIA CySA+ -->
+  <rect x="30" y="390" width="200" height="85" rx="10" fill="#1a1a2e" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="130" y="410" text-anchor="middle" font-size="12" font-weight="bold" fill="#818cf8">CompTIA CySA+</text>
+  <text x="130" y="426" text-anchor="middle" font-size="10" fill="#6366f1">CS0-003</text>
+  <text x="130" y="442" text-anchor="middle" font-size="9" fill="#94a3b8">Cursos 1, 2 e 3</text>
+  <text x="130" y="458" text-anchor="middle" font-size="9" fill="#64748b">Threat Intelligence · IR</text>
+  <text x="130" y="468" text-anchor="middle" font-size="9" fill="#64748b">Detecção · SOC Operations</text>
+
+  <!-- CompTIA CASP+ -->
+  <rect x="245" y="390" width="200" height="85" rx="10" fill="#1a1a2e" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="345" y="410" text-anchor="middle" font-size="12" font-weight="bold" fill="#818cf8">CompTIA CASP+</text>
+  <text x="345" y="426" text-anchor="middle" font-size="10" fill="#6366f1">CAS-004</text>
+  <text x="345" y="442" text-anchor="middle" font-size="9" fill="#94a3b8">Curso 4 (Cloud Tools)</text>
+  <text x="345" y="458" text-anchor="middle" font-size="9" fill="#64748b">Arquitetura Avançada</text>
+  <text x="345" y="468" text-anchor="middle" font-size="9" fill="#64748b">DevSecOps · Risk Management</text>
+
+  <!-- CCSK CSA -->
+  <rect x="460" y="390" width="200" height="85" rx="10" fill="#0d1f17" stroke="#10b981" stroke-width="1.5"/>
+  <text x="560" y="410" text-anchor="middle" font-size="12" font-weight="bold" fill="#34d399">CCSK</text>
+  <text x="560" y="426" text-anchor="middle" font-size="10" fill="#10b981">CSA Certificate · v5</text>
+  <text x="560" y="442" text-anchor="middle" font-size="9" fill="#94a3b8">Curso 4 (Cloud Tools)</text>
+  <text x="560" y="458" text-anchor="middle" font-size="9" fill="#64748b">Cloud Security Knowledge</text>
+  <text x="560" y="468" text-anchor="middle" font-size="9" fill="#64748b">CSPM · Architecture</text>
+
+  <!-- CISSP Cloud Domain -->
+  <rect x="675" y="390" width="200" height="85" rx="10" fill="#150d2a" stroke="#9333ea" stroke-width="1.5"/>
+  <text x="775" y="410" text-anchor="middle" font-size="12" font-weight="bold" fill="#c084fc">CISSP</text>
+  <text x="775" y="426" text-anchor="middle" font-size="10" fill="#9333ea">Cloud Security Domain</text>
+  <text x="775" y="442" text-anchor="middle" font-size="9" fill="#94a3b8">Curso 4 (Cloud Tools)</text>
+  <text x="775" y="458" text-anchor="middle" font-size="9" fill="#64748b">Domain 3: Security Arch.</text>
+  <text x="775" y="468" text-anchor="middle" font-size="9" fill="#64748b">Cloud Security CBK</text>
+
+  <!-- ================= SEÇÃO DE SEQUÊNCIA RECOMENDADA ================= -->
+  <rect x="30" y="490" width="940" height="80" rx="10" fill="#0c1628" stroke="#334155" stroke-width="1.5"/>
+  <text x="500" y="510" text-anchor="middle" font-size="12" font-weight="bold" fill="#94a3b8">Sequência Recomendada de Certificações</text>
+
+  <!-- Setas de sequência -->
+  <rect x="50" y="520" width="110" height="36" rx="8" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="105" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#93c5fd">AZ-900 / AWS CCP</text>
+  <text x="105" y="549" text-anchor="middle" font-size="8" fill="#60a5fa">Google Dig. Leader</text>
+  <line x1="160" y1="538" x2="185" y2="538" stroke="#475569" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="185" y="520" width="100" height="36" rx="8" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="235" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#93c5fd">CompTIA</text>
+  <text x="235" y="549" text-anchor="middle" font-size="8" fill="#60a5fa">Security+</text>
+  <line x1="285" y1="538" x2="310" y2="538" stroke="#475569" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="310" y="520" width="100" height="36" rx="8" fill="#1a0f35" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="360" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#c4b5fd">SC-200 ou</text>
+  <text x="360" y="549" text-anchor="middle" font-size="8" fill="#a78bfa">AWS Specialty</text>
+  <line x1="410" y1="538" x2="435" y2="538" stroke="#475569" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="435" y="520" width="100" height="36" rx="8" fill="#0a1a2e" stroke="#4285f4" stroke-width="1.5"/>
+  <text x="485" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#93c5fd">GCP Security</text>
+  <text x="485" y="549" text-anchor="middle" font-size="8" fill="#60a5fa">Engineer</text>
+  <line x1="535" y1="538" x2="560" y2="538" stroke="#475569" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="560" y="520" width="100" height="36" rx="8" fill="#0f1f12" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="610" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#86efac">CCSP /</text>
+  <text x="610" y="549" text-anchor="middle" font-size="8" fill="#4ade80">CCSK</text>
+  <line x1="660" y1="538" x2="685" y2="538" stroke="#475569" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="685" y="520" width="100" height="36" rx="8" fill="#150d2a" stroke="#9333ea" stroke-width="1.5"/>
+  <text x="735" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#c084fc">CISSP</text>
+  <text x="735" y="549" text-anchor="middle" font-size="8" fill="#a78bfa">Cloud Domain</text>
+  <line x1="785" y1="538" x2="810" y2="538" stroke="#475569" stroke-width="1.5" marker-end="url(#arr-gray)"/>
+
+  <rect x="810" y="520" width="130" height="36" rx="8" fill="#1a1a00" stroke="#eab308" stroke-width="1.5"/>
+  <text x="875" y="535" text-anchor="middle" font-size="9" font-weight="bold" fill="#fef08a">Head of Cloud</text>
+  <text x="875" y="549" text-anchor="middle" font-size="8" fill="#fbbf24">Security / CISO</text>
+
+  <!-- Aviso de regulação -->
+  <text x="500" y="600" text-anchor="middle" font-size="11" fill="#475569">O programa contempla também preparação para: CompTIA CySA+ · EC-Council CEH / CHFI (cenários cloud) · ISC² CISSP (domínio 3)</text>
+  <text x="500" y="618" text-anchor="middle" font-size="10" fill="#374151">Contexto regulatório brasileiro integrado: BACEN 4.893 · CMN 4.658 · LGPD · SUSEP · ANPD</text>
+  <text x="500" y="636" text-anchor="middle" font-size="10" fill="#374151">Parcerias: Microsoft (SC-200) · AWS (Security Specialty) · Google Cloud · CompTIA · EC-Council</text>
+
+  <defs>
+    <marker id="arr-gray" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#475569"/>
+    </marker>
+  </defs>
+</svg>
