@@ -116,7 +116,15 @@ O Amazon GuardDuty é o serviço de detecção de ameaças inteligente da AWS. E
 
 ## Seção 1 — Deploy GuardDuty Organization-Wide
 
-**Passo 1.1** — Habilitar GuardDuty na Management Account:
+### Passo 1.1 — Habilitar GuardDuty na Management Account e configurar delegated admin
+
+**O que este passo faz:** Dois comandos em sequência: o primeiro cria o detector GuardDuty na Management Account (111111111111) — o detector é o componente que recebe e armazena as configurações do GuardDuty em uma conta/região específica; o segundo (`enable-organization-admin-account`) transfere a autoridade administrativa do GuardDuty para a conta Audit (222222222222), que a partir deste momento passa a gerenciar todos os detectors de todas as contas-membro. A conta Management não deve ser usada para operações de segurança do dia a dia — ela contém apenas o OrganizationAdminAccount e as SCPs, não ferramentas operacionais.
+
+**Por que esta ordem:** O detector da Management Account deve existir antes da delegação de admin — sem ele, o `enable-organization-admin-account` falhará. A sequência é: criar detector → delegar admin → ir para a conta Audit → configurar auto-enable.
+
+**Por que isso importa para o Banco Meridian:** O incidente de março aconteceu porque o GuardDuty estava habilitado apenas em `sa-east-1` da conta Production — e o atacante operou em `us-east-1`. Com a delegação de administrador para a conta Audit e auto-enable org-wide (Passo 1.2), qualquer nova conta ou região terá GuardDuty habilitado automaticamente, eliminando os pontos cegos que permitiram o ataque de março operar por 2 horas sem detecção.
+
+**Permissão IAM necessária:** `guardduty:CreateDetector` na Management Account; `guardduty:EnableOrganizationAdminAccount` e `organizations:EnableAWSServiceAccess` na Management Account.
 
 ```bash
 # Habilitar detector na Management Account
@@ -136,7 +144,13 @@ aws guardduty enable-organization-admin-account \
 echo "Delegated Admin configurado para conta Audit (222222222222)"
 ```
 
-**Passo 1.2** — Na Audit Account, configurar auto-enable:
+### Passo 1.2 — Na Audit Account, configurar auto-enable e features
+
+**O que este passo faz:** Com a delegação de admin configurada no Passo 1.1, este passo opera na conta Audit (222222222222) para configurar três comportamentos: (1) `auto-enable ALL` garante que qualquer conta nova adicionada ao Organizations receberá GuardDuty habilitado automaticamente — cobertura por design; (2) a lista de `features` com `AutoEnable: ALL` ativa todas as fontes de dados avançadas em todas as contas existentes e novas: S3 Data Events (detecta acesso anômalo a S3), EKS Audit Logs, Malware Protection para EC2 e S3, RDS Login Activity, Lambda Network Activity e Runtime Monitoring. O valor `ALL` significa "habilitar em novas contas E em contas existentes".
+
+**Por que esta ordem:** Este passo só pode ser executado após a delegação de admin (Passo 1.1) e após assumir as credenciais da conta Audit. O detector da conta Audit (criado automaticamente quando a delegação é estabelecida) deve existir antes de configurar o `update-organization-configuration`.
+
+**Por que isso importa para o Banco Meridian:** Cada feature ativada corresponde a uma superfície de ataque coberta: `S3_DATA_EVENTS` detectaria o download dos 47 objetos S3 com credenciais comprometidas (cenário do Lab 05); `MALWARE_PROTECTION` detectaria arquivos maliciosos em instâncias EC2 e buckets S3; `RDS_LOGIN_EVENTS` detectaria brute force em bancos de dados financeiros. Sem `AutoEnable: ALL`, uma conta Production (444444444444) requer configuração manual de cada feature — criando janelas de exposição.
 
 ```bash
 # Assumir role na Audit Account
@@ -219,7 +233,11 @@ echo "Sample findings gerados — aguardar 30 segundos"
 sleep 30
 ```
 
-**Passo 2.2** — Listar os findings gerados:
+### Passo 2.2 — Listar os findings gerados
+
+**O que este passo faz:** Consulta os findings do detector da conta Audit filtrando apenas os sample findings (campo `sample: true`). Em produção, este comando sem o filtro `sample` retornaria findings reais. O filtro `--query 'FindingIds'` extrai apenas os IDs dos findings — que serão usados nos passos seguintes para obter detalhes de cada finding individualmente.
+
+**O que você deve ver:** Uma lista de IDs de findings no formato `"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"`. Se a lista estiver vazia, aguardar mais 30 segundos (os sample findings podem levar até 2 minutos para ser processados).
 
 ```bash
 aws guardduty list-findings \
@@ -299,7 +317,13 @@ echo "QUERY: SELECT * FROM EDS WHERE resources[0].arn LIKE '%<INSTANCE_ID>%' AND
 
 ## Seção 4 — Análise do Finding 2: IAM Credential Exfiltration
 
-**Passo 4.1** — Obter detalhes do finding de exfiltração de credenciais:
+### Passo 4.1 — Obter detalhes do finding de exfiltração de credenciais
+
+**O que este passo faz:** Busca e exibe os detalhes do finding `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` — o finding que indica que credenciais temporárias de um IAM role (obtidas via IMDS da instância EC2) estão sendo usadas a partir de um endereço IP externo à infraestrutura AWS. Os campos mais críticos extraídos são: `AccessKeyId` (identifica exatamente qual chave está sendo usada externamente), `IP_Externo` (endereço do atacante), e `API_Chamada` (o que o atacante está fazendo com as credenciais).
+
+**Por que isso importa para o Banco Meridian:** Este finding é a sequência direta do `Backdoor:EC2/C&CActivity.B` analisado na Seção 3. Quando uma instância é comprometida com backdoor C2, o próximo passo típico do atacante é acessar o IMDS (http://169.254.169.254/latest/meta-data/iam/security-credentials/) para obter credenciais temporárias da role IAM — e usá-las externamente. Com IMDSv1 (sem token), qualquer código rodando na instância, incluindo malware, pode fazer essa consulta sem autenticação. O `IP_Externo` aqui é o mesmo C2 do finding anterior — confirma que é o mesmo atacante.
+
+**Ação imediata ao ver este finding:** A role IAM deve ser revogada imediatamente usando a técnica `DateLessThan` no `aws:TokenIssueTime` — não basta excluir a role, pois as credenciais temporárias já emitidas continuam válidas até o timeout natural (até 12 horas).
 
 ```bash
 CRED_FINDING_ID=$(aws guardduty list-findings \
@@ -342,7 +366,11 @@ aws guardduty get-findings \
 
 ## Seção 5 — Análise do Finding 3: S3 Exfiltration
 
-**Passo 5.1** — Analisar finding de exfiltração via S3:
+### Passo 5.1 — Analisar finding de exfiltração via S3
+
+**O que este passo faz:** Extrai os detalhes do finding de exfiltração via S3 — gerado pelo modelo de machine learning do GuardDuty quando detecta um padrão de download de objetos S3 que é estatisticamente anômalo em relação ao baseline histórico da conta. Os campos-chave extraídos incluem o bucket afetado e o número de operações de `GetObject` que excederam o padrão normal. Este finding só é gerado se S3 Data Events estiverem habilitados no GuardDuty (Passo 1.2 deste lab) e no CloudTrail (Lab 02).
+
+**Por que isso importa para o Banco Meridian:** Este finding corresponde exatamente ao incidente de março: o atacante, com credenciais temporárias da role EC2, baixou 47 objetos do bucket `meridian-dados-clientes`. O GuardDuty detectou o download massivo porque o baseline não incluía esse volume de `GetObject` de um IP externo. Para o BACEN 4.893 Art. 11 e LGPD Art. 48, este finding é a evidência inicial que dispara o processo de notificação ao regulador em até 72 horas.
 
 ```bash
 S3_FINDING_ID=$(aws guardduty list-findings \
@@ -381,9 +409,13 @@ aws guardduty get-findings \
 
 ---
 
-## Seção 6 — Análise do Finding 4: Port Probe (LOW)
+## Seção 6 — Análise do Finding 4: Port Probe (LOW) e Suppression Rules
 
-**Passo 6.1** — Analisar e criar suppression rule:
+### Passo 6.1 — Analisar o finding de Port Probe
+
+**O que este passo faz:** Recupera os detalhes do finding `Recon:EC2/PortProbeUnprotectedPort`, que é gerado quando o GuardDuty detecta tentativas externas de probe em portas abertas de uma instância EC2. Este finding tem severidade LOW porque port probing é comum na internet — scanners automáticos tentam portas em todos os IPs públicos continuamente. O campo `RemoteIpDetails` revela o IP de origem do probe, que determina se é um falso positivo (scanner autorizado, Shodan, etc.) ou um reconhecimento real.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian contrata a PentestCorp para testes de intrusão autorizados mensalmente. Durante cada ciclo de pentest, dezenas de findings `Recon:EC2/PortProbeUnprotectedPort` são gerados, inundando o painel de findings e treinando inadvertidamente a equipe a ignorar alertas LOW — o que é um risco operacional real. A Suppression Rule do Passo 6.2 resolve isso de forma documentada e auditável.
 
 ```bash
 PORT_FINDING_ID=$(aws guardduty list-findings \
@@ -406,7 +438,11 @@ aws guardduty get-findings \
   --query 'Findings[0].Service.Action.PortProbeAction.PortProbeDetails[0].RemoteIpDetails'
 ```
 
-**Passo 6.2** — Criar suppression rule para scanners autorizados:
+### Passo 6.2 — Criar suppression rule para scanners autorizados
+
+**O que este passo faz:** Cria um filtro do GuardDuty com ação `ARCHIVE` — findings que correspondem aos critérios são automaticamente arquivados sem aparecer no painel ativo. Os critérios combinados (AND implícito) são: finding type `Recon:EC2/PortProbeUnprotectedPort` E IP de origem exato `203.0.113.50` (scanner Qualys autorizado). O finding não é excluído — permanece consultável ao filtrar por `status: ARCHIVED`.
+
+**Por que isso importa para o Banco Meridian:** Esta Suppression Rule é a resposta correta para o ruído operacional do scanner Qualys autorizado. A alternativa incorreta — desabilitar o GuardDuty durante scans — criaria janela de exposição real. A regra com nome descritivo (`AuthorizedVulnerabilityScanner-Qualys`) é auditável pelo BACEN: mostra que o noise reduction é intencional e documentado, não descuido.
 
 ```bash
 # Criar suppression rule para o scanner de vulnerabilidades Qualys
@@ -439,7 +475,13 @@ echo "Suppression rule criada para Qualys"
 
 ## Seção 7 — Configurar EventBridge para Resposta Automática
 
-**Passo 7.1** — Criar regra EventBridge para findings HIGH:
+### Passo 7.1 — Criar regra EventBridge para findings HIGH
+
+**O que este passo faz:** Configura o pipeline de alertas automáticos para findings GuardDuty com severidade HIGH (>= 7.0). São três recursos criados: (1) um tópico SNS `MeridianGuardDutyAlerts-HIGH` como canal de distribuição; (2) uma subscrição de e-mail para o time de segurança; (3) uma regra EventBridge com event pattern que filtra eventos do GuardDuty com `severity >= 7.0` e roteia para o SNS. O `InputTransformer` formata a mensagem com os campos mais relevantes do finding, permitindo que o time de segurança receba informação acionável diretamente no e-mail.
+
+**Por que esta ordem:** O SNS topic deve existir antes da regra EventBridge. A subscrição de e-mail deve ser confirmada pelo destinatário para estar ativa.
+
+**Por que isso importa para o Banco Meridian:** No incidente de março, o finding `Backdoor:EC2/C&CActivity.B` ficou no console por 2 horas e 9 minutos sem notificação. Com esta regra, o mesmo finding dispararia um alerta em segundos — conectado com o Lab 06 (Lambda de isolamento automático), o MTTC cairia de horas para minutos.
 
 ```bash
 # Criar SNS topic para notificações (se não existir)

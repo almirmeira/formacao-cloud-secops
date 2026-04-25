@@ -233,6 +233,12 @@ Com o contexto da Fase A, agora mergulhe nos dados:
 
 ### 3.4 Fase C: Criação das Três Regras YARA-L (30 min)
 
+**O que esta fase faz:** Transforma o conhecimento adquirido na investigação das Fases A e B em detecções automatizadas permanentes. Esta é a etapa de Detection Engineering do capstone — você não está apenas respondendo ao incidente atual, mas garantindo que o SOC do Banco Meridian detecte automaticamente o mesmo tipo de ataque no futuro. As três regras cobrem as três fases mais críticas do ataque da Operação Antas: o Command and Control (beaconing), a persistência (criação de conta backdoor) e o impacto (exfiltração de dados).
+
+**Por que estas três regras e não outras:** O princípio de priorização de Detection Engineering é criar regras para os comportamentos que causaram o maior impacto e que ficaram mais tempo invisíveis. Neste incidente: (1) o beaconing ficou ativo por 9 dias sem detecção — a maior lacuna; (2) a criação de conta backdoor é um movimento irreversível que indica APT persistente; (3) a exfiltração é o impacto final que gera obrigações regulatórias (BACEN 4.893 art. 12 — notificação em 24h). Cada regra fecha uma lacuna real identificada durante a investigação.
+
+**Por que agora:** A criação das regras ocorre com o incidente ainda fresco porque você tem acesso aos dados reais que o ataque gerou — hashes, IPs de C2, timestamps, volumes de exfiltração. Esses dados são o input para calibrar os thresholds das regras com precisão. Criar regras genéricas "em algum momento" após o incidente resulta em thresholds estimados que podem ser muito altos (deixam passar ataques menores) ou muito baixos (geram falsos positivos com backups legítimos).
+
 Crie (ou refine) três regras YARA-L no editor do Google SecOps:
 
 **Regra 1: Beaconing C2 específico do Cobalt Strike**
@@ -241,10 +247,14 @@ Com base no que você descobriu sobre o beaconing de WRK-MARCOS-015, refine a re
 `c2_beaconing_periodicidade` do Módulo 03 para cobrir o caso específico onde o beacon
 é um processo Windows em `%TEMP%` ou `%APPDATA%` (característica do Cobalt Strike).
 
+**Por que este refinamento importa:** A regra genérica de beaconing do Módulo 03 detecta qualquer processo fazendo conexões periódicas — incluindo atualizadores de software legítimos (Windows Update, antivírus). Adicionar o critério de processo em `%TEMP%` ou `%APPDATA%` é o diferencial: nenhum software legítimo executa e mantém beaconing a partir dessas pastas, mas o Cobalt Strike invariavelmente o faz. Esse filtro reduz os falsos positivos de dezenas por dia para próximo de zero.
+
 **Regra 2: Criação de conta admin por usuário não-admin**
 
 Use como base o Exemplo 5 do Módulo 03 (`privilege_escalation_criacao_conta_admin`),
 mas calibre os parâmetros para o ambiente do Banco Meridian (domínio, grupos admin, etc.).
+
+**Por que calibrar para o Banco Meridian:** O Banco Meridian tem um processo documentado de criação de contas de TI que gera eventos legítimos de USER_CREATION seguidos de GROUP_MODIFICATION. A regra do Módulo 03 dispararia para esses eventos legítimos se não for calibrada com as exclusões corretas — por exemplo, excluindo a conta do processo de onboarding de TI ou restringindo a detecção a criações que ocorrem fora do horário comercial e por usuários não membros do grupo de TI.
 
 **Regra 3: Exfiltração em massa via HTTPS**
 
@@ -252,13 +262,27 @@ Crie esta regra do zero, baseada no template do Módulo 07 (seção 5.2). Defina
 de bytes que seria adequado para o Banco Meridian — nem tão baixo que gere FPs de backups
 legítimos, nem tão alto que deixe passar exfiltração de dados menores.
 
+**Por que o threshold é o desafio central desta regra:** O Banco Meridian tem backups noturnos automáticos que transferem volumes significativos de dados legítimos. Uma regra com threshold muito baixo (ex: 10 MB em 1 hora) dispararia para esses backups diariamente. O threshold correto deve estar ACIMA do volume máximo de backup legítimo mas ABAIXO do volume de exfiltração observado no incidente (4,7 GB). Pesquisar os logs de backup para determinar o volume exato do baseline é parte do exercício.
+
 **Para cada regra:**
 1. Escreva no editor YARA-L
 2. Salve e verifique se está sem erros de sintaxe
 3. Execute Retrohunt sobre os últimos 7 dias
 4. Documente o resultado do Retrohunt (quantas detecções, quais eventos)
 
+**O que você deve ver ao final da Fase C:** As três regras salvas com status "No errors". O Retrohunt de cada regra deve retornar pelo menos 1 detecção referente ao incidente da Operação Antas. Se o Retrohunt retornar 0 detecções, revise o threshold — provavelmente está muito alto ou os campos UDM estão incorretos.
+
+**O que fazer se der errado:**
+- "Syntax error": verifique a seção indicada, especialmente se há campos UDM escritos incorretamente — use o autocompletar do editor para confirmar os nomes exatos
+- Retrohunt retorna 0 detecções: relaxe o threshold 50% e rode novamente; se ainda retornar 0, o campo UDM pode estar errado — confirme o nome do campo no UDM Search com um evento real do incidente
+
 ### 3.5 Fase D: Criação do Playbook SOAR (30 min)
+
+**O que esta fase faz:** Cria o playbook de resposta automatizada para o tipo de incidente da Operação Antas — um APT com acesso persistente, conta backdoor ativa e exfiltração de dados confirmada. Este playbook define a sequência exata de ações que o SOAR executará automaticamente quando qualquer uma das três regras YARA-L da Fase C disparar no futuro. A automação das ações de contenção (isolamento do host, revogação de credenciais) é o que transforma a capacidade de detecção em capacidade de resposta — sem o playbook, o analista recebe o alerta mas ainda precisa executar manualmente cada ação de contenção, o que pode levar 30–60 minutos. Com o playbook, as ações críticas são executadas em segundos.
+
+**Por que a sequência de ações importa:** A ordem das ações no playbook não é arbitrária — ela reflete a priorização de contenção de danos. O isolamento do host vem primeiro porque corta o acesso do atacante ao ambiente; a revogação de credenciais vem antes da notificação porque garante que a conta comprometida não pode ser usada enquanto a notificação está sendo enviada; a criação do ticket P1 vem por último porque documenta tudo que foi feito — uma exigência do BACEN para notificações de incidentes.
+
+**Impacto no MTTR:** O MTTD (Mean Time to Detect) já foi reduzido pelas regras da Fase C. O MTTR (Mean Time to Respond) é reduzido pelo playbook desta fase. Juntos, eles transformam a métrica atual do Banco Meridian (MTTR de 4h 23min) para um alvo abaixo de 15 minutos para os primeiros passos de contenção — o que pode ser a diferença entre exfiltração de 4,7 GB e exfiltração de 100 MB antes da contenção.
 
 Crie um playbook SOAR para resposta ao tipo de incidente da Operação Antas.
 Este playbook deve cobrir no mínimo:
@@ -273,14 +297,32 @@ Este playbook deve cobrir no mínimo:
 Você pode usar como base o playbook do Lab 04 (phishing response), expandindo-o para
 cobrir os cenários adicionais do APT.
 
+**O que você deve ver ao final da Fase D:** O playbook salvo no Playbook Designer com pelo menos 6 blocos de ação conectados em sequência. O playbook deve ter pelo menos um bloco condicional (ex: "se o IP de destino for IOC conhecido → severidade P1; senão → severidade P2"). Playbooks lineares sem condicionais são aceitos, mas perdem pontos na rubrica de avaliação.
+
+**O que fazer se der errado:**
+- Se uma Action não estiver disponível (ex: CrowdStrike Contain não aparece), verifique se a integração está configurada em Settings → SOAR → Integrations — no ambiente de lab, as integrações CrowdStrike, Azure AD e PAN-OS devem estar pré-configuradas
+- Se o playbook não salvar, verifique se todos os blocos de ação têm os campos obrigatórios preenchidos — campos em vermelho indicam configuração incompleta
+
 ### 3.6 Fase E: Finalizar os Entregáveis (10 min)
+
+**O que esta fase faz:** Realiza a revisão final de qualidade dos quatro entregáveis antes da sessão live de defesa. Esta não é uma fase de criação — é uma fase de inspeção. Cada entregável deve ser verificado contra a rubrica de avaliação (seção 7) para garantir que os critérios mínimos estão atendidos. Um entregável incompleto descoberto durante a sessão live causa uma penalidade de pontuação maior do que um entregável incompleto descoberto aqui e corrigido em 5 minutos.
+
+**Por que esta revisão é necessária:** Em um exercício de 2 horas com alta pressão cognitiva (investigação de incidente real + criação de regras + desenvolvimento de playbook + escrita de relatório), é normal que detalhes sejam omitidos por pressa. A Fase E é o "controle de qualidade" antes da entrega — uma prática padrão em ambientes de SOC real onde os relatórios de incidente BACEN têm prazo legal de 24 horas e não podem ser corrigidos após o envio.
+
+**Impacto na avaliação final:** A sessão live de defesa (Parte 2) representa 50% da nota do capstone. A qualidade dos entregáveis da Parte 1 determina sua confiança durante a defesa — analistas que chegam com uma timeline incompleta têm dificuldade em responder as perguntas do instrutor com precisão, o que afeta a nota mesmo que a análise técnica esteja correta.
 
 Revise e organize os quatro entregáveis obrigatórios para entrega:
 
-1. **Timeline:** complete a tabela com todos os eventos identificados
-2. **Relatório NIST SP 800-61:** garanta que todas as 8 seções estão preenchidas
-3. **Regras YARA-L:** confirme que as 3 regras estão salvas e funcionais
-4. **Playbook SOAR:** confirme que o playbook está salvo (pode estar inativo para a defesa)
+1. **Timeline:** complete a tabela com todos os eventos identificados — mínimo 8 eventos com timestamp, técnica MITRE e fonte de log
+2. **Relatório NIST SP 800-61:** garanta que todas as 8 seções estão preenchidas, especialmente a seção de Recomendações de Melhoria (que é avaliada separadamente na rubrica)
+3. **Regras YARA-L:** confirme que as 3 regras estão salvas e com status "No errors" — regras com erro de sintaxe não contam como entregues
+4. **Playbook SOAR:** confirme que o playbook está salvo (pode estar inativo para a defesa); verifique se os 6 blocos de ação mínimos estão presentes
+
+**O que você deve confirmar antes de avançar para a Parte 2:**
+- [ ] Timeline com pelo menos 8 eventos em ordem cronológica com técnicas MITRE mapeadas
+- [ ] Relatório com todas as 8 seções preenchidas, incluindo IOCs e recomendações
+- [ ] 3 regras YARA-L salvas sem erros, com resultado de Retrohunt documentado
+- [ ] Playbook com pelo menos 6 ações e pelo menos 1 bloco condicional
 
 ---
 

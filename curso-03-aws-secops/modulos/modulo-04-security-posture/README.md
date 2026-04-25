@@ -338,6 +338,10 @@ O Inspector usa CVSS (Common Vulnerability Scoring System) para classificar vuln
 
 ## 5. Diagrama de Fluxo: Config → Remediação Automática
 
+**O que este diagrama representa:** O fluxo de auto-remediação mostra o pipeline completo de detecção e resposta automática a violações de conformidade no Banco Meridian. O processo inicia quando um recurso AWS é criado ou modificado (passo 1) e, se violam uma Config Rule, dispara automaticamente uma sequência de ações sem intervenção humana: o Config detecta (passos 2-3), o EventBridge roteia (passos 4-5), o SSM Automation corrige (passo 6), e o ciclo de conformidade se fecha com a reavaliação e resolução do achado no Security Hub (passos 7-9). Para violações de baixo risco e remediação clara (como S3 público, IMDSv1 habilitado), este pipeline opera completamente de forma autônoma. Para violações de alto risco ou que requerem avaliação de impacto no negócio, o pipeline para no passo 4 (notificação) e aguarda aprovação humana via ServiceNow.
+
+**Por que isso importa para o Banco Meridian:** A diferença entre um SOC manual (onde um analista descobre a violação horas depois, escalona, aprova a remediação, e executa) e um SOC automatizado (onde o pipeline resolve em minutos) é determinante para o nível de risco residual. Um bucket S3 com acesso público em ambiente financeiro, em média, leva 72 minutos para ser corrigido manualmente — com este pipeline, leva menos de 5 minutos. Para o BACEN 4.893 Art. 7, que exige monitoramento CONTÍNUO de controles, o pipeline de auto-remediação é a evidência de que os controles não são apenas monitorados mas também corrigidos automaticamente.
+
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │  FLUXO DE AUTO-REMEDIAÇÃO — Banco Meridian                            │
@@ -386,6 +390,12 @@ O Inspector usa CVSS (Common Vulnerability Scoring System) para classificar vuln
 ```
 
 ### SSM Automation para S3 Block Public Access
+
+**O que este bloco representa:** O documento SSM Automation `ssm-document-s3-remediation.yaml` define um playbook de remediação automatizada em três passos (steps): `BlockPublicAccess` aplica os quatro bloqueios de acesso público via API S3; `VerifyRemediation` confirma que a remediação foi bem-sucedida consultando a configuração atual do bucket; `NotifySecurityTeam` publica uma mensagem SNS informando que a remediação foi executada — quem a acionou (Config via EventBridge), qual bucket foi corrigido e que deve ser revisado se algum workload legítimo foi impactado. A `assumeRole` é o parâmetro que define qual role IAM o SSM usará para executar as ações — deve ter permissão de `s3:PutPublicAccessBlock` e `sns:Publish`.
+
+**Por que isso importa para o Banco Meridian:** Este documento SSM é o "playbook de remediação automatizada" para o controle BACEN 4.893 Art. 10 (proteção de dados públicos). Quando o AWS Config detecta um bucket S3 com Block Public Access desabilitado (violação do controle `bacen-s3-public-read-prohibited`), o EventBridge aciona o SSM Automation com este documento. O resultado é que o bucket é protegido em minutos, não horas — sem intervenção humana para correções de baixo risco como esta. A notificação SNS do passo `NotifySecurityTeam` garante que o time de segurança está informado sobre cada remediação executada, permitindo auditoria de todas as ações automáticas tomadas.
+
+**Interpretando o resultado:** O campo `schemaVersion: "0.3"` indica a versão do schema SSM Automation — versões diferentes têm capacidades diferentes (0.3 suporta parallelismo e outputs entre steps). O campo `assumeRole: "{{AutomationAssumeRole}}"` usa a sintaxe de parâmetros do SSM — o `{{}}` é um placeholder substituído dinamicamente pelo valor do parâmetro `AutomationAssumeRole` passado na invocação. O step `VerifyRemediation` com `action: aws:executeAwsApi` e `Api: GetPublicAccessBlock` confirma que a remediação foi efetiva antes de enviar a notificação — evitando falsos positivos onde a notificação seria enviada mas a remediação teria falhado silenciosamente.
 
 ```yaml
 # ssm-document-s3-remediation.yaml
@@ -449,6 +459,10 @@ mainSteps:
 ## 6. Integração Security Hub + Config + GuardDuty
 
 ### Visão Unificada de Postura
+
+**O que este diagrama representa:** A arquitetura de postura unificada centraliza findings de quatro fontes (GuardDuty, Inspector, Config, Macie) no Security Hub em formato ASFF (Amazon Security Finding Format). O Security Hub agrega, normaliza e calcula um Security Score consolidado. O EventBridge roteia findings críticos para automação (Lambda de contenção imediata) ou para notificação (SNS → analista de plantão). Esta arquitetura implementa o conceito de "single pane of glass" para operações de segurança — um dashboard para todas as fontes.
+
+**Por que isso importa para o Banco Meridian:** O CISO Felipe Mendes não precisa mais alternar entre quatro consoles AWS em quatro contas diferentes para avaliar a postura de segurança da organização. O Security Hub centralizado na conta Audit (222222222222) apresenta findings das contas Production (444444444444), Log Archive (333333333333) e Dev (555555555555) em um único painel — reduzindo o MTTD (Mean Time to Detect) e habilitando correlação entre eventos de diferentes serviços e contas.
 
 ```
                 FONTES DE FINDINGS

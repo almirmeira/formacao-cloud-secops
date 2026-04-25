@@ -119,7 +119,15 @@ Mariana vai testar sua implementação criando propositalmente um bucket S3 púb
 
 ## Seção de Implementação — Configurar Security Hub
 
-**Passo 1.1** — Habilitar Security Hub:
+### Passo 1.1 — Habilitar Security Hub na conta Audit
+
+**O que este passo faz:** Habilita o Security Hub na conta Audit (222222222222), que atuará como administrador delegado centralizado para o Banco Meridian. O parâmetro `--enable-default-standards` ativa automaticamente o AWS Foundational Security Best Practices (FSBP) — o standard base com mais de 300 controles. As tags aplicadas permitem rastrear este recurso nos relatórios de conformidade. Após habilitação, o Security Hub leva até 30 minutos para a avaliação inicial completa de todos os recursos da conta.
+
+**Por que esta ordem:** O Security Hub deve ser habilitado antes de configurar standards adicionais (Passo 1.2) e antes de configurar a agregação multi-conta. Uma vez habilitado, começa a receber findings do GuardDuty, Inspector e Config imediatamente.
+
+**Por que isso importa para o Banco Meridian:** O Security Hub é a resposta direta ao primeiro item do checklist BACEN da Mariana: "Art. 10 §1 — Monitoramento contínuo de conformidade de controles → Security Hub: DESABILITADO". Com o Security Hub habilitado e populado com findings das 4 contas, o Banco Meridian passa de "Dashboard de postura: INEXISTENTE" para evidência auditável em formato ASFF (Amazon Security Finding Format) para o auditor do BACEN.
+
+**Permissão IAM necessária:** `securityhub:EnableSecurityHub` e `securityhub:BatchEnableStandards` na conta Audit.
 
 ```bash
 # Habilitar Security Hub na conta Audit (administração centralizada)
@@ -131,7 +139,13 @@ aws securityhub enable-security-hub \
 echo "Security Hub habilitado"
 ```
 
-**Passo 1.2** — Habilitar standards adicionais:
+### Passo 1.2 — Habilitar standards adicionais: CIS v2.0 e PCI DSS
+
+**O que este passo faz:** Habilita dois standards adicionais de conformidade no Security Hub: o CIS AWS Foundations Benchmark v2.0 (89 controles de configuração segura) e o PCI DSS v3.2.1 (controles para proteção de dados de cartão de pagamento). O primeiro comando lista os standards disponíveis para confirmar os ARNs corretos, evitando o erro de ARN inválido. O comando `batch-enable-standards` aceita múltiplos standards em uma única chamada, iniciando a avaliação de todos simultaneamente.
+
+**Por que esta ordem:** Os standards devem ser habilitados após o Security Hub estar ativo (Passo 1.1). A avaliação inicial leva de 5 a 30 minutos — quanto mais recursos na conta, mais tempo leva.
+
+**Por que isso importa para o Banco Meridian:** O CIS AWS Foundations Benchmark é o padrão de referência mais citado em auditorias de segurança AWS no Brasil. Controles específicos como CIS 1.4 (sem access keys de root), CIS 3.1 (CloudTrail em todas as regiões) e CIS 5.2 (sem SSH para 0.0.0.0/0) são verificados automaticamente. O PCI DSS v3.2.1 é mandatório para o Banco Meridian pois o banco processa transações com cartões de pagamento — o Finding Hub do PCI DSS mostra diretamente quais controles estão falhando, com o controle PCI específico mapeado.
 
 ```bash
 # Obter ARNs dos standards disponíveis
@@ -155,7 +169,15 @@ aws securityhub batch-enable-standards \
 echo "Standards habilitados — aguardar 5 minutos para avaliação inicial"
 ```
 
-**Passo 1.3** — Verificar Security Score após avaliação:
+### Passo 1.3 — Verificar Security Score após avaliação inicial
+
+**O que este passo faz:** Consulta o status dos standards habilitados e os controles com falha. O Security Hub leva de 5 a 30 minutos para a avaliação inicial de todos os recursos — o comando `sleep 300` aguarda 5 minutos antes de consultar. O `get-enabled-standards` lista os standards ativos e seu status. Uma avaliação inicial com score 50-75% é normal para uma conta AWS recém-configurada.
+
+**O que você deve ver:** Os standards devem aparecer com `Status: READY` (não mais `PENDING`). Um score abaixo de 70% indica muitos controles falhando — o restante deste lab os corrigirá progressivamente.
+
+**O que fazer se der errado:**
+- `InvalidAccessException`: Security Hub já está habilitado — `aws securityhub describe-hub` para verificar
+- Standards com status `PENDING`: aguardar mais 10 minutos — a avaliação de todas as contas da organização pode levar até 30 minutos
 
 ```bash
 # Aguardar avaliação inicial (pode levar até 30 minutos para avaliação completa)
@@ -181,7 +203,13 @@ aws securityhub get-enabled-standards \
 
 ## Seção 2 — Configurar AWS Config
 
-**Passo 2.1** — Criar bucket de Config na conta Log Archive:
+### Passo 2.1 — Criar bucket S3 para entrega do AWS Config na conta Log Archive
+
+**O que este passo faz:** Cria o bucket S3 na conta Log Archive (333333333333) que receberá os snapshots de configuração e histórico de mudanças do AWS Config de todas as contas da organização. Os snapshots de configuração são arquivos JSON que representam o estado de todos os recursos AWS em um determinado momento — uma "fotografia" da infraestrutura. O histórico de mudanças registra cada alteração de configuração: quem criou, modificou ou excluiu cada recurso, e qual era o estado antes e depois.
+
+**Por que esta ordem:** O bucket deve existir ANTES da configuração do Delivery Channel (Passo 2.2). O Config verifica a existência e permissões do bucket no momento da configuração.
+
+**Por que isso importa para o Banco Meridian:** O AWS Config é o "CFTV de configuração" da infraestrutura — sem ele, é impossível responder à pergunta "qual era o estado do Security Group da instância comprometida 48 horas antes do incidente?". Para investigações forenses e relatórios BACEN, o Config fornece a linha do tempo de mudanças de configuração que complementa a linha do tempo de API calls do CloudTrail.
 
 ```bash
 # Criar bucket de Config (ou usar o bucket de logs existente com prefixo)
@@ -227,7 +255,13 @@ aws s3api put-bucket-policy \
   --policy file:///tmp/config-bucket-policy.json
 ```
 
-**Passo 2.2** — Configurar Configuration Recorder:
+### Passo 2.2 — Configurar Configuration Recorder e Delivery Channel
+
+**O que este passo faz:** Três comandos complementares: (1) `put-configuration-recorder` cria o gravador de configuração com `allSupported: true` (registra todos os tipos de recurso AWS suportados) e `includeGlobalResourceTypes: true` (inclui recursos IAM, Route53 e CloudFront, que são globais e não têm região); (2) `put-delivery-channel` define onde os snapshots de configuração e mudanças são entregues — bucket S3 da conta Log Archive e tópico SNS para notificações em tempo real; (3) `start-configuration-recorder` inicia efetivamente o registro. Sem o `start-configuration-recorder`, o recorder existe mas não grava nada.
+
+**Por que esta ordem:** O bucket S3 e a bucket policy (Passo 2.1) devem existir antes do Delivery Channel. O `start-configuration-recorder` deve ser o último dos três — iniciar o recorder antes de ter o delivery channel configurado resulta em erros de entrega.
+
+**Por que isso importa para o Banco Meridian:** O AWS Config é o mecanismo de "CFTV de configuração" da infraestrutura AWS — cada mudança de recurso gera um Configuration Item com o estado antes e depois. Durante investigações, o Config permite responder: "qual era o Security Group da instância comprometida no momento do ataque?". Para o BACEN 4.893 Art. 7, o Config é a evidência de monitoramento contínuo de integridade de configuração exigida pela norma.
 
 ```bash
 # Criar Configuration Recorder
@@ -266,7 +300,13 @@ echo "Config recorder iniciado"
 
 ## Seção 3 — Criar 3 Config Rules Customizadas (BACEN 4.893)
 
-**Passo 3.1** — Config Rule 1: Verificar se instâncias EC2 têm tag CostCenter:
+### Passo 3.1 — Config Rule 1 (Custom Lambda): Tag CostCenter obrigatória em instâncias EC2
+
+**O que este passo faz:** Cria uma Config Rule customizada via Lambda para verificar se todas as instâncias EC2 têm a tag `CostCenter` preenchida. A função Lambda recebe o `configurationItem` de cada instância EC2 avaliada, extrai as tags e retorna `COMPLIANT` se a tag `CostCenter` estiver presente e não vazia, ou `NON_COMPLIANT` caso contrário. A regra usa o trigger `ConfigurationItemChangeNotification` — avalia cada instância no momento em que é criada ou modificada.
+
+**Por que esta ordem:** A Lambda deve ser criada e o ZIP de deployment empacotado antes de criar a Config Rule. A role IAM deve incluir `config:PutEvaluations` para que a Lambda possa reportar o resultado. O `aws lambda publish-version` é necessário para que a Config Rule referencie uma versão estável.
+
+**Por que isso importa para o Banco Meridian:** Instâncias EC2 sem tag `CostCenter` são shadow IT — recursos criados fora do processo aprovado de IaC que não têm responsável financeiro identificado. Além da governança de custos, recursos sem tag não passam pelo processo de revisão de segurança, podendo ter configurações inseguras por padrão.
 
 ```bash
 # Criar função Lambda para a rule customizada
@@ -351,7 +391,11 @@ aws configservice put-config-rule \
 echo "Config Rule 1 criada: bacen-ec2-costcenter-tag-required"
 ```
 
-**Passo 3.2** — Config Rule 2: Verificar se KMS rotation está habilitada:
+### Passo 3.2 — Config Rule 2 (Managed): KMS Key Rotation obrigatória
+
+**O que este passo faz:** Cria a Config Rule gerenciada `kms-cmk-not-scheduled-for-deletion` usando a rule gerenciada pela AWS `KMS_CMK_NOT_SCHEDULED_FOR_DELETION`. Rules gerenciadas são avaliadas pela AWS com lógica interna — não requerem Lambda customizada. Este comando cria a regra com avaliação do tipo `CHANGE_TRIGGERED` para recursos `AWS::KMS::Key`, avaliando cada CMK do Banco Meridian no momento de sua criação ou modificação.
+
+**Por que isso importa para o Banco Meridian:** CMKs (Customer Managed Keys) do KMS criptografam os buckets S3 de logs, os snapshots EBS e os segredos do Secrets Manager do Banco Meridian. A rotação anual automática (`EnableKeyRotation: true`) garante que mesmo que uma chave antiga seja comprometida, os dados mais recentes são protegidos por uma chave diferente. Uma CMK sem rotação habilitada em ambiente financeiro é um controle faltante que o auditor BACEN identificaria imediatamente.
 
 ```bash
 aws configservice put-config-rule \
@@ -404,7 +448,11 @@ aws configservice describe-config-rules \
 
 ## Seção 4 — Auto-Remediation para S3 Público
 
-**Passo 4.1** — Verificar o SSM Automation document disponível:
+### Passo 4.1 — Verificar o SSM Automation document disponível
+
+**O que este passo faz:** Confirma a existência do documento SSM Automation `AWSConfigRemediation-ConfigureS3BucketPublicAccessBlock` — um documento gerenciado pela AWS que habilita automaticamente os quatro bloqueios de acesso público (BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy, RestrictPublicBuckets) em um bucket S3 identificado como NON_COMPLIANT pela Config Rule `s3-bucket-public-read-prohibited`. O `describe-document` retorna os parâmetros aceitos pelo documento — usados na configuração da remediação do Passo 4.3.
+
+**Por que esta ordem:** Confirmar que o documento existe antes de configurar a remediação evita o erro `InvalidDocument`. Documentos SSM Automation gerenciados pela AWS são específicos por região.
 
 ```bash
 # Verificar documento de remediação AWS gerenciado
@@ -454,7 +502,11 @@ aws iam put-role-policy \
   --policy-document file:///tmp/ssm-remediation-policy.json
 ```
 
-**Passo 4.3** — Configurar auto-remediation para s3-bucket-public-read-prohibited:
+### Passo 4.3 — Configurar auto-remediation para s3-bucket-public-read-prohibited
+
+**O que este passo faz:** Dois comandos em sequência: (1) cria a Config Rule gerenciada `s3-bucket-public-read-prohibited` que avalia todos os buckets S3 da conta para verificar se o Block Public Access está habilitado; (2) associa a regra ao documento SSM Automation com `Automatic: true` — qualquer bucket detectado como NON_COMPLIANT receberá remediação automática sem intervenção humana. O `ResourceId: RESOURCE_ID` é um placeholder dinâmico que o Config substitui pelo nome real do bucket no momento da execução.
+
+**Por que isso importa para o Banco Meridian:** Um bucket S3 criado acidentalmente com acesso público em ambiente financeiro é um incidente de dados. Com auto-remediação, o gap de exposição vai de horas (detectar + escalar + corrigir manualmente) para minutos (Config detecta → SSM Automation aplica Block Public Access automaticamente → Security Hub finding fechado). O BACEN 4.893 Art. 10 exige controles que previnam exposição pública de dados financeiros — esta auto-remediação é a implementação preventiva desse requisito.
 
 ```bash
 # Criar Config rule gerenciada de S3 público
@@ -498,7 +550,13 @@ echo "Auto-remediation configurada para s3-bucket-public-read-prohibited"
 
 ## Seção 5 — Deploy do Conformance Pack BACEN 4.893
 
-**Passo 5.1** — Criar o arquivo YAML do conformance pack:
+### Passo 5.1 — Criar o arquivo YAML e implantar o Conformance Pack
+
+**O que este passo faz:** Cria o arquivo YAML do Conformance Pack com as Config Rules alinhadas ao BACEN 4.893 e o implanta via `put-conformance-pack`. O Conformance Pack funciona como um template CloudFormation gerenciado pelo Config: o YAML define quais regras criar (com parâmetros como `MaxAccessKeyAge: "90"` para rotação de chaves em 90 dias), e o Config cria e gerencia essas regras automaticamente. A diferença em relação a criar regras individualmente: o pack mantém todas as regras versionadas e sincronizadas — alterar o YAML e reimplantar atualiza todas as regras de uma vez.
+
+**Por que esta ordem:** A implantação do Conformance Pack deve ocorrer após o Config estar funcionando e o bucket de delivery configurado. O pack precisa do bucket de delivery para armazenar os resultados da avaliação.
+
+**O que você deve ver:** `Status: DEPLOYMENT_SUCCESSFUL` após alguns minutos. As regras do pack aparecem no console do Config com o prefixo do nome do Conformance Pack.
 
 ```bash
 # Copiar o conformance pack do módulo 4 para um arquivo
@@ -591,7 +649,18 @@ aws configservice describe-conformance-pack-status \
 
 ## Seção 6 — Teste da Auto-Remediation
 
-**Passo 6.1** — Criar bucket S3 público para testar a remediação:
+### Passo 6.1 — Criar bucket S3 público para testar o ciclo completo de remediação
+
+**O que este passo faz:** Cria intencionalmente um bucket S3 com Block Public Access desabilitado — a violação que o Config deve detectar automaticamente. Este é o teste end-to-end do pipeline: Config detecta NON_COMPLIANT → EventBridge roteia → SSM Automation aplica Block Public Access → Config reavalia → COMPLIANT → Security Hub fecha o finding. O bucket de teste tem timestamp no nome para unicidade e deve ser excluído após o teste.
+
+**Por que esta ordem:** O teste só faz sentido após toda a cadeia de remediação estar ativa: Config Rule `s3-bucket-public-read-prohibited` (Passo 4.3), remediação automática configurada, e EventBridge ativo. Testar em qualquer ponto anterior ao ciclo completo não validaria o pipeline end-to-end que será usado em produção.
+
+**O que você deve ver:** Após 5 a 15 minutos, o `get-public-access-block` do bucket deve retornar os quatro campos como `true` — sem nenhuma ação manual. O Security Hub deve mostrar o finding do bucket evoluindo de `FAILED` para `PASSED`. Este é o comportamento esperado que a Mariana testará durante a apresentação do lab.
+
+**O que fazer se der errado:**
+- Config não detecta em 15 minutos: verificar se o Configuration Recorder está ativo (`aws configservice get-configuration-recorder-status`)
+- Remediação não ocorre: verificar se a auto-remediação está configurada com `Automatic: true` (Passo 4.3)
+- SSM Automation falha: verificar o log de execução do SSM em Systems Manager → Automation → Execution History
 
 ```bash
 # Criar bucket de teste (NÃO usar em conta de produção real)

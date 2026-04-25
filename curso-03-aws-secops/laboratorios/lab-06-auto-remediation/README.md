@@ -82,7 +82,13 @@ Você vai implementar 3 automações de resposta a incidentes completas para o B
 
 ## Seção 1 — Infraestrutura Base
 
-**Passo 1.1** — Criar roles IAM para as Lambdas:
+### Passo 1.1 — Criar roles IAM dedicadas para cada Lambda de resposta a incidentes
+
+**O que este passo faz:** Cria três roles IAM com políticas específicas para cada função Lambda de resposta: a role `LambdaIR-DisableIAMKeyRole` tem permissões restritas ao gerenciamento de access keys IAM e tags de usuário; a role `LambdaIR-IsolateEC2Role` tem permissões de EC2 para modificar Security Groups e criar snapshots; a role `LambdaIR-BlockWAFIPRole` tem permissões para atualizar IP Sets do WAFv2. Todas as três têm acesso básico ao CloudWatch Logs para registrar execuções. A trust policy com `lambda.amazonaws.com` permite que a Lambda assuma a role temporariamente.
+
+**Por que esta ordem:** As roles devem existir ANTES das funções Lambda — o parâmetro `--role` do `create-function` requer o ARN da role. Criar as três roles em sequência, antes de criar qualquer Lambda, evita o erro `InvalidParameterValueException` ao referenciar uma role inexistente.
+
+**Por que isso importa para o Banco Meridian:** Cada Lambda com sua própria role com permissões mínimas implementa o princípio de menor privilégio. Uma Lambda comprometida (via bug ou injeção de código) tem acesso limitado ao que sua role permite — a Lambda de WAF não consegue excluir usuários IAM; a Lambda de IAM não consegue modificar regras WAF. Isso é defesa em profundidade para a própria infraestrutura de resposta a incidentes.
 
 ```bash
 # Role para Lambda de desabilitar chave IAM
@@ -177,7 +183,13 @@ echo "SNS Topics: $SNS_CRITICO | $SNS_HIGH"
 
 ## Seção 2 — Automação 1: Desabilitar Chave IAM Comprometida
 
-**Passo 2.1** — Criar o código Lambda:
+### Passo 2.1 — Criar o código Python da Lambda
+
+**O que este passo faz:** Implementa a função Lambda que recebe o evento GuardDuty via EventBridge e desabilita imediatamente a access key comprometida. O código extrai o `userName` e o `accessKeyId` do finding GuardDuty, chama `iam:UpdateAccessKey --status Inactive` para desabilitar (sem excluir), aplica tags de incidente no usuário para rastreabilidade, e publica uma notificação SNS com o resultado da ação. A idempotência é garantida: executar a Lambda duas vezes para a mesma chave não causa erro — a segunda chamada retorna sem alteração.
+
+**Por que isso importa para o Banco Meridian:** A access key comprometida de Lucas ficou ativa por 2 horas e 9 minutos no incidente de março. Com esta automação, a mesma key seria desabilitada em segundos após o GuardDuty gerar o finding. A desabilitação (não exclusão) preserva a chave como evidência forense — permite confirmar quando foi usada pela última vez antes da remediação.
+
+**Permissão IAM necessária da Lambda:** `iam:UpdateAccessKey`, `iam:ListAccessKeys`, `iam:TagUser`, `sns:Publish`.
 
 ```bash
 cat > /tmp/lambda_disable_key.py << 'PYEOF'
@@ -334,7 +346,15 @@ echo "EventBridge rule configurada para Automação 1"
 
 ## Seção 3 — Automação 2: Isolar EC2 Comprometida
 
-**Passo 3.1** — Criar Lambda de isolamento (versão simplificada):
+### Passo 3.1 — Criar Lambda de isolamento de instâncias EC2 comprometidas
+
+**O que este passo faz:** Implementa a função Lambda que isola uma instância EC2 comprometida em resposta a um finding GuardDuty HIGH. O código: (1) extrai o `instanceId` e a região do finding; (2) cria um Security Group de quarentena sem regras de ingress ou egress (exceto porta 22 de um bastion host para investigação forense); (3) substitui todos os Security Groups da instância pelo grupo de quarentena usando `modify-instance-attribute`; (4) cria um snapshot EBS para preservação de evidências; (5) aplica tags de quarentena na instância; (6) notifica o time de segurança via SNS. O isolamento via Security Group (sem stop da instância) mantém a instância ligada para análise de memória, mas a isola completamente da rede.
+
+**Por que esta ordem:** A criação do código Lambda precede a criação da regra EventBridge (Passo 3.3). A idempotência aqui é crítica: `describe-security-groups` antes de `create-security-group` evita criar múltiplos SGs de quarentena para a mesma instância em múltiplas execuções.
+
+**Por que isso importa para o Banco Meridian:** O isolamento via Security Group (não stop) preserva a instância em estado operacional para análise de memória (RAM dump) pela equipe forense — a memória contém as credenciais em uso, conexões ativas e processos em execução no momento do ataque. Parar a instância destruiria essa evidência. O snapshot EBS criado neste passo complementa o Passo 4.1 do Lab 05.
+
+**Permissão IAM necessária da Lambda:** `ec2:ModifyInstanceAttribute`, `ec2:CreateSecurityGroup`, `ec2:DescribeSecurityGroups`, `ec2:CreateSnapshot`, `ec2:CreateTags`, `ec2:DescribeInstances`, `sns:Publish`.
 
 ```bash
 cat > /tmp/lambda_isolate_ec2.py << 'PYEOF'
@@ -483,7 +503,13 @@ echo "EventBridge rule configurada para Automação 2"
 
 ## Seção 4 — Automação 3: Bloquear IP no WAF
 
-**Passo 4.1** — Criar WAF IP Set e Lambda:
+### Passo 4.1 — Criar WAF IP Set e função Lambda de bloqueio dinâmico
+
+**O que este passo faz:** Cria o IP Set `MeridianBlockedIPs` no WAFv2 — um container de endereços IP que será bloqueado pelo WAF em todas as requisições ao ALB do internet banking. O IP Set começa vazio e é populado dinamicamente pela Lambda de bloqueio (Passo 4.2) sempre que um finding GuardDuty identifica um IP malicioso. A integração com o WAF do Lab 07 transforma cada finding de IP malicioso em bloqueio imediato na camada de aplicação, antes mesmo que a requisição chegue ao servidor de aplicação.
+
+**Por que esta ordem:** O IP Set deve existir antes da Lambda de bloqueio — a função Lambda precisa do ID do IP Set para atualizá-lo. Após a criação, o ID e o Lock Token são exportados como variáveis de ambiente para uso nos passos subsequentes.
+
+**Por que isso importa para o Banco Meridian:** Esta automação fecha o ciclo de proteção adaptativa: GuardDuty detecta o IP do atacante → EventBridge aciona a Lambda → Lambda adiciona o IP ao WAF → WAF bloqueia todas as requisições subsequentes daquele IP. O atacante `185.220.101.15` que comprometeu a instância EC2 e está tentando acessar o internet banking do Banco Meridian seria bloqueado automaticamente em segundos após o finding GuardDuty.
 
 ```bash
 # Criar IP Set no WAF para IPs bloqueados
@@ -633,7 +659,17 @@ echo "Automação 3 configurada"
 
 ## Seção 5 — Testes das 3 Automações
 
-**Passo 5.1** — Testar Automação 1 (desabilitar chave):
+### Passo 5.1 — Testar a Automação 1 (desabilitar chave IAM comprometida)
+
+**O que este passo faz:** Cria um usuário IAM de teste (`IR-Test-User-Lab`) e uma access key temporária, constrói um payload JSON que simula o evento GuardDuty que o EventBridge enviaria à Lambda, e invoca diretamente a função Lambda `LambdaIR-DisableIAMKey` para validar que a automação funciona antes de habilitar a regra EventBridge em produção. O teste verifica: (1) a Lambda executa sem erro (StatusCode 200); (2) a chave é desabilitada (status Inactive); (3) o usuário recebe as tags de incidente.
+
+**Por que esta ordem:** Testar diretamente via `lambda invoke` antes de habilitar o EventBridge permite identificar e corrigir erros na Lambda sem depender do ciclo de detecção do GuardDuty. Após validação, o `enable-rule` do EventBridge ativa o pipeline completo.
+
+**O que você deve ver:** `StatusCode: 200` na saída do invoke. A chave `IR-Test-User-Lab` deve ter status `Inactive` após o teste.
+
+**O que fazer se der errado:**
+- `Function returned an error`: ver o log no CloudWatch `/aws/lambda/LambdaIR-DisableIAMKey` para o traceback Python
+- Chave ainda `Active` após invoke: verificar se a role IAM da Lambda tem permissão `iam:UpdateAccessKey`
 
 ```bash
 # Criar usuário e chave de teste
@@ -684,7 +720,13 @@ aws wafv2 get-ip-set \
 
 ## Seção 6 — CloudWatch Alarm para Falhas de Lambda IR
 
-**Passo 6.1** — Criar alarme para erros nas Lambdas de IR:
+### Passo 6.1 — Criar alarmes de monitoramento para as Lambdas de resposta a incidentes
+
+**O que este passo faz:** Cria CloudWatch Alarms para monitorar falhas das três funções Lambda de resposta a incidentes. O script usa um loop bash que cria o alarme para cada Lambda com o mesmo padrão de configuração: threshold de 1 erro, período de 5 minutos, avaliação em 1 período. Quando uma Lambda de IR falha, o alarme dispara e notifica via SNS o time de segurança — indicando que a contenção automática não ocorreu e resposta manual é necessária.
+
+**Por que isso importa para o Banco Meridian:** Sem este alarme, uma falha silenciosa na Lambda de isolamento de EC2 durante um incidente real deixaria o atacante sem contenção enquanto o time assume que a automação funcionou. O princípio de "monitor your monitors" é crítico em infraestrutura de segurança — a automação de resposta deve ser monitorada com o mesmo rigor que qualquer sistema de produção.
+
+**O que você deve ver:** Três alarmes criados no CloudWatch com nomes `CRITICO-LambdaIR-Failure-MeridianIR-*`, todos em estado `OK` inicialmente (sem erros nas Lambdas).
 
 ```bash
 for LAMBDA in MeridianIR-DisableIAMKey MeridianIR-IsolateEC2 MeridianIR-BlockWAFIP; do

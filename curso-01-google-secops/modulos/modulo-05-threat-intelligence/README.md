@@ -310,6 +310,8 @@ rule conexao_a_iocs_internos {
 
 ### 5.6 Integração TI → SIEM: Enriquecimento de Eventos UDM
 
+**O que esta integração faz e por que muda o trabalho do analista:** O enriquecimento TI → UDM adiciona contexto de inteligência de ameaças diretamente em cada evento normalizado, antes que o analista sequer abra o alerta. Sem enriquecimento, um evento de conexão de rede mostra apenas `principal.ip = "203.45.12.89"` — o analista precisaria copiar o IP, abrir o VirusTotal em outra aba, esperar a resposta e interpretar o resultado. Com enriquecimento, o mesmo evento mostra automaticamente `principal.ip_geo_artifact.attribute.labels: ["APT28", "Fancy Bear", "Russia"]` e `security_result.threat_name: "Cobalt Strike C2"` — o analista vê em 2 segundos que o IP é infraestrutura de APT russo. Essa redução no tempo de contextualização é o principal driver de redução de MTTD em SOCs com grande volume de alertas.
+
 O diagrama a seguir mostra como a Threat Intelligence enriquece os eventos UDM:
 
 ```
@@ -344,6 +346,8 @@ FLUXO DE ENRIQUECIMENTO TI → UDM:
 ---
 
 ### 5.7 Integração TI → SOAR: TI nos Playbooks para Tomada de Decisão
+
+**O que este padrão de integração faz e por que é importante:** A integração TI → SOAR transforma dados de inteligência de ameaças em critérios objetivos para decisões automatizadas de resposta a incidentes. Sem TI no playbook, o analista precisaria consultar manualmente o Mandiant ou VirusTotal para cada hash ou IP detectado antes de decidir se isola o host — um processo que leva de 5 a 15 minutos por alerta. Com a integração, o SOAR consulta automaticamente as fontes de TI e toma a decisão de isolamento em segundos, com base em thresholds pré-definidos (ex: `positives >= 10` ou `confidence = HIGH`). Esta automação é especialmente crítica para incidentes de ransomware, onde cada minuto de atraso na contenção pode significar a propagação para novos hosts.
 
 O SOAR usa dados de Threat Intelligence como entrada para decisões nos playbooks:
 

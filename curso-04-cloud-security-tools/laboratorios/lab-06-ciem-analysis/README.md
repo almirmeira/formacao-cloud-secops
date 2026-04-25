@@ -60,6 +60,10 @@ Ao final deste laboratório, você terá identificado e remediado as permissões
 
 ### Passo 1: Habilitar External Access Analyzer
 
+**O que este passo faz:** Configura o perfil AWS para o ambiente sandbox do Banco Meridian e cria o External Access Analyzer — um analisador que examina continuamente todos os recursos da conta em busca de configurações que permitam acesso de fora da conta ou organização AWS. Ao contrário de scans manuais, o External Access Analyzer funciona de forma contínua: assim que um recurso é criado ou modificado, ele é automaticamente analisado. O parâmetro `--type ACCOUNT` restringe a análise ao escopo da conta (em vez de `ORGANIZATION`, que analisaria toda a organização AWS).
+
+**Por que esta ordem:** O External Access Analyzer precisa ser criado antes de revisar seus findings (passo 2), pois pode levar 1-2 minutos para processar todos os recursos existentes da conta. Criá-lo primeiro e verificar findings depois garante que os resultados estarão disponíveis quando necessário. Além disso, o External Access Analyzer detecta exposição externa — o risco mais imediato — enquanto o Unused Access Analyzer (passo 3) detecta permissões excessivas internas.
+
 ```bash
 # Configurar perfil AWS sandbox
 export AWS_PROFILE=bancomeridian-sandbox
@@ -91,9 +95,18 @@ aws accessanalyzer list-analyzers \
 +-------------------------------+--------------------+
 ```
 
+**O que fazer se der errado:**
+- Se o status aparecer como `CREATING` em vez de `ACTIVE`, aguarde mais 60 segundos e execute novamente o comando `list-analyzers`
+- Se o erro for `AccessDeniedException`, verifique se o perfil AWS tem a permissão `access-analyzer:CreateAnalyzer` — consulte o Módulo 00 para configuração de permissões mínimas
+- Se o erro for `ConflictException`, um analyzer com este nome já existe — execute `aws accessanalyzer list-analyzers` para verificar o existente
+
 ---
 
 ### Passo 2: Revisar Findings de Acesso Externo
+
+**O que este passo faz:** Consulta todos os findings ativos do External Access Analyzer e os processa com um script Python para exibir os mais relevantes. O External Access Analyzer gera um finding para cada recurso que detecta como acessível externamente — por exemplo, um bucket S3 com política que permite acesso público, ou um IAM role com trust policy que aceita `Principal: "*"` (qualquer conta AWS). O script Python filtra e formata os primeiros 10 findings para análise imediata, exibindo: o ID do finding, o ARN do recurso afetado, o tipo de recurso e a condição que permite o acesso externo.
+
+**Por que esta ordem:** Este passo vem imediatamente após a criação do analyzer (passo 1) porque aproveita os findings que o analyzer já processou durante o tempo de espera de 60 segundos. Revisar os findings de acesso externo antes dos findings de permissões não usadas (passo 4) reflete a prioridade de risco: exposição externa é imediata e explorável por qualquer atacante na internet, enquanto permissões não usadas representam um risco latente que requer comprometimento interno primeiro.
 
 ```bash
 # Aguardar o analyzer processar os recursos (pode levar 1-2 minutos)
@@ -133,9 +146,32 @@ for f in findings[:10]:
 PYEOF
 ```
 
+**O que você deve ver:**
+```
+Total de findings de acesso externo: 3
+
+Finding ID: a1b2c3d4e5f6789...
+  Recurso: arn:aws:s3:::bancomeridian-relatorios-publicos
+  Tipo: AWS::S3::Bucket
+
+Finding ID: f9e8d7c6b5a4321...
+  Recurso: arn:aws:iam::123456789:role/api-terceiros-role
+  Tipo: AWS::IAM::Role
+  Condição: {"aws:PrincipalOrgID": {"StringNotEquals": "o-xxxxx"}}
+```
+
+**O que fazer se der errado:**
+- Se `Total de findings de acesso externo: 0` aparecer logo após criar o analyzer, aguarde mais 2 minutos e execute novamente — o analyzer pode ainda estar processando os recursos
+- Se o script Python falhar com `JSONDecodeError`, verifique se a AWS CLI retornou JSON válido executando o comando sem o pipe para Python primeiro
+- Se o `sleep 60` for insuficiente no seu ambiente, aumente para `sleep 120`
+
 ---
 
 ### Passo 3: Habilitar Unused Access Analyzer
+
+**O que este passo faz:** Cria um segundo analisador do tipo `ACCOUNT_UNUSED_ACCESS` com janela de lookback de 90 dias. Este analisador é fundamentalmente diferente do External Access Analyzer: enquanto o primeiro detecta exposição externa, o Unused Access Analyzer usa dados do AWS CloudTrail para identificar permissões IAM que foram concedidas mas nunca efetivamente utilizadas nos últimos 90 dias. O parâmetro `"unusedAccessAge": 90` define a janela de inatividade — uma permissão é considerada "não usada" se não aparecer em nenhum evento do CloudTrail nos últimos 90 dias. Este prazo alinha-se com o ciclo de revisão trimestral recomendado pelo BACEN 4.893.
+
+**Por que esta ordem:** O Unused Access Analyzer vem após o External Access Analyzer porque seu processamento é mais demorado (2-5 minutos) e requer dados do CloudTrail. Criá-lo depois do analyzer externo permite que ambos processem em paralelo enquanto o analista revisa os findings externos (passo 2). Os dois analisadores respondem perguntas complementares: "Quem de fora pode acessar nossos recursos?" (externo) e "Quais permissões internas nunca foram usadas?" (unused access).
 
 ```bash
 # Criar Unused Access Analyzer (90 dias de lookback)
@@ -157,9 +193,26 @@ aws accessanalyzer list-analyzers \
   --output table
 ```
 
+**O que você deve ver:**
+```
+--------------------------------------------------------------
+|                      ListAnalyzers                         |
++--------------------------+----------+---------------------+
+|  bancomeridian-unused-90d|  ACTIVE  | ACCOUNT_UNUSED_ACCESS|
++--------------------------+----------+---------------------+
+```
+
+**O que fazer se der errado:**
+- Se o status aparecer como `CREATING` após os 120 segundos de espera, aguarde mais 2 minutos — a análise inicial de 90 dias de CloudTrail pode levar mais tempo em contas com alto volume de eventos
+- Se receber `ValidationException: unusedAccessAge`, verifique se o CloudTrail está habilitado na conta sandbox — o Unused Access Analyzer requer CloudTrail para funcionar
+
 ---
 
 ### Passo 4: Listar Permissões Não Usadas
+
+**O que este passo faz:** Obtém o ARN do Unused Access Analyzer dinamicamente e consulta todos os findings do tipo `UnusedPermission` — o finding mais crítico para CIEM. O script Python processa a saída JSON e agrupa os findings por recurso IAM (role ou user), exibindo as ações específicas que foram concedidas mas nunca executadas nos últimos 90 dias. Adicionalmente, o segundo comando filtra pelo tipo `UnusedIAMRole` — roles inteiras que não foram assumidas por nenhuma identidade no período, candidatas diretas à deleção.
+
+**Por que esta ordem:** Este passo vem depois da criação do Unused Access Analyzer (passo 3) com intervalo de processamento suficiente para que os findings estejam disponíveis. Listar permissões não usadas antes de iniciar a Policy Generation (passo 5) é fundamental porque os findings desta etapa informam quais roles priorizar para geração de política mínima — você começa pela role com o maior número de permissões não usadas ou com as permissões mais críticas (iam:*, s3:Delete*, ec2:Terminate*).
 
 ```bash
 # Obter ARN do Unused Access Analyzer
@@ -211,9 +264,34 @@ aws accessanalyzer list-findings-v2 \
   done
 ```
 
+**O que você deve ver:**
+```
+=== PERMISSÕES NÃO USADAS (últimos 90 dias) ===
+Total: 12
+
+Role/User: api-pagamentos-role
+  - s3:DeleteObject (nunca usada)
+  - s3:DeleteBucket (nunca usada)
+  - iam:ListUsers (nunca usada)
+
+Role/User: lambda-notificacoes-role
+  - ec2:DescribeInstances (nunca usada)
+  - iam:GetUser (nunca usada)
+
+ROLE INATIVA: arn:aws:iam::123456789:role/role-projeto-encerrado-2023
+```
+
+**O que fazer se der errado:**
+- Se `Total: 0` aparecer, o CloudTrail da conta pode ter menos de 90 dias de histórico, ou o analyzer ainda está processando — aguarde mais 5 minutos e repita
+- Se o script Python falhar com `KeyError`, o formato de output do `list-findings-v2` pode diferir entre versões da AWS CLI — use `--debug` para inspecionar o JSON bruto
+
 ---
 
 ### Passo 5: Iniciar Policy Generation
+
+**O que este passo faz:** Identifica a role alvo para análise (buscando por nome `api-pagamentos` na conta) e, se ela não existir, cria uma role de demonstração com políticas propositalmente excessivas (`AmazonS3FullAccess` + `IAMReadOnlyAccess`) para simular o cenário realista. Em seguida, inicia o processo de Policy Generation do IAM Access Analyzer, que consulta 90 dias de eventos do CloudTrail para a role especificada e compila uma lista de quais ações IAM foram efetivamente executadas. O `JOB_ID` retornado é usado no passo 6 para recuperar a política gerada.
+
+**Por que esta ordem:** A Policy Generation precisa ser iniciada antes de comparar a política atual com a mínima (passo 6), porque o processo de análise do CloudTrail pode levar de 5 a 30 minutos dependendo do volume de eventos. Iniciar o job no passo 5 e fazer a comparação no passo 6 permite que o processo rode em background enquanto o aluno entende o conceito. A demonstração com a role `lab06-api-pagamentos-demo` é necessária porque ambientes sandbox normalmente não têm 90 dias de CloudTrail histórico suficiente — a comparação conceitual do passo 6 supre essa limitação.
 
 ```bash
 # Identificar uma role com permissões excessivas para análise
@@ -277,9 +355,33 @@ JOB_ID=$(aws accessanalyzer start-policy-generation \
 echo "Job ID: $JOB_ID"
 ```
 
+**O que você deve ver:**
+```
+Role de demonstração criada: arn:aws:iam::123456789:role/lab06-api-pagamentos-demo
+
+=== POLÍTICAS ATUAIS DA ROLE ===
++----------------------+------------------------------------------+
+|  PolicyName          |  PolicyArn                               |
++----------------------+------------------------------------------+
+|  AmazonS3FullAccess  |  arn:aws:iam::aws:policy/AmazonS3FullA...|
+|  IAMReadOnlyAccess   |  arn:aws:iam::aws:policy/IAMReadOnlyAcc..|
++----------------------+------------------------------------------+
+
+=== INICIANDO POLICY GENERATION ===
+Job ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
+
+**O que fazer se der errado:**
+- Se `JOB_ID=POLICY_GENERATION_DEMO`, significa que o comando falhou porque a conta sandbox não tem a role `AccessAnalyzerCloudTrailRole` ou CloudTrail configurado — isso é esperado em sandboxes; o passo 6 fará a demonstração conceitual
+- Se a criação da role falhar com `EntityAlreadyExists`, execute `aws iam get-role --role-name lab06-api-pagamentos-demo` para obter o ARN existente
+
 ---
 
 ### Passo 6: Comparar Política Atual vs Política Mínima
+
+**O que este passo faz:** Demonstra o impacto quantificado da aplicação do princípio de menor privilégio. Exibe lado a lado a política atual (permissões excessivas) versus a política mínima gerada pela análise de uso real do CloudTrail. O output mostra: (1) quais ações S3 foram efetivamente usadas (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`); (2) quais ações S3 nunca foram usadas e seriam removidas (`s3:DeleteObject`, `s3:DeleteBucket`, `s3:PutBucketPolicy` e 40+ outras); (3) a redução calculada de superfície de ataque em percentagem. Se o Job da Policy Generation concluiu, o script também tenta recuperar a política real gerada pelo CloudTrail.
+
+**Por que esta ordem:** A comparação antes/depois vem imediatamente antes da aplicação da política mínima (passo 7) para que o analista possa revisar e aprovar as mudanças antes de qualquer alteração na conta. Este é o ponto de decisão humana no processo: o Access Analyzer sugere, o analista valida, e só então a política é aplicada. Em produção, esta revisão seria documentada como evidência de controle de acesso para auditoria BACEN.
 
 ```bash
 # Mostrar o conceito de política mínima esperada
@@ -319,9 +421,41 @@ if [ "$JOB_ID" != "POLICY_GENERATION_DEMO" ] && [ -n "$JOB_ID" ]; then
 fi
 ```
 
+**O que você deve ver:**
+```
+=== ANÁLISE: POLÍTICA ATUAL vs POLÍTICA MÍNIMA ===
+
+POLÍTICA ATUAL (AmazonS3FullAccess + IAMReadOnlyAccess):
+  s3:* (todas as ações S3)
+  iam:Get*, iam:List*, iam:Generate* (todas as ações de leitura IAM)
+
+RESULTADO DA POLICY GENERATION ESPERADO (baseado em CloudTrail 90 dias):
+  s3:GetObject (usada: 1.234 vezes)
+  s3:PutObject (usada: 456 vezes)
+  s3:ListBucket (usada: 789 vezes)
+
+PERMISSÕES NÃO USADAS (seriam removidas):
+  s3:DeleteObject
+  s3:DeleteBucket
+  s3:PutBucketPolicy
+  iam:GetUser (nunca usada)
+  iam:ListUsers (nunca usada)
+  ... + 40 outras ações
+
+REDUÇÃO: de 80+ permissões para 3 permissões necessárias
+IMPACTO EM SEGURANÇA: superfície de ataque reduzida em ~96%
+```
+
+**O que fazer se der errado:**
+- Se `Policy generation ainda em andamento...` aparecer após 30 segundos, o job ainda está processando — isso é normal para contas com muito volume de CloudTrail; aumente o `sleep 30` para `sleep 120` e tente novamente
+
 ---
 
 ### Passo 7: Aplicar Política Mínima
+
+**O que este passo faz:** Cria a política IAM mínima em formato JSON com apenas as três ações S3 que foram efetivamente usadas nos últimos 90 dias, restritas ao bucket específico de pagamentos (`bancomeridian-pagamentos`). Em seguida, desanexa a política excessiva (`AmazonS3FullAccess`) e anexa a nova política mínima à role. Este é o passo de remediação efetiva — as etapas anteriores foram de análise e aprovação; agora a mudança é aplicada na conta AWS real.
+
+**Por que esta ordem:** A aplicação da política mínima ocorre apenas depois que o analista revisou o comparativo (passo 6) e aprovou a redução. Fazer o passo 7 antes do passo 6 seria como aplicar uma cirurgia sem diagnóstico. O escopo da política mínima (`Resource: bancomeridian-pagamentos/*`) é mais restritivo que a política original que permitia qualquer bucket S3 — essa especificidade é fundamental para o princípio de menor privilégio, pois impede que a role acesse outros buckets mesmo que um atacante tente.
 
 ```bash
 # Criar política mínima manualmente (baseada no exemplo acima)
@@ -375,9 +509,24 @@ if [ -n "$MINIMAL_POLICY_ARN" ]; then
 fi
 ```
 
+**O que você deve ver:**
+```
+Política mínima criada: arn:aws:iam::123456789:policy/lab06-api-pagamentos-demo-minimal-policy-20260425
+✓ Política mínima aplicada à role lab06-api-pagamentos-demo
+```
+
+**O que fazer se der errado:**
+- Se `aws iam create-policy` falhar com `EntityAlreadyExists`, a política já foi criada em uma execução anterior — o script lida com isso com `2>/dev/null || echo "Nota: política pode já existir"`
+- Se `MINIMAL_POLICY_ARN` ficar vazia, verifique o nome da role com `echo $ROLE_NAME` e liste as políticas com `aws iam list-policies --scope Local`
+- Após aplicar, verifique com `aws iam list-attached-role-policies --role-name $ROLE_NAME` que a política mínima aparece e a excessiva foi removida
+
 ---
 
 ### Passo 8: Verificar Credenciais de Ex-Colaboradores
+
+**O que este passo faz:** Gera o relatório de credenciais nativo do IAM (CSV com informações de todos os usuários da conta) e processa com um script Python que identifica dois tipos de risco: (1) usuários humanos que não fazem login há mais de 90 dias — candidatos a ex-colaboradores com credenciais ativas; (2) access keys com mais de 90 dias sem rotação — chaves com alto risco de comprometimento por exposição não detectada. O relatório é a base de evidência para comunicar ao RH e ao time de segurança quais usuários devem ter acesso revogado imediatamente.
+
+**Por que esta ordem:** A verificação de credenciais de ex-colaboradores ocorre depois de aplicar a remediação técnica de permissões (passo 7) porque são ações de natureza diferente. Enquanto reduzir permissões de roles existentes é uma ação puramente técnica, revogar credenciais de ex-colaboradores pode exigir validação com o RH antes da execução — especialmente em caso de false positives (colaborador em licença médica, funcionário com conta sem login regular). Esta análise informa quais usuários merecem atenção no passo 9 (shadow admins).
 
 ```bash
 # Gerar relatório de credenciais
@@ -449,9 +598,33 @@ except Exception as e:
 PYEOF
 ```
 
+**O que você deve ver:**
+```
+=== AUDITORIA DE CREDENCIAIS IAM ===
+
+CHAVE ANTIGA: dev-maria-santos — access_key_1 tem 127 dias sem rotação
+CHAVE ANTIGA: svc-integracao-erp — access_key_1 tem 203 dias sem rotação
+
+USUÁRIOS INATIVOS (+90 dias sem acesso):
+  joao.silva: 142 dias inativo (último: 2025-12-03)
+  pedro.alves: 287 dias inativo (último: 2025-07-19)
+
+RECOMENDAÇÃO: Verificar com RH se esses usuários ainda são colaboradores ativos.
+Se saíram da empresa: REVOGAR IMEDIATAMENTE (BACEN 4.893 Art. 8)
+```
+
+**O que fazer se der errado:**
+- Se receber `Erro ao processar relatório: O relatório pode não estar disponível nesta conta sandbox`, execute `aws iam generate-credential-report` novamente e aguarde 30 segundos antes de tentar `get-credential-report`
+- Se `base64 -d` falhar em macOS, use `base64 -D` (letra maiúscula)
+- Em contas sandbox novas, é normal não encontrar usuários inativos — o relatório ainda assim valida que o processo funciona
+
 ---
 
 ### Passo 9: Identificar Shadow Admins
+
+**O que este passo faz:** Executa uma varredura em todas as roles da conta em busca de políticas inline que contenham `Action: "*"`, `Action: "iam:*"` ou `Action: "sts:*"` — as três configurações que caracterizam um shadow admin. Shadow admins são roles com nomes inofensivos (como `lambda-processamento-relatorios`) que possuem permissões efetivamente equivalentes às de um administrador, mas que passam despercebidas em revisões superficiais porque não têm `AdministratorAccess` como nome de política. O script usa um detector Python inline para analisar cada policy document e emitir alerta quando detecta a combinação perigosa.
+
+**Por que esta ordem:** A identificação de shadow admins ocorre antes do relatório final (passo 10) porque é um dos achados mais críticos de uma auditoria CIEM. Um shadow admin representa um risco imediato e específico — uma conta ou role que pode comprometer toda a conta AWS se explorada. Os achados deste passo alimentam diretamente as recomendações do relatório executivo gerado no passo 10, e qualquer shadow admin identificado deve ser documentado com prioridade máxima.
 
 ```bash
 echo "=== IDENTIFICANDO SHADOW ADMINS ==="
@@ -497,9 +670,26 @@ except: pass
 done 2>/dev/null | head -10 || echo "Nenhum shadow admin detectado (ou scan incompleto)"
 ```
 
+**O que você deve ver:**
+```
+SHADOW ADMIN DETECTADO: Role=legacy-data-migration-role, Policy=DataMigrationPolicy
+```
+Ou, em ambientes limpos:
+```
+Nenhum shadow admin detectado (ou scan incompleto)
+```
+
+**O que fazer se der errado:**
+- Se o script parecer travar (sem output por mais de 2 minutos), pode estar iterando sobre muitas roles — adicione `| head -20` antes do `while read role_name` para limitar o escopo durante o lab
+- Em contas com muitas roles, adicione `--max-items 50` ao comando `aws iam list-roles` para limitar o escopo durante o exercício de laboratório
+
 ---
 
 ### Passo 10: Gerar Relatório CIEM Final
+
+**O que este passo faz:** Consolida todos os achados dos passos anteriores em um relatório executivo estruturado, salvo em `/tmp/lab06-ciem-report.txt`. O relatório inclui: data e conta auditada, achados agrupados por categoria (acesso externo, permissões excessivas, credenciais de ex-colaboradores, shadow admins), evidência da remediação aplicada (antes/depois da role `lab06-api-pagamentos-demo`), status de conformidade com o BACEN 4.893 Art. 8, e as próximas recomendações priorizadas para os próximos 30 dias. Este formato é adequado para apresentação ao CISO e ao Compliance Officer como evidência de auditoria.
+
+**Por que esta ordem:** O relatório é sempre o último passo porque consolida todos os achados e remediações já realizados. Gerá-lo antes de completar os passos anteriores resultaria em um relatório incompleto e enganoso. Em cenários reais de auditoria CIEM no Banco Meridian, este relatório seria gerado no final de cada ciclo trimestral de revisão de acessos e arquivado como evidência formal para o regulador.
 
 ```bash
 python3 << 'PYEOF'
@@ -555,6 +745,27 @@ with open('/tmp/lab06-ciem-report.txt', 'w') as f:
 print("Relatório salvo em: /tmp/lab06-ciem-report.txt")
 PYEOF
 ```
+
+**O que você deve ver:**
+```
+=== RELATÓRIO DE AUDITORIA CIEM — BANCO MERIDIAN ===
+Data: 2026-04-25 14:32
+Conta AWS: 123456789012
+Ferramenta: AWS IAM Access Analyzer
+
+ACHADOS PRINCIPAIS:
+──────────────────────────────────────────────────────────────────────────────
+
+1. ACESSO EXTERNO (External Access Analyzer)
+   Findings ativos: verificar no console do Access Analyzer
+   ...
+
+Relatório salvo em: /tmp/lab06-ciem-report.txt
+```
+
+**O que fazer se der errado:**
+- Se o comando `aws sts get-caller-identity` dentro do script Python falhar (erro de permissão), substitua a linha do `Account` por `Account: [verificar manualmente]` na variável `report`
+- Se `/tmp/lab06-ciem-report.txt` não for criado, verifique as permissões de escrita em `/tmp` com `ls -la /tmp/`
 
 ---
 

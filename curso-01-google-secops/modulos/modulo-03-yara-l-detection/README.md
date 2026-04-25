@@ -419,6 +419,10 @@ Detection Engineer de alguém que apenas copia regras sem entender o que está f
 
 #### Exemplo 1: Login Fora do Horário Comercial (Single-Event)
 
+**O que esta regra detecta e por que foi projetada assim:** Esta regra detecta logins bem-sucedidos de usuários do Banco Meridian fora do horário comercial (antes das 8h e após as 20h, horário de Brasília). É uma regra single-event porque cada login fora do horário é, por si só, um evento suspeito que justifica investigação — não é necessário correlacionar múltiplos eventos. Logins noturnos de contas corporativas são frequentemente associados à técnica T1078 (Valid Accounts) usada por atacantes que comprometeram credenciais e escolhem horários de baixo monitoramento para operar. No Banco Meridian, o BACEN exige rastreamento de acessos fora do horário operacional — esta regra cumpre automaticamente este requisito.
+
+**Decisões de design críticas:** O campo `target.user.email_addresses` é preferido a `target.user.userid` porque o e-mail corporativo é mais específico (exclui contas de sistema) e mais fácil de correlacionar com logs do Azure AD. A exclusão de contas de serviço (`svc_`, `sa_`) via regex é essencial — sistemas de monitoramento fazem check-ins noturnos legítimos e sem essa exclusão a regra geraria dezenas de falsos positivos por dia. A watchlist `watchlist_acesso_noturno_autorizado` permite exceções gerenciadas para profissionais de plantão sem reescrever a regra.
+
 ```yara-l
 // ============================================================
 // REGRA: login_fora_horario_comercial
@@ -477,6 +481,10 @@ rule login_fora_horario_comercial {
 ---
 
 #### Exemplo 2: Password Spray (Multi-Event)
+
+**O que esta regra detecta e por que foi projetada assim:** Esta regra detecta ataques de Password Spray (T1110.003), onde um atacante usa uma senha comum contra muitos usuários diferentes — ao contrário do brute force, que tenta muitas senhas contra um único usuário. A distinção técnica entre os dois ataques está no campo `count(distinct $e1.target.user.email_addresses)`: o brute force gera muitas falhas do mesmo IP para o mesmo usuário (alto `#e1`, baixo `distinct users`); o password spray gera falhas distribuídas em muitos usuários (alto `#e1` E alto `distinct users`). Esta combinação é o que torna a regra específica — nenhuma das condições sozinha seria suficiente.
+
+**Decisões de design críticas:** A janela de 15 minutos (`over 15m`) é calibrada para capturar rajadas rápidas de password spray, que tipicamente duram 10–30 minutos para evitar lockouts de conta. O threshold de 10 tentativas e 5 usuários distintos foi derivado da análise do baseline do Banco Meridian — em dias normais, nenhum IP externo gera mais de 3 bloqueios em 15 minutos. A regra usa `target.user.email_addresses` em vez de `userid` porque o password spray geralmente testa endereços de e-mail que o atacante obteve via OSINT ou vazamentos.
 
 ```yara-l
 // ============================================================
@@ -544,6 +552,10 @@ rule password_spray_detection {
 ---
 
 #### Exemplo 3: C2 Beaconing por Periodicidade (Multi-Event com Análise Estatística)
+
+**O que esta regra detecta e por que foi projetada assim:** Esta regra detecta comportamento de C2 Beaconing (T1071.001), onde um malware instalado em um host faz conexões periódicas regulares para um servidor de Comando e Controle do atacante. O padrão característico do beaconing é a regularidade: ao contrário de tráfego humano (que é irregular e em rajadas), um beacon faz conexões a intervalos quase fixos — a cada 60 segundos, a cada 5 minutos, etc. A técnica de análise estatística usada aqui (desvio padrão dos intervalos entre conexões) é o método mais eficaz para capturar essa regularidade, pois é resistente a jitter (pequena variação aleatória que frameworks como Cobalt Strike adicionam aos beacons para evitar detecção).
+
+**Decisões de design críticas:** O uso de `stddev(intervals) < 10` captura beacons com jitter de até 10 segundos — o jitter padrão do Cobalt Strike é configurável entre 0% e 50% do intervalo. Para um beacon de 60 segundos com 20% de jitter, o desvio padrão seria de ~12 segundos, portanto a regra usa threshold de 10 para ser conservadora. O filtro de IPs internos (`NOT target.ip = /^10\..*/ etc.`) é essencial — sem ele, qualquer sistema de heartbeat interno (monitoramento, backup) dispararia a regra. O `count >= 10` garante que pelo menos 10 conexões foram feitas no período, evitando que 2 ou 3 reconexões legítimas (por exemplo, após queda de VPN) disparem o alerta.
 
 ```yara-l
 // ============================================================
@@ -626,6 +638,10 @@ rule c2_beaconing_periodicidade {
 
 #### Exemplo 4: Exfiltração via DNS / DGA Detection (Multi-Event)
 
+**O que esta regra detecta e por que foi projetada assim:** Esta regra detecta dois comportamentos relacionados que indicam uso malicioso do protocolo DNS: exfiltração de dados via DNS (T1048.003) e uso de Domain Generation Algorithms — DGA (T1568.002). Atacantes usam DNS para exfiltrar dados porque o protocolo quase sempre é permitido pelo firewall e raramente é inspecionado com profundidade. A exfiltração via DNS codifica dados em queries de subdomínio — cada query carrega pequenos pedaços de dados que, somados, formam o arquivo exfiltrado. DGA é usado para gerar domínios de C2 dinamicamente, tornando o bloqueio por lista negra ineficaz. O alto volume de respostas NXDOMAIN (domínio não encontrado) é o sinal característico de DGA: o malware gera centenas de domínios e só um pequeno subconjunto está ativo como C2.
+
+**Decisões de design críticas:** O threshold de 50 domínios únicos com NXDOMAIN em 5 minutos captura o padrão de DGA sem disparar para falhas de DNS legítimas (usuário digitando URL errada). O filtro `strlen(target.hostname) > 30` foca em domínios longos — domínios DGA são tipicamente gerados com 20–40 caracteres aleatórios, enquanto domínios legítimos raramente excedem 20 caracteres. Para o Banco Meridian, a detecção de DNS tunelado é especialmente crítica em conformidade com a LGPD — dados de clientes exfiltrados por DNS constituem violação de dados pessoais que requer notificação à ANPD em até 72 horas.
+
 ```yara-l
 // ============================================================
 // REGRA: dns_dga_exfiltracao
@@ -691,6 +707,10 @@ rule dns_dga_exfiltracao {
 ---
 
 #### Exemplo 5: Privilege Escalation via Criação de Conta Admin (Multi-Event)
+
+**O que esta regra detecta e por que foi projetada assim:** Esta regra detecta uma sequência de dois eventos que, juntos, indicam persistência pós-comprometimento: primeiro, um login bem-sucedido com credenciais que geraram alertas anteriores (comprometimento); segundo, a criação de uma nova conta de usuário seguida de adição ao grupo de administradores (T1098 + T1136). Esta sequência é o padrão clássico de como APTs garantem acesso futuro ao ambiente — a conta backdoor criada pelo atacante serve de porta de entrada permanente mesmo que a conta original seja bloqueada após descoberta do comprometimento. No incidente da Operação Antas (Lab 05), foi exatamente esse padrão que levou à criação da conta `administrador_ti2`.
+
+**Decisões de design críticas:** A regra usa dois eventos correlacionados (`$e1` e `$e2`) com uma janela de correlação de 30 minutos (`over 30m`) e o vínculo `$e1.principal.user.userid = $e2.principal.user.userid` — isso garante que AMBOS os eventos são realizados pelo MESMO usuário. Sem esse vínculo, a regra dispararia em qualquer dia onde qualquer usuário fizesse login e qualquer administrador criasse uma nova conta (eventos não relacionados). O filtro de grupos de admin (`Domain Admins|Enterprise Admins|Administrators`) é específico para o domínio Active Directory do Banco Meridian — em outros ambientes, o grupo pode ter nome diferente e precisar de ajuste. Para compliance BACEN, a criação não autorizada de contas privilegiadas é classificada como incidente relevante de segurança (Resolução 4.893, Artigo 2, inciso III).
 
 ```yara-l
 // ============================================================

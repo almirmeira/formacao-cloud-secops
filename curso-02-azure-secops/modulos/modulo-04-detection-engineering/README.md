@@ -345,6 +345,8 @@ Actions:
 
 ### Rule 1 — Impossible Travel (Login de Dois Países em Menos de 1 Hora)
 
+O impossible travel detecta o indicador mais claro de comprometimento de conta: o mesmo usuário autenticando com sucesso em dois países que nenhum ser humano conseguiria visitar em sequência naquele intervalo de tempo. Esta rule usa um self-join da tabela `SigninLogs` — une a tabela com ela mesma pelo `UserPrincipalName`, comparando o login mais recente com o imediatamente anterior. O filtro `abs(datetime_diff('minute', ...)) < 60` garante que os dois logins ocorreram dentro de 60 minutos, e `Country != Country1` confirma que são países diferentes. A exclusão via watchlists (`service-accounts` e `frequent-travelers`) é o que mantém a taxa de falsos positivos baixa: sem essas exclusões, o VP de vendas que voa para Buenos Aires a trabalho geraria um alerta por semana. O threshold de 60 minutos pode ser ajustado conforme a política do banco — para casos de fronteira (São Paulo → Montevidéu de avião leva ~3h), 60 minutos garante que apenas logins fisicamente impossíveis disparem o alerta.
+
 ```kql
 // ═══════════════════════════════════════════════════════════════════
 // ANALYTICS RULE: Impossible Travel
@@ -406,6 +408,8 @@ recentLogins
 
 ### Rule 2 — Password Spray via Entra ID Sign-in Logs
 
+O password spray é detectado nesta rule pela análise da proporção entre contas únicas tentadas e tentativas por conta. O limiar de `minAccounts = 10` (10 contas distintas do mesmo IP em 1 hora) é calibrado para o porte do Banco Meridian: ambientes menores podem usar 5, ambientes maiores podem precisar de 15 para evitar falsos positivos de sistemas de autenticação legítimos como health-check automatizados. A exclusão de `ResultType in (50074, 50076)` elimina os códigos "MFA required" — que são gerados quando usuários sem MFA configurado tentam acessar apps que exigem MFA, comportamento legítimo em um ambiente onde a implantação de MFA está em andamento. O campo `TTL (Timeout to Live)` configurado no incidente garante que o analista seja notificado mesmo se o ataque parar antes da próxima execução da rule — o incidente permanece ativo por `closingBehavior` definido. O scheduling de 15 minutos é agressivo por design: password spray acontece rápido, e um SOC que demora 1 hora para detectar pode ter o banco inteiro exposto antes de responder.
+
 ```kql
 // ═══════════════════════════════════════════════════════════════════
 // ANALYTICS RULE: Password Spray Attack
@@ -455,6 +459,8 @@ SigninLogs
 ---
 
 ### Rule 3 — Service Principal Adicionado a Role Privilegiada
+
+Esta rule detecta uma técnica de escalada de privilégio e persistência em ambientes Azure que é frequentemente subestimada: a atribuição de roles privilegiadas a Service Principals (identidades de aplicações) em vez de a usuários humanos. Quando um atacante adiciona uma Service Principal que controla a uma role como "Global Administrator" ou "Security Administrator", ele ganha acesso privilegiado permanente que não é afetado por redefinição de senhas de usuários humanos ou revogação de sessões. Esta técnica é especialmente insidiosa porque Service Principals frequentemente recebem permissões amplas como parte de integrações legítimas, tornando difícil para analistas menos experientes distinguir atribuições maliciosas de legítimas. A lista `privilegedRoles` nesta rule é o coração da detecção — ela deve ser mantida atualizada conforme novos roles são adicionados ao Entra ID. O join com `AuditLogs` para buscar a criação prévia da Service Principal ajuda a contextualizar: uma SP criada há 3 anos sendo adicionada a um role agora é menos suspeita que uma SP criada e adicionada ao role na mesma hora.
 
 ```kql
 // ═══════════════════════════════════════════════════════════════════
@@ -520,6 +526,8 @@ AuditLogs
 ---
 
 ### Rule 4 — Token Theft / AiTM Phishing Pattern
+
+Esta é a rule mais complexa do módulo e a mais relevante dado o contexto de ameaça AiTM identificado para o setor bancário brasileiro. Ela detecta o padrão post-exploitation do AiTM phishing: a combinação de três indicadores simultâneos que, individualmente, podem ser legítimos, mas em conjunto são altamente suspeitos. O primeiro indicador é um login bem-sucedido com `AuthenticationRequirement = "singleFactorAuthentication"` para um usuário que historicamente sempre usa MFA — o token roubado pelo proxy AiTM já passou pelo MFA, então o atacante se autentica "de graça" sem esse fator. O segundo é um IP de origem diferente do habitual (calculado pela baseline dos últimos 30 dias). O terceiro é um `DeviceId` não registrado no tenant, indicando que não é um dispositivo corporativo gerenciado. A correlação dos três fatores em uma única query via `let` e joins mantém o sinal-ruído alto — um único indicador geraria muitos falsos positivos, mas a combinação dos três é altamente específica para o padrão AiTM. O scheduling de 30 minutos é um equilíbrio entre detecção rápida e custo computacional de um join com lookback de 30 dias.
 
 ```kql
 // ═══════════════════════════════════════════════════════════════════
@@ -588,6 +596,8 @@ SigninLogs
 ---
 
 ### Rule 5 — Exfiltração de Dados via SharePoint Incomum
+
+Esta rule implementa uma das técnicas mais sofisticadas de detecção comportamental disponíveis no KQL para o Sentinel: a análise de anomalia baseada em baseline individual por usuário. Em vez de usar um threshold absoluto (ex: "mais de 50 downloads é suspeito"), ela calcula para cada usuário qual é a sua média histórica de downloads nos últimos 30 dias e alerta apenas quando o volume atual é significativamente superior ao padrão pessoal. O multiplicador `ExfiltrationMultiplier > 10.0` significa que o usuário está baixando 10 vezes mais que sua média histórica — um analista financeiro que normalmente baixa 5 documentos por semana precisaria baixar 50 em um período de 2 horas para disparar o alerta. Isso praticamente elimina falsos positivos relacionados a diferenças de função (o analista de crédito naturalmente baixa mais que a recepcionista) enquanto mantém alta sensibilidade para comportamentos aberrantes. O campo `Multiplier` no resultado do incidente permite ao analista calibrar a urgência: `Multiplier = 10x` requer investigação, `Multiplier = 50x` requer resposta imediata.
 
 ```kql
 // ═══════════════════════════════════════════════════════════════════

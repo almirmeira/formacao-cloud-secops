@@ -121,7 +121,15 @@ Você é o IR Analyst de plantão. Use o Amazon Detective para reconstruir a tim
 
 ## Seção 1 — Triagem Inicial do Finding
 
-**Passo 1.1** — Obter detalhes completos do finding GuardDuty:
+### Passo 1.1 — Obter detalhes completos do finding GuardDuty
+
+**O que este passo faz:** Executa duas chamadas de API sequenciais: `list-findings` busca os IDs dos findings de alta severidade do tipo `Backdoor:EC2/C&CActivity.B` ordenados pelo mais recente; `get-findings` recupera o JSON completo de um finding específico. O script Python extrai os campos mais críticos para triagem: tipo do finding, conta afetada, instância, IP e porta do C2, e — o mais importante — o `EventFirstSeen` que indica quando o comprometimento começou. O output estruturado permite que o analista de plantão tome decisões em segundos, não minutos.
+
+**Por que esta ordem:** A triagem do finding GuardDuty é sempre o PRIMEIRO passo de qualquer processo de resposta a incidentes. O finding contém informações de contexto que orientam todos os passos seguintes: sem o `Instance ID`, não é possível isolar; sem o `IamInstanceProfile`, não é possível revogar credenciais; sem o `EventFirstSeen`, não é possível definir o escopo da janela de comprometimento.
+
+**Por que isso importa para o Banco Meridian:** O campo `EventFirstSeen: 2026-04-10T01:15:00Z` é crítico — significa que a instância estava comprometida por 2 horas e 9 minutos ANTES do alerta às 03h24. Este delta é o período de exposição máxima: o atacante teve esse tempo para exfiltrar dados, criar backdoors e mover-se lateralmente. Para o BACEN 4.893 Art. 11 e LGPD Art. 48, o `EventFirstSeen` é o T0 do incidente, que define o prazo de 72 horas para notificação regulatória.
+
+**Permissão IAM necessária:** `guardduty:ListFindings` e `guardduty:GetFindings` no detector da conta Audit (222222222222). O DETECTOR_ID é obtido em: `aws guardduty list-detectors --region sa-east-1 --query 'DetectorIds[0]' --output text`.
 
 ```bash
 # Assumir role na Audit Account
@@ -188,7 +196,15 @@ Contagem: 1847
 
 ## Seção 2 — Investigação com Amazon Detective
 
-**Passo 2.1** — Pivot do Finding para o Detective:
+### Passo 2.1 — Pivot do Finding para o Amazon Detective
+
+**O que este passo faz:** O Amazon Detective constrói automaticamente um "behavior graph" — um grafo de relacionamentos entre entidades AWS (instâncias, usuários IAM, endereços IP, chamadas de API) baseado em CloudTrail, VPC Flow Logs e GuardDuty. O `start-investigation` inicia uma investigação focada na instância comprometida `i-0a1b2c3d4e5f67890`, com janela temporal de 2 dias antes e depois do primeiro evento suspeito. O Detective usa machine learning para destacar automaticamente os relacionamentos e comportamentos mais anômalos — economizando horas de análise manual.
+
+**Por que esta ordem:** O Detective deve ser acionado ANTES do isolamento da instância (Seção 4) — após o isolamento, a instância para de gerar eventos, reduzindo a utilidade do Detective para investigações em tempo real. O Detective analisa dados históricos também, mas a análise simultânea com o incidente em curso é mais rica.
+
+**Por que isso importa para o Banco Meridian:** O Amazon Detective é o que permite ao analista Rodrigo Saraiva responder à pergunta "o atacante se moveu lateralmente para outras instâncias?" em minutos, não horas. O behavior graph mostra visualmente todas as entidades que se comunicaram com a instância comprometida, os IAM roles que ela assumiu, e os IPs com os quais ela se conectou — informação que levaria horas para reunir manualmente de CloudTrail e VPC Flow Logs separados.
+
+**Permissão IAM necessária:** `detective:ListGraphs` e `detective:StartInvestigation` na conta Audit (222222222222), onde o behavior graph está centralizado.
 
 ```bash
 # Obter ARN do behavior graph
@@ -213,17 +229,17 @@ aws detective start-investigation \
   --region sa-east-1
 ```
 
-**Passo 2.2** — Analisar o behavior graph da instância:
+### Passo 2.2 — Analisar o behavior graph da instância no console Detective
 
-No console Detective (não disponível totalmente via CLI), navegar:
+**O que este passo faz:** O Amazon Detective expõe algumas informações via API, mas a análise de behavior graph completa é feita no console web — que oferece visualizações interativas que a CLI não replica. As 5 abas do Detective para esta instância são: (1) **Findings tab** confirma o finding GuardDuty de origem; (2) **Network tab** mostra todas as conexões de rede no período — procurar tráfego para a porta 4444 (C2 Metasploit) do IP `185.220.101.15`; (3) **Process activity tab** (Runtime Monitoring) lista processos em execução suspeitos; (4) **API call activity** exibe todas as chamadas de API feitas usando o IAM role da instância — aqui aparecem os `GetObject` e `ListBuckets` do atacante; (5) **Related findings** mostra outros findings GuardDuty correlacionados com esta instância.
 
-1. **Findings tab:** Confirmar finding do GuardDuty
-2. **Network tab:** Ver conexões de rede — tráfego para 185.220.101.15:4444
-3. **Process activity tab (Runtime Monitoring):** Ver processos suspeitos
-4. **API call activity:** Ver chamadas de API usando o IAM role da instância
-5. **Related findings:** Outros findings para a mesma instância ou IAM role
+**O que você deve ver:** Na aba Network, tráfego para `185.220.101.15:4444` com volume de bytes significativo (C2 channel). Na aba API call activity, calls para `s3:GetObject` em horários alinhados com o `EventFirstSeen` do finding — confirmando o vetor de exfiltração.
 
-**Passo 2.3** — Pivot para o IAM Role da instância:
+### Passo 2.3 — Pivot para o IAM Role da instância comprometida
+
+**O que este passo faz:** Identifica a IAM role (via Instance Profile) associada à instância comprometida. Esta role é o que o atacante usou para fazer chamadas de API — ListBuckets, GetObject, CreateUser — após obter as credenciais temporárias via IMDS (http://169.254.169.254). O ARN da Instance Profile é o ponto de partida para a revogação de credenciais na Seção 5.
+
+**Por que isso importa para o Banco Meridian:** A role `EC2AppRole` da instância comprometida tem permissões de acesso ao S3 porque a aplicação rodando nela precisa ler e escrever dados. O atacante explorou essas permissões legítimas para acessar dados que a aplicação normalmente acessa — mascarando o acesso malicioso em meio ao tráfego legítimo. Isso é MITRE T1078.004 (Valid Accounts: Cloud Accounts).
 
 ```bash
 # Verificar qual IAM role está associada à instância
@@ -237,7 +253,13 @@ aws ec2 describe-instances \
 
 ## Seção 3 — Timeline com CloudTrail Lake
 
-**Passo 3.1** — Query de timeline completo da instância (últimas 48h):
+### Passo 3.1 — Query de timeline completo da instância (últimas 48h)
+
+**O que este passo faz:** Esta query SQL busca TODAS as chamadas de API feitas pelo IAM role da instância comprometida nas últimas 48 horas, ordenadas cronologicamente. O campo `userIdentity.arn LIKE '%EC2AppRole%'` filtra exatamente as chamadas do role da instância. O resultado é a linha do tempo completa de atividade — chamadas legítimas da aplicação (normalmente apenas `s3:GetObject` e `s3:PutObject` em buckets específicos) misturadas com as chamadas maliciosas do atacante (`s3:ListBuckets`, `iam:CreateUser`).
+
+**Por que esta ordem:** A timeline deve ser construída ANTES do isolamento (Seção 4). Após o isolamento, a instância para de gerar novos eventos — a timeline histórica do CloudTrail Lake permanece disponível, mas o contexto em tempo real é perdido.
+
+**Por que isso importa para o Banco Meridian:** A query de timeline responde à pergunta "o que o atacante fez?" com precisão de segundos. A diferença entre os primeiros eventos legítimos da role e o início das chamadas suspeitas (`ListBuckets`, `CreateUser`) define o momento exato do comprometimento — crucial para o Plano de Resposta a Incidentes e para a notificação ao BACEN (Art. 11: relato do incidente dentro de 72 horas da ciência).
 
 ```bash
 EDS_ID="<EVENT_DATA_STORE_ID>"
@@ -274,7 +296,11 @@ aws cloudtrail start-query \
 echo "Query de timeline disparada — aguardar resultado"
 ```
 
-**Passo 3.2** — Query de atividade do IAM Role após o comprometimento:
+### Passo 3.2 — Query de atividade do IAM Role após o comprometimento
+
+**O que este passo faz:** Query focada especificamente nas chamadas de API feitas pelo IAM Role APÓS o horário do `EventFirstSeen` do finding GuardDuty — ou seja, apenas as ações do período de comprometimento confirmado. O filtro `eventTime > timestamp '2026-04-10 01:15:00'` elimina a atividade legítima anterior e isola exatamente o que o atacante fez. O resultado mostra: quais APIs foram chamadas, de qual IP (o IP do C2 `185.220.101.15`), em quais regiões, e se foram bem-sucedidas ou bloqueadas.
+
+**Por que isso importa para o Banco Meridian:** Esta query é a prova forense do escopo da violação. O campo `sourceIPAddress` deve mostrar `185.220.101.15` (externo) em vez do IP interno da instância — confirmando que as credenciais foram exfiltradas e usadas remotamente. O campo `awsRegion` pode revelar que o atacante fez chamadas em `us-east-1` além de `sa-east-1` — o mesmo padrão do incidente de março.
 
 ```bash
 aws cloudtrail start-query \
@@ -301,7 +327,11 @@ aws cloudtrail start-query \
   --region sa-east-1
 ```
 
-**Passo 3.3** — Query de detecção de criação de backdoor ou persistência:
+### Passo 3.3 — Query de detecção de criação de backdoor ou persistência
+
+**O que este passo faz:** Esta query busca as ações mais perigosas de persistência que um atacante pode executar com credenciais IAM comprometidas: criação de usuários IAM (`CreateUser`), criação de access keys (`CreateAccessKey`), e anexação de políticas permissivas (`AttachUserPolicy`, `PutUserPolicy`). Qualquer resultado desta query após o `EventFirstSeen` indica que o atacante plantou um backdoor — acesso que persiste mesmo após a instância ser isolada e as credenciais da role serem revogadas.
+
+**Por que isso importa para o Banco Meridian:** Na Operação Boto (Lab Capstone), o atacante criou o usuário `backdoor-svc` com `AdministratorAccess` às 08h42. Se esta query tivesse sido executada durante a resposta ao incidente, o backdoor teria sido descoberto em segundos. Identificar backdoors antes de declarar o incidente encerrado é crítico — fechar o incidente sem revogar o usuário `backdoor-svc` deixa o atacante com acesso permanente mesmo após a remediação da instância comprometida.
 
 ```bash
 aws cloudtrail start-query \
@@ -330,7 +360,13 @@ aws cloudtrail start-query \
 
 ## Seção 4 — Preservação de Evidências
 
-**Passo 4.1** — Criar snapshots de preservação ANTES do isolamento:
+### Passo 4.1 — Criar snapshots de preservação forense com cadeia de custódia
+
+**O que este passo faz:** Script Python que implementa a preservação de evidências forenses com cadeia de custódia completa. O script: (1) localiza todos os volumes EBS da instância comprometida; (2) cria um snapshot de cada volume com tags forenses obrigatórias (IncidentID, Custodian, DataHora, SHA256 do volume ID); (3) protege os snapshots de exclusão acidental; (4) gera um relatório JSON de cadeia de custódia com hash SHA256 de cada snapshot. A distinção crítica em relação a um snapshot simples é a documentação de quem criou, quando, por qual motivo e qual o hash de integridade.
+
+**Por que esta ordem:** A preservação deve ocorrer ANTES de qualquer ação de contenção (isolamento de Security Group, stop da instância). A sequência correta é: PRESERVAR (este passo) → ISOLAR (Seção 5) → REMEDIAR. Inverter a ordem pode destruir evidências.
+
+**Por que isso importa para o Banco Meridian:** O BACEN 4.893 Art. 12 exige que o relatório pós-incidente inclua "descrição dos impactos e das medidas adotadas". Os snapshots com cadeia de custódia são a evidência técnica que sustenta este relatório. Para eventual ação judicial contra o atacante, snapshots sem cadeia de custódia documentada podem ser questionados como evidência. O hash SHA256 registrado ANTES do isolamento garante que a evidência não foi modificada após a coleta.
 
 ```python
 import boto3

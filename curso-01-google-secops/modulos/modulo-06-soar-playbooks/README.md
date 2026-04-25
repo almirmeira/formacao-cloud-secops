@@ -163,6 +163,12 @@ que executa uma operação específica em um produto terceiro.
 
 ### 6.4 Playbook 1: Resposta a Phishing (Completo)
 
+**O que este playbook faz e por que está estruturado assim:** Este playbook automatiza a resposta ao phishing (T1566.001) desde a detecção até a contenção, seguindo uma lógica de escalonamento progressivo baseada na gravidade real do impacto. O playbook começa com enriquecimento (verificar se os IOCs são realmente maliciosos via VirusTotal antes de tomar qualquer ação) — isso evita que um falso positivo cause contenção desnecessária de um usuário legítimo, o que seria um incidente de disponibilidade. Só após confirmar a maliciosidade dos IOCs é que o playbook toma ações de contenção, e mesmo então, escalona: se o usuário NÃO interagiu com o link malicioso, a ação é notificação preventiva (menor impacto operacional); se interagiu, a ação é contenção imediata (maior impacto, mas necessária).
+
+**Por que o enriquecimento via VirusTotal é o primeiro passo:** A maioria dos alertas de phishing gerados por sistemas de e-mail são falsos positivos — newsletters de marketing, promoções legítimas com redirecionadores de URL, etc. Sem enriquecimento, o playbook bloquearia e-mails legítimos e isolaria funcionários sem motivo, gerando reclamações de negócio e erosão da confiança no SOC. O threshold de `positives >= 5` no VirusTotal é conservador — 5 ou mais engines detectando como malicioso é praticamente um positivo verdadeiro.
+
+**Impacto no MTTR do Banco Meridian:** Sem o playbook, um alerta de phishing com comprometimento confirmado levava 47 minutos para ser respondido (investigação manual + aprovações). Com o playbook, as ações de contenção (disable user, revoke sessions, contain host) são executadas em menos de 60 segundos após o alerta — a notificação ao PagerDuty garante que o analista de plantão é acionado imediatamente para as decisões que ainda requerem julgamento humano.
+
 #### Diagrama de Fluxo
 
 ```
@@ -302,6 +308,12 @@ def playbook_phishing_response(alert):
 
 ### 6.5 Playbook 2: Conta Comprometida (Completo)
 
+**O que este playbook faz e por que está estruturado assim:** Este playbook responde a incidentes de Valid Account Abuse (T1078) — uso de credenciais legítimas por um atacante que as obteve via phishing, credential stuffing ou compra em fórum criminal. É um dos cenários mais difíceis de responder manualmente porque o comportamento do atacante é inicialmente indistinguível de um login legítimo do usuário. O playbook usa a combinação de Risk Score do UEBA (> 80) e anomalias de geolocalização para determinar a confiança no comprometimento antes de tomar ações — isso evita desabilitar a conta de um executivo que simplesmente viajou ao exterior.
+
+**Por que a lógica de escalonamento é mais complexa neste playbook:** Diferentemente do phishing (onde o vetor é claro), o comprometimento de conta apresenta incerteza — pode ser o próprio usuário em circunstâncias incomuns. Por isso o playbook primeiro notifica o usuário por canal alternativo (SMS/WhatsApp corporativo) perguntando se o login é legítimo. Se o usuário confirmar (resposta "Sim"), o playbook encerra sem ação; se negar ou não responder em 10 minutos, prossegue com a contenção. Essa abordagem respeita a experiência do usuário legítimo enquanto ainda garante contenção rápida quando não há resposta.
+
+**Impacto em conformidade BACEN:** Contas comprometidas que acessam o sistema de core banking (Tópus Banking) representam risco regulatório imediato — transações não autorizadas geradas por uma conta comprometida são responsabilidade do banco perante o BACEN e o BCB. A velocidade de contenção deste playbook (< 2 minutos para revogar sessões após confirmação de comprometimento) é diretamente correlacionada à redução do valor em risco de transações fraudulentas no período de comprometimento.
+
 #### Diagrama de Fluxo
 
 ```
@@ -408,6 +420,12 @@ def playbook_compromised_account(alert):
 ---
 
 ### 6.6 Playbook 3: Malware em Endpoint (Completo)
+
+**O que este playbook faz e por que está estruturado assim:** Este playbook responde a detecções de malware em endpoints (T1059, T1055, T1071) — seja via alerta do EDR (CrowdStrike Falcon) ou via regra YARA-L do Google SecOps que detectou comportamento suspeito de processo. O foco é contenção imediata do host afetado para evitar movimento lateral e exfiltração, antes da análise detalhada do malware. Esta prioridade (conter primeiro, analisar depois) é a abordagem padrão de NIST SP 800-61 para incidentes de malware com potencial de propagação — o custo de conter um host legítimo é muito menor que o custo de permitir que um worm ou ransomware se propague pela rede do Banco Meridian.
+
+**Por que o isolamento via EDR é preferido ao isolamento de rede:** O isolamento via CrowdStrike Contain mantém o agente EDR ativo e comunicando com o servidor CrowdStrike, permitindo investigação forense do host isolado (acesso a logs, processos, artefatos) sem risco de propagação. O isolamento de rede completo (bloqueio no switch) corta também a comunicação do EDR, cegando o analista. Por isso o playbook usa contain do EDR como primeiro passo — é a opção que maximiza tanto a contenção quanto a visibilidade investigativa.
+
+**Conexão com o Lab 03 e o Lab 05:** O cenário do Lab 03 (Cobalt Strike Beacon no WRK-RODRIGO-011) e o Lab 05 (Operação Antas com WRK-MARCOS-015) são exatamente os tipos de incidente que este playbook responderia em produção. Ao concluir o Lab 03, o aluno criou a regra YARA-L que dispara este playbook; ao concluir o Lab 05, o aluno criou um playbook equivalente para o cenário de APT. Este módulo fecha o ciclo: detecção (YARA-L) → alerta → playbook → contenção → investigação → documentação.
 
 #### Diagrama de Fluxo
 

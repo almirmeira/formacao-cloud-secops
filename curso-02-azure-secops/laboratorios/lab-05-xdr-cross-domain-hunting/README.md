@@ -128,6 +128,10 @@ union
 
 ### Passo 2: Investigar E-mails Suspeitos (MDO)
 
+**O que este passo faz:** A investigação começa pelos e-mails porque 90% dos ataques de comprometimento de conta iniciam por phishing. A query analisa todos os e-mails recebidos por marcela.ferreira nos últimos 30 dias, excluindo domínios internos e classificando por categoria de ameaça. Para uma investigação de insider threat que pode, na verdade, ser um comprometimento de conta externo, entender quais e-mails chegaram e de quais domínios é o primeiro passo para determinar se a funcionária foi vítima de phishing (não responsável pelo vazamento) ou se o acesso foi deliberado. Os campos `ThreatTypes` e `DeliveryAction` revelam o que o Defender for Office 365 já sabia sobre esses e-mails no momento da entrega — se havia um e-mail classificado como Phish que foi entregue na caixa de entrada, isso é uma evidência crítica de comprometimento externo.
+
+**Por que agora:** Esta é a primeira query porque e-mails são o vetor de entrada mais provável. O resultado desta análise vai definir o período de interesse (quando o phishing chegou) que guiará todas as queries subsequentes.
+
 ```kql
 // Investigação 1: E-mails de domínios externos suspeitos para marcela.ferreira
 // Últimos 30 dias
@@ -162,6 +166,10 @@ EmailEvents
 
 ### Passo 3: Verificar Cliques em URLs (MDO)
 
+**O que este passo faz:** Saber que um e-mail suspeito chegou à caixa de entrada é importante, mas saber que o usuário clicou em uma URL maliciosa é a prova de que o ataque teve sucesso na fase de entrega. A tabela `EmailUrlInfo` registra cada URL presente em e-mails e, quando o Safe Links está habilitado, registra também o status da verificação de segurança. Para a investigação de Marcela Ferreira, esta query responde a pergunta mais crítica: ela clicou no link do e-mail suspeito? Se sim, temos o momento exato do comprometimento e o endereço do site de phishing. Esse dado é o ponto de pivô para toda a análise subsequente — a partir do horário do clique, buscamos o login que se seguiu, os downloads que ocorreram e os uploads externos.
+
+**Por que agora:** Com os e-mails suspeitos identificados no Passo 2, precisamos agora verificar se eles foram clicados. A correlação via `NetworkMessageId` garante que estamos olhando apenas as URLs dos e-mails recebidos por Marcela — não URLs aleatórias do ambiente.
+
 ```kql
 // Investigação 2: URLs clicadas por marcela.ferreira
 let user = "marcela.ferreira@bancomeridian-lab.onmicrosoft.com";
@@ -190,6 +198,10 @@ EmailUrlInfo
 
 ### Passo 4: Verificar Logins Pós-Suspeitos
 
+**O que este passo faz:** Com e-mails suspeitos e possíveis cliques identificados nos passos anteriores, esta query mapeia o padrão de autenticação de Marcela nos últimos 30 dias usando a tabela `IdentityLogonEvents` (fornecida pelo Microsoft Defender for Identity e pelo Entra ID, conforme o conector configurado). Ao agregar logins por país e IP de origem, o objetivo é identificar anomalias geográficas: se Marcela sempre logou de São Paulo e de repente aparece um login da Ucrânia ou de um VPN anônimo, isso é um sinal forte de comprometimento de conta. A coluna `Countries = make_set(Country, 10)` cria uma lista dos países de origem de cada dia, tornando imediatamente visível quando um dia específico tem um país fora do padrão histórico. Este passo responde à pergunta: "Algum atacante usou as credenciais de Marcela para autenticar na conta?"
+
+**Por que agora:** Este passo vem após os e-mails e cliques porque o login suspeito é a consequência natural de um phishing bem-sucedido. Sem os passos 2 e 3 estabelecendo a hipótese de comprometimento, essa query seria uma busca genérica. Com eles, estamos confirmando ou refutando a hipótese com dados de autenticação reais.
+
 ```kql
 // Investigação 3: Logins de marcela.ferreira com sinais de risco
 let user = "marcela.ferreira@bancomeridian-lab.onmicrosoft.com";
@@ -215,6 +227,10 @@ IdentityLogonEvents
 ---
 
 ### Passo 5: Investigar Downloads de Arquivos do SharePoint
+
+**O que este passo faz:** Com o login suspeito confirmado no Passo 4, esta query investiga o que o atacante (ou Marcela, se for insider threat) fez após obter acesso à conta. A tabela `DeviceFileEvents` do MDE registra criação, modificação e exclusão de arquivos no nível de endpoint — não o que foi acessado na nuvem, mas o que efetivamente foi gravado no disco local. Downloads de arquivos do SharePoint via browser (Chrome, Edge) ou via OneDrive sync geram eventos em `DeviceFileEvents` com `FolderPath` contendo "Downloads" ou "OneDrive" e o processo iniciador sendo o browser. Para o Banco Meridian, um download de dezenas de arquivos Excel com dados de contratos de crédito, ou documentos PDF de propostas comerciais, é o sinal de que dados confidenciais saíram do controle da organização para o dispositivo físico de onde podem ser facilmente exfiltrados via USB, e-mail pessoal ou serviço de storage externo. O campo `SHA256` presente nos resultados permite verificar os arquivos contra bases de malware (VirusTotal) e confirmar quais arquivos específicos foram baixados.
+
+**Por que agora:** Este passo segue naturalmente a confirmação do login suspeito: depois de entrar na conta, a ação mais frequente de um atacante ou insider threat é baixar dados de valor. Verificar downloads imediatamente após confirmar o acesso suspeito revela a extensão do comprometimento.
 
 ```kql
 // Investigação 4: Downloads de arquivos do SharePoint pelo endpoint de marcela
@@ -249,6 +265,10 @@ DeviceFileEvents
 
 ### Passo 6: Verificar Upload para Serviços Externos
 
+**O que este passo faz:** Após identificar downloads em massa de arquivos corporativos no SharePoint (Passo 5), esta query verifica a destinação: os arquivos foram enviados para serviços de armazenamento externos não autorizados? A tabela `DeviceNetworkEvents` registra conexões TCP/IP de nível de endpoint realizadas pelo MDE — diferente dos logs de aplicação do OfficeActivity, aqui vemos conexões de rede brutas, incluindo uploads para Dropbox, Google Drive, Mega, WeTransfer e outros serviços que o Banco Meridian não sanciona para uso com dados corporativos. Para compliance com a BACEN 4.893 e a política de prevenção de vazamento de dados (DLP) do banco, qualquer upload de dados financeiros para serviços pessoais de armazenamento é uma violação grave, independentemente de ser por ataque externo ou decisão do funcionário. O filtro por `RemotePort == 443` garante que estamos capturando conexões HTTPS — praticamente todos os serviços de storage usam HTTPS para uploads.
+
+**Por que agora:** Este passo é o elo final da cadeia de exfiltração: e-mail phishing → clique → login comprometido → download de arquivos → upload externo. Sem verificar o upload, poderíamos concluir que dados foram acessados mas não vazados. Com este passo, temos a evidência completa do vazamento.
+
 ```kql
 // Investigação 5: Conexões de rede para serviços de storage externo
 let user = "marcela.ferreira";
@@ -273,7 +293,11 @@ DeviceNetworkEvents
 
 ---
 
-### Passo 7: Construir a Timeline Completa
+### Passo 7: Construir a Timeline Cross-Domain Completa
+
+**O que este passo faz:** Esta query consolida evidências de três domínios diferentes (e-mail via MDO, autenticação via Entra ID, endpoint via MDE) em uma única timeline cronológica. É o passo de síntese da investigação — o equivalente digital de montar um quadro de evidências conectando todos os fatos descobertos. A timeline cross-domain é o que transforma observações isoladas em uma narrativa coerente de ataque: às 14h30 chegou o e-mail de phishing (MDO), às 14h47 houve um clique na URL (MDO), às 15h02 ocorreu o login de IP estrangeiro (Entra ID), às 15h15 iniciaram-se os downloads de arquivos Excel (MDE), às 16h30 começaram os uploads para o Dropbox (MDE Network). Essa narrativa é o que o CISO precisa para tomar uma decisão e o que o jurídico precisa para suportar qualquer ação legal.
+
+**Por que agora:** A timeline só pode ser construída após todos os dados individuais terem sido coletados e o período de interesse estar definido. Executar antes dos passos 2-6 produziria uma timeline incompleta ou confusa.
 
 ```kql
 // Timeline Completa — Correlação de todas as fontes
@@ -323,11 +347,19 @@ union
 | project TimeGenerated, Source, EventType, Description
 ```
 
-**Anote** a timeline completa. Identifique a sequência: email → login → download → upload.
+**O que você deve ver:** A timeline mostra uma narrativa coerente de ataque: e-mail → login → download → upload, todos com timestamps que se seguem logicamente. A coluna `Source` permite distinguir de qual produto Defender cada evidência veio (MDO, Entra ID, MDE), demonstrando o valor do Advanced Hunting cross-domain: uma única query consolida evidências que estariam espalhadas em quatro portais diferentes.
+
+**O que fazer se der errado:**
+- Se `DeviceFileEvents` retornar vazio: verificar se o endpoint de Marcela está onboarded no MDE
+- Se os timestamps não estiverem alinhados: lembrar de ajustar para o fuso horário UTC-3 (Brasil Standard Time) ao interpretar os dados
 
 ---
 
 ### Passo 8: Criar Bookmarks e Incidente
+
+**O que este passo faz:** Bookmarks são mecanismos de preservação de evidências digitais no Microsoft Sentinel. Quando um analista encontra uma linha de resultado de query que representa uma evidência de um ataque, criar um bookmark significa fixar aquele dado — incluindo o timestamp, os valores dos campos relevantes, a query que o gerou e as notas do analista — em um local auditável e permanente. Esse processo é equivalente ao "preservação da cadeia de custódia" em forense digital: garante que a evidência não seja alterada, perdida ou contextualizada de forma incorreta. Para o Banco Meridian, que precisa demonstrar conformidade com a BACEN 4.893 (que exige rastreabilidade de incidentes), os bookmarks compõem o registro formal da investigação. Criar um incidente a partir dos bookmarks transforma a investigação informal em um ticket oficial no sistema de gestão de incidentes do SOC, com owner, severity e status definidos.
+
+**Por que agora:** A criação de bookmarks e do incidente formal deve ser o último passo, depois de toda a evidência estar coletada e analisada. Criar bookmarks prematuramente pode resultar em evidências fragmentadas sem o contexto completo da investigação.
 
 **Para cada evidência relevante encontrada nas queries acima**:
 

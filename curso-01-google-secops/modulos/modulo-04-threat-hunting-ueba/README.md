@@ -527,6 +527,8 @@ AND NOT principal.user.userid = /.*\$$/
 **Hipótese:** "Um funcionário foi vítima de phishing e suas credenciais estão sendo usadas
 de fora do Brasil."
 
+**Por que esta query testa esta hipótese:** A query busca logins bem-sucedidos (`ALLOW`) de IPs que estão fora dos blocos de endereçamento IP tipicamente brasileiros (177.x.x.x, 189.x.x.x, 200.x.x.x, 201.x.x.x) e fora da rede interna do banco (10.0.0.0/8). Um login legítimo de um funcionário do Banco Meridian viajando ao exterior seria um falso positivo nesta query — por isso o resultado deve ser revisado manualmente para eliminar viagens corporativas conhecidas. O agrupamento por `principal.ip + target.user.userid` permite identificar rapidamente se o mesmo IP externo acessou múltiplas contas (indicador mais forte de comprometimento).
+
 ```
 Query: Logins bem-sucedidos de IPs fora do range normal brasileiro
 ───────────────────────────────────────────────────────────────────
@@ -546,6 +548,8 @@ AND NOT principal.ip = "10.0.0.0/8"
 
 **Hipótese:** "Dados sensíveis estão sendo exfiltrados via upload para serviços de cloud
 storage pessoal (Dropbox, Mega, Google Drive pessoal)."
+
+**Por que esta query testa esta hipótese:** A combinação de `network.http.method = "PUT"` com `network.sent_bytes > 10485760` (10 MB) é o que distingue upload de exfiltração de simples navegação. O método HTTP PUT é característico de uploads de arquivo — GET é para download. O threshold de 10 MB elimina sincronizações menores que poderiam ser legítimas (cache de browser, telemetria). A lista de domínios cobre os serviços mais usados para exfiltração baseada em cloud sem passar por DLP corporativo. O agrupamento por hostname + usuário + destino e a ordenação por `total_bytes` coloca os maiores exfiltradores no topo da lista — exatamente o que um analista de SOC precisa para priorizar a investigação.
 
 ```
 Query: Conexões HTTPS para domínios de cloud storage pessoal
@@ -570,6 +574,8 @@ AND network.sent_bytes > 10485760
 **Hipótese:** "Um host comprometido está fazendo reconhecimento interno da rede antes do
 movimento lateral."
 
+**Por que esta query testa esta hipótese:** O reconhecimento interno (T1046 — Network Service Scanning) é invariavelmente um dos primeiros passos após o comprometimento inicial — o atacante precisa mapear a rede antes de se mover lateralmente para servidores de maior valor. A query busca hosts que tentaram se conectar a mais de 20 IPs internos distintos ou a mais de 30 portas distintas em um mesmo período, o que é uma assinatura inequívoca de varredura. O filtro duplo (origem E destino em 192.168.0.0/16) garante que estamos vendo comunicação interna — varredura interna é mais perigosa que varredura externa porque o host já está dentro do perímetro. Scanners autorizados (Tenable, Qualys) devem ser excluídos da query na adaptação para o ambiente de produção.
+
 ```
 Query: Host com conexões a muitas portas/IPs internos distintos em curto período
 ─────────────────────────────────────────────────────────────────────────────────
@@ -587,6 +593,8 @@ AND target.ip = "192.168.0.0/16"
 
 **Hipótese:** "Um atacante com acesso ao sistema está criando mecanismos de persistência via
 Windows Scheduled Tasks ou serviços maliciosos."
+
+**Por que esta query testa esta hipótese:** Após comprometimento, atacantes criam mecanismos de persistência (T1053 — Scheduled Task, T1543 — Create or Modify System Process) para garantir que mesmo que o processo malicioso seja encerrado ou o sistema reiniciado, o acesso seja restaurado automaticamente. A query detecta a execução de comandos `schtasks /create` e `sc create` por processos que não são os criadores legítimos dessas tarefas no Windows (como `svchost.exe`). As exclusões de contas de sistema (`SYSTEM`, `LOCAL SERVICE`, `NETWORK SERVICE`) são essenciais porque o próprio Windows cria agendamentos legítimos usando essas contas — sem essa exclusão, a query geraria centenas de FPs por dia de tarefas agendadas do próprio sistema operacional.
 
 ```
 Query: Criação de scheduled task ou service por processo incomum
@@ -608,6 +616,8 @@ AND NOT principal.user.userid = /^(SYSTEM|LOCAL SERVICE|NETWORK SERVICE)$/
 
 **Hipótese:** "Um usuário sem perfil técnico está usando ferramentas de administração remota
 (PsExec, WinRM, RDP) — indicativo de comprometimento ou insider threat."
+
+**Por que esta query testa esta hipótese:** Ferramentas como PsExec e WinRM são o "canivete suíço" dos atacantes para movimento lateral — elas usam protocolos legítimos do Windows, são raramente bloqueadas por firewalls internos e deixam menos rastros que explorações de vulnerabilidade. Quando um usuário do setor financeiro (analista de crédito, caixa) executa `psexec.exe`, é um indicador quase certo de comprometimento ou insider threat — essas ferramentas simplesmente não têm uso legítimo para esse perfil de usuário. A watchlist `%watchlist_admins_ti` exclui os administradores de TI que legitimamente usam PsExec e WinRM para gerenciamento de servidores, evitando que cada ação legítima do time de TI gere um alerta. O filtro `NOT principal.hostname = /.*SRV-.*/` exclui servidores — o uso de PsExec em servidor por conta de serviço é mais comum e legítimo.
 
 ```
 Query: Usuários comuns usando ferramentas de admin remoto

@@ -203,6 +203,8 @@ Bloquear o usuário (desabilitar a conta) é uma ação mais drástica que revog
 
 ### 3.3 Isolar Endpoint via MDE
 
+O isolamento de endpoint é a resposta mais contundente a um comprometimento confirmado de máquina. Quando o MDE detecta que um endpoint está sendo usado para movimento lateral, extração de credenciais ou comunicação com C2, o isolamento de rede bloqueia toda comunicação do dispositivo exceto o canal de gerenciamento do MDE (mantendo a capacidade de Live Response para forense). No contexto do Banco Meridian, um endpoint de caixa de agência ou de um analista de crédito comprometido tem acesso a sistemas críticos como o core bancário e o sistema de gestão de crédito. Cada segundo que o endpoint permanece conectado à rede é uma janela onde o atacante pode exfiltrar dados de contratos ou executar transações fraudulentas. O isolamento `Selective` é preferível ao `Full` na maioria dos casos: mantém as ferramentas de gerenciamento ativas (permitindo ao analista investigar via Live Response) enquanto bloqueia conexões não autorizadas para a internet e para outros hosts internos. A chamada à MDE API via Managed Identity garante autenticação segura sem expor credenciais no código do Logic App.
+
 ```json
 // HTTP POST para isolar dispositivo via MDE API
 {
@@ -269,6 +271,8 @@ Condition: Is High Severity?
 
 ### 5.1 Microsoft Teams — Notificação com Adaptive Card
 
+A notificação via Teams é o ponto de contato primário entre o sistema de automação e os analistas do SOC do Banco Meridian. Um incidente de alto impacto detectado às 2h da manhã precisa chegar ao analista de plantão de forma clara, acionável e rápida — um e-mail pode ficar perdido na caixa de entrada, mas uma mensagem em um canal do Teams dedicado ao SOC é imediata. O Adaptive Card é um formato de cartão rico suportado pelo Teams que permite apresentar as informações mais críticas de um incidente de forma organizada (título, severidade, usuário afetado, IP suspeito, ações já tomadas) com um botão de ação direto que leva o analista ao incidente no Sentinel com um clique. A diferença entre uma notificação de texto simples e um Adaptive Card bem estruturado é a velocidade de triagem: o analista não precisa buscar o incidente — toda a informação necessária para decidir a próxima ação está no cartão.
+
 ```json
 // Logic App: Post adaptive card to Teams channel
 {
@@ -305,6 +309,8 @@ Condition: Is High Severity?
 
 ### 5.2 ServiceNow — Criar Ticket de Incidente
 
+A criação automática de ticket no ServiceNow é a integração que une o SOC de segurança com os processos de ITSM (IT Service Management) do Banco Meridian. Um incidente de segurança detectado pelo Sentinel precisa ter um ticket formal no sistema de gestão de incidentes por duas razões regulatórias: (1) a Resolução BACEN 4.893 exige que incidentes relevantes sejam documentados, tratados e reportados com prazo definido; (2) a CMN 4.658 exige que o banco mantenha registro formal do ciclo de vida de cada incidente de segurança. O ticket do ServiceNow cumpre esse papel: documenta o incidente, registra o SLA de resposta, permite assignment ao responsável e tracking até o fechamento. Os campos `urgency` e `impact` determinam o SLA aplicado: combinação 2/2 resulta em SLA "High" com resposta em até 4 horas no ServiceNow configurado para o banco. O campo `assignment_group` garante que o ticket vai diretamente para a fila do time de resposta a incidentes, sem passar por triagem manual.
+
 ```json
 // Logic App: Create ServiceNow incident
 {
@@ -320,6 +326,8 @@ Condition: Is High Severity?
 ```
 
 ### 5.3 Jira — Criar Issue de Segurança
+
+Para organizações que usam Jira como sistema de gestão de projetos e incidentes (alternativa ou complemento ao ServiceNow), a integração via Logic App segue o mesmo princípio: um incidente do Sentinel dispara a criação automática de uma issue na board de segurança do Jira. O projeto `SEC` é a board dedicada ao time de segurança, e o issue type `Story` é tratado como uma unidade de trabalho com backlog, sprint e tracking de progresso — ideal para incidentes que exigem atividades múltiplas ao longo de dias (investigação, contenção, remediação, relatório). A prioridade `"name": "High"` mapeia diretamente para os SLAs de resposta configurados no Jira do banco. Diferente do ServiceNow (mais focado em ITSM e workflow), o Jira é preferido por times de segurança que trabalham com metodologia ágil: o backlog de segurança inclui tanto vulnerabilidades a corrigir quanto incidentes ativos, e o Kanban board dá visibilidade ao estado de cada item em tempo real.
 
 ```json
 // Logic App: Create Jira issue

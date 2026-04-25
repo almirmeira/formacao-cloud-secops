@@ -386,6 +386,10 @@ As queries abaixo são usadas diretamente no cenário do Banco Meridian e coment
 
 ### Query 1 — Detecção de Sign-in Anomalies: Impossible Travel
 
+O **impossible travel** é uma das detecções de identidade mais eficazes porque explora uma limitação física irrefutável: nenhum ser humano consegue estar em São Paulo às 14h30 e em Moscou às 14h47. Quando isso acontece nos logs de autenticação, significa que as credenciais de um usuário foram comprometidas e um atacante em outro país está usando a conta ao mesmo tempo. Esta query usa o operador `prev()` do KQL para comparar o login atual de cada usuário com o login imediatamente anterior, identificando pares de logins de países diferentes em menos de 60 minutos. A técnica de usar `prev()` em vez de um `join` consigo mesmo é mais eficiente computacionalmente e mais legível.
+
+Para o Banco Meridian, esta query é especialmente relevante dado o alerta do FS-ISAC sobre o Grupo Lazarus-BR: operadores de grupos APT geralmente ficam baseados em um país (Rússia, China, Coreia do Norte) enquanto a vítima está no Brasil. A correlação temporal entre o clique de phishing e o primeiro login do atacante tipicamente gera exatamente esse padrão de impossible travel.
+
 ```kql
 // OBJETIVO: Detectar usuários logando de dois países diferentes em < 1 hora
 // MITRE ATT&CK: T1078 — Valid Accounts / T1556 — Modify Authentication Process
@@ -437,6 +441,10 @@ SigninLogs
 
 ### Query 2 — Detecção de Password Spray
 
+O **password spray** é uma das técnicas de ataque de credencial mais usadas contra organizações financeiras porque contorna políticas de bloqueio de conta. Um brute force tradicional tenta muitas senhas em uma conta e eventualmente bloqueia o usuário. O password spray faz o inverso: tenta uma (ou poucas) senha(s) contra muitas contas. Como cada conta recebe apenas 1-2 tentativas, o limiar de bloqueio (geralmente 5-10 tentativas) nunca é atingido. Esta query usa dois operadores agregados em conjunto — `dcount(UserPrincipalName)` para contar quantas contas distintas foram alvo de um IP, e `TargetedUsers = make_set()` para listar os usuários — identificando exatamente esse padrão de "muitas contas, poucas tentativas por conta". O filtro por `ResultType` inclui os códigos de erro mais comuns em ataques de spray no Entra ID, mas exclui 50074 (MFA requerido), que é uma falha esperada em ambientes com Conditional Access corretamente configurado.
+
+Para o Banco Meridian, este padrão é urgente porque o relatório do FS-ISAC mencionou especificamente password spray como vetor dos ataques contra bancos tier-2 brasileiros. Uma detecção positiva desta query deve ser escalada imediatamente para o analista L2 de plantão.
+
 ```kql
 // OBJETIVO: Detectar ataque de password spray (muitos logins com códigos de erro específicos)
 // MITRE ATT&CK: T1110.003 — Password Spraying
@@ -476,6 +484,8 @@ SigninLogs
 
 ### Query 3 — Detecção de Lateral Movement via Pass-the-Hash
 
+O **Pass-the-Hash** é uma técnica de movimento lateral onde o atacante usa o hash NTLM de uma senha (obtido via LSASS dump, por exemplo) em vez da senha em texto claro para autenticar em outros sistemas da rede. O hash serve como prova de identidade em ambientes com autenticação NTLM — o servidor não verifica se o atacante conhece a senha, apenas se possui o hash correto. Para o Banco Meridian, que provavelmente ainda tem autenticação NTLM habilitada por compatibilidade com sistemas legados, esta é uma das técnicas mais perigosas: uma vez comprometido um endpoint de funcionário com acesso a dados financeiros, o atacante pode se mover para outros sistemas usando o hash sem nunca precisar conhecer as senhas reais. Esta query usa a tabela `SecurityEvent` do Windows (LogonType = 3 representa network logon) e filtra por eventos NTLM sem sessão Kerberos correspondente — indicador de que não há autenticação real com credencial, apenas replay de hash.
+
 ```kql
 // OBJETIVO: Detectar Pass-the-Hash — logins NTLM sem senha (logon type 3, no Kerberos)
 // MITRE ATT&CK: T1550.002 — Use Alternate Authentication Material: Pass the Hash
@@ -511,6 +521,10 @@ SecurityEvent
 
 ### Query 4 — Detecção de Exfiltração via SharePoint/OneDrive
 
+A exfiltração de dados via SharePoint e OneDrive é o vetor preferencial de **insider threats** em instituições financeiras porque usa canais completamente legítimos — o funcionário tem acesso autorizado ao SharePoint, e a ação de "baixar arquivo" é normal. O que não é normal é baixar 500 arquivos em 2 horas. Esta query usa uma técnica de análise comportamental baseada em baseline: calcula a média histórica de downloads de cada usuário nos últimos 30 dias e compara com a atividade recente. Um usuário que baixa em média 5 arquivos por dia e de repente baixa 200 em uma hora tem `Multiplier = 200/5 = 40x` — muito acima do limiar de 10x usado nesta query. Essa abordagem baseada em desvio da baseline reduz significativamente falsos positivos em relação a thresholds absolutos: o analista financeiro que processa 50 contratos por dia não será alertado desnecessariamente, mas o mesmo analista que baixa 800 contratos no dia anterior à sua demissão será detectado.
+
+Esta detecção é especialmente relevante no contexto do Banco Meridian sob BACEN 4.893, que exige controles de prevenção de vazamento de dados (DLP) para informações de clientes financeiros.
+
 ```kql
 // OBJETIVO: Detectar download em massa de arquivos do SharePoint Online
 // MITRE ATT&CK: T1567.002 — Exfiltration Over Web Service: Cloud Storage
@@ -544,6 +558,8 @@ OfficeActivity
 ---
 
 ### Query 5 — Detecção de Adição de Credencial a Application/Service Principal
+
+A **adição de credencial a uma aplicação** (service principal ou app registration) é uma das técnicas de persistência mais insidiosas em ambientes Azure porque não requer acesso contínuo à conta do usuário comprometido. Após o acesso inicial via phishing, um atacante que obteve permissões de administrador no Entra ID pode adicionar uma chave de API ou certificado a um app registration existente — por exemplo, o app de integração com o sistema bancário core. A partir desse momento, o atacante tem acesso autenticado aos recursos do app (SharePoint, Exchange, Graph API) de forma completamente independente da conta do usuário, mesmo que a senha seja redefinida e o MFA seja reconfigurado. A chave adicionada é o backdoor. Esta query usa a tabela `AuditLogs` e filtra pela operação `Add service principal credentials`, que é o evento específico registrado quando uma chave ou certificado é adicionado. A presença de `InitiatorUPN` de fora do time de TI autorizado é um forte indicador de abuso.
 
 ```kql
 // OBJETIVO: Detectar quando uma credencial (chave ou certificado) é adicionada a um app
@@ -588,6 +604,10 @@ AuditLogs
 ---
 
 ### Query 6 — Correlação: Alerta MDE + Login Suspeito (Join)
+
+A **correlação cross-source via join** é o superpoder do KQL para investigações de segurança complexas. Fontes de dados isoladas raramente contam a história completa de um ataque: o Defender for Endpoint (MDE) vê que um endpoint foi comprometido, mas não sabe se a conta do usuário também foi; o Entra ID vê um login suspeito, mas não sabe se o endpoint do usuário gerou alertas. O `join` no KQL conecta essas duas perspectivas usando um campo em comum — o nome de usuário — e revela correlações que nenhuma das fontes conseguiria detectar individualmente. Esta query usa `join kind=inner`, que mantém apenas os resultados que têm correspondência em ambas as tabelas: usuários com alertas de endpoint E logins suspeitos. A correlação `LoginTime > AlertTime` garante que estamos buscando logins que ocorreram DEPOIS do comprometimento do endpoint — exatamente o padrão de "endpoint comprometido → movimento lateral usando as credenciais roubadas".
+
+Esta é a técnica fundamental usada no Lab 05 (XDR Cross-Domain Hunting) — dominar o `join` no contexto de segurança é o que diferencia analistas L1 de L2.
 
 ```kql
 // OBJETIVO: Correlacionar alertas do Defender for Endpoint com logins suspeitos do mesmo usuário
@@ -636,6 +656,10 @@ RecentAlerts
 
 ### Query 7 — Detecção de Escalada de Privilégio: Adição de Conta ao Grupo Admin
 
+A **adição não autorizada de conta a grupo privilegiado** é um indicador crítico de escalada de privilégio (T1078 / T1098). Em ambientes Azure/Microsoft 365, grupos como "Global Administrators", "Security Administrators" e "Exchange Administrators" controlam o acesso a toda a infraestrutura cloud. Um atacante que comprometeu uma conta comum mas não tem privilégios suficientes para seus objetivos — acessar dados financeiros, criar novas contas, exfiltrar e-mails — frequentemente tenta adicionar sua conta comprometida a um grupo admin como passo de escalada. O AuditLogs registra cada adição a grupo com o operador que executou a ação, a conta que foi adicionada e o nome do grupo destino. Esta query não apenas detecta a adição, mas também captura quem adicionou (`InitiatorUPN`) — pois uma adição legítima feita pelo administrador de TI é diferente de uma adição feita pela própria conta comprometida (sinal de escalada via conta já parcialmente privilegiada).
+
+Para o Banco Meridian, este é um evento de alta severidade que deve acionar notificação imediata ao CISO, independentemente do horário.
+
 ```kql
 // OBJETIVO: Detectar quando um usuário é adicionado a grupos de alto privilégio
 // MITRE ATT&CK: T1078.004 — Valid Accounts: Cloud Accounts / T1098 — Account Manipulation
@@ -670,6 +694,10 @@ AuditLogs
 ---
 
 ### Query 8 — Detecção de Comandos Suspeitos em Endpoints (DeviceProcessEvents)
+
+A **execução de ferramentas ofensivas em endpoints** é detectável pelo Microsoft Defender for Endpoint através da tabela `DeviceProcessEvents`, que registra cada processo iniciado nos endpoints onboardados — incluindo nome do processo, linha de comando completa, processo pai e usuário que executou. Esta query usa `has_any()` para buscar uma lista de indicadores de comprometimento: nomes de ferramentas conhecidas de ataque (mimikatz, cobalt strike, meterpreter), parâmetros de PowerShell ofensivo (base64 encoding, bypass de execution policy, download de payloads via IEX/DownloadString) e commandlets de reconhecimento (whoami, net user, ipconfig usados de forma encadeada). O operador `has_any()` no KQL é mais eficiente que múltiplos `where contains` porque avalia todas as condições em uma única passagem sobre os dados. O campo `InitiatingProcessCommandLine` frequentemente revela a cadeia completa de execução: qual processo pai executou o comando suspeito, permitindo reconstruir o caminho de ataque.
+
+Esta query complementa as detecções automáticas do MDE: enquanto o MDE usa ML e threat intelligence para detectar comportamentos automaticamente, esta query KQL permite customização para TTPs específicos identificados em threat reports do setor bancário brasileiro.
 
 ```kql
 // OBJETIVO: Detectar execução de ferramentas de reconhecimento e coleta de credenciais
@@ -710,6 +738,10 @@ or (FileName =~ "net.exe"
 
 ### Query 9 — Detecção de Exfiltração via E-mail (Mass Forward Rule)
 
+A **regra de encaminhamento de e-mail** (T1114.003) é uma das técnicas de exfiltração mais discretas usadas em ataques BEC (Business Email Compromise) e spionagem corporativa. Após comprometer uma conta, o atacante cria uma regra de caixa de entrada que encaminha automaticamente cópias de todos os e-mails recebidos para um endereço externo (Gmail, Outlook pessoal, ProtonMail). O usuário legítimo continua recebendo seus e-mails normalmente, sem perceber que cada mensagem também está sendo enviada para o atacante. Para o Banco Meridian, este risco é especialmente sério: e-mails de executivos da área financeira frequentemente contêm informações privilegiadas de mercado, estratégias de M&A, dados de clientes e comunicações regulatórias com o BACEN. Esta query busca as operações `New-InboxRule` e `Set-Mailbox -ForwardingAddress` no `OfficeActivity`, que são os dois mecanismos técnicos pelos quais o encaminhamento pode ser configurado no Exchange Online — o primeiro via regra de caixa de entrada, o segundo via configuração de mailbox no nível do Exchange.
+
+A ausência de resultados nesta query é excelente — significa que nenhuma regra de encaminhamento suspeita está ativa. Mas ela deve ser executada regularmente como parte da caça proativa (hunting) do SOC.
+
 ```kql
 // OBJETIVO: Detectar regras de encaminhamento de e-mail para endereços externos
 // MITRE ATT&CK: T1114.003 — Email Collection: Email Forwarding Rule
@@ -743,6 +775,8 @@ OfficeActivity
 ---
 
 ### Query 10 — Dashboard: Resumo de Saúde do SOC (últimas 24h)
+
+O **dashboard de saúde do SOC** é uma query operacional de alto nível que os analistas executam no início do turno ou que alimenta um Workbook automatizado exibido nos monitores do SOC do Banco Meridian. Em vez de investigar eventos específicos, esta query cria uma visão agregada da atividade de segurança: quantos incidentes foram gerados por severidade, quantos alertas por fonte, volume de ingestão de cada tabela. Esse "resumo executivo técnico" serve dois propósitos: primeiro, permite ao analista que está assumindo o turno entender rapidamente o estado atual do ambiente sem precisar abrir múltiplos painéis; segundo, fornece as métricas de MTTD/MTTR (Mean Time to Detect / Mean Time to Respond) que o CISO usa para reportar a eficiência do SOC ao board. Para o Banco Meridian, ter este dashboard disponível como Workbook no Sentinel é parte da maturidade de operações de segurança esperada por um banco sob supervisão do BACEN — demonstra que o SOC tem capacidade de monitoramento contínuo e rastreamento de indicadores de desempenho.
 
 ```kql
 // OBJETIVO: Query de dashboard para visão geral do SOC em 24 horas

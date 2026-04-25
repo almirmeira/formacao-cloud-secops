@@ -132,7 +132,13 @@ A aplicação está exposta via Application Load Balancer (ALB) na conta Product
 
 ## Seção 1 — Criar Web ACL Base
 
-**Passo 1.1** — Criar a Web ACL:
+### Passo 1.1 — Criar a Web ACL com default action Allow
+
+**O que este passo faz:** Cria a Web ACL (Web Access Control List) — o container de regras do AWS WAFv2 que avaliará cada requisição HTTP ao internet banking do Banco Meridian. O parâmetro `--default-action Allow` define o comportamento padrão: requisições que não correspondem a nenhuma regra são permitidas. Isso é o correto para implantação inicial — se a default action fosse `Block`, qualquer requisição sem regra específica seria bloqueada, causando indisponibilidade imediata. O `--scope REGIONAL` indica que a Web ACL será associada a recursos regionais (ALB, API Gateway) — diferente do `CLOUDFRONT` que seria para CloudFront distributions. O `LockToken` retornado é o mecanismo de concorrência otimista do WAFv2 — necessário para atualizações (add-rules, update-rules).
+
+**Por que esta ordem:** A Web ACL deve existir antes de adicionar regras. O `LockToken` é exportado agora porque expira periodicamente e deve ser re-consultado a cada operação de atualização.
+
+**Por que isso importa para o Banco Meridian:** Esta é a estrutura que vai proteger os 45.000 clientes do internet banking do Banco Meridian das 14.587 tentativas de credential stuffing da última semana. A Web ACL é o ponto de controle único entre a internet e o ALB — todas as 8.000 requisições por segundo no horário de pico passam por ela. A decisão de usar `default-action: Allow` com regras de bloqueio específicas (em vez de `default-action: Block` com regras de permissão) é deliberada: é muito mais fácil definir o que bloquear do que enumerar todo o tráfego legítimo.
 
 ```bash
 # Criar Web ACL para o Internet Banking
@@ -172,7 +178,13 @@ echo "  ARN: $WEB_ACL_ARN"
 
 ## Seção 2 — Adicionar Managed Rule Groups
 
-**Passo 2.1** — Criar Web ACL com managed rules:
+### Passo 2.1 — Adicionar Managed Rule Groups da AWS ao Web ACL via Python
+
+**O que este passo faz:** Script Python que atualiza a Web ACL criada no Passo 1.1 adicionando quatro Managed Rule Groups da AWS: (1) `AWSManagedRulesCommonRuleSet` — proteção base OWASP Top 10; (2) `AWSManagedRulesKnownBadInputsRuleSet` — bloqueia inputs com padrões de exploits conhecidos (Log4Shell, Spring4Shell); (3) `AWSManagedRulesSQLiRuleSet` — proteção específica contra SQL injection com detecção de bypass; (4) `AWSManagedRulesAmazonIpReputationList` — bloqueia IPs com reputação negativa nos feeds proprietários da AWS. O script usa o `LockToken` atual da Web ACL (obtido dinamicamente via `get-web-acl`) — se o token estiver desatualizado, a operação falha com `WAFOptimisticLockException`.
+
+**Por que esta ordem:** O `LockToken` deve ser consultado imediatamente antes de cada `update-web-acl` — tokens expiram rapidamente se outra operação modificou a Web ACL nesse intervalo. O script Python é preferível ao CLI para esta operação porque o JSON de update é complexo e difícil de formatar corretamente no shell.
+
+**Por que isso importa para o Banco Meridian:** Estas quatro regras gerenciadas cobrem automaticamente a maioria das tentativas de exploração web registradas pela FEBRABAN em 2025-2026. A atualização automática pela AWS garante que novas assinaturas de ataques (ex: CVEs de dias zero) sejam incorporadas sem manutenção manual pelo time de segurança — reduzindo o custo operacional de manutenção da lista de regras.
 
 ```python
 import boto3
@@ -306,7 +318,13 @@ print(f"Novo Lock Token: {response['NextLockToken']}")
 
 ## Seção 3 — Adicionar Regras Customizadas
 
-**Passo 3.1** — Rate Limiting para endpoint de login:
+### Passo 3.1 — Rate Limiting customizado para o endpoint de login (/api/auth/login)
+
+**O que este passo faz:** Adiciona uma regra customizada que limita o número de requisições ao endpoint de autenticação (`/api/auth/login`) a 100 por IP em 5 minutos. A regra usa o tipo `RATE_BASED` com `AggregateKeyType: IP` — cada endereço IP tem seu próprio contador independente. A chave `ScopeDownStatement` com `ByteMatchStatement` garante que o limite se aplica APENAS ao endpoint `/api/auth/login` — não limita acesso a outras páginas do internet banking. O `LockToken` é re-consultado no início do script para garantir que está atualizado antes do update.
+
+**Por que esta ordem:** A regra customizada deve ter prioridade após as Managed Rules (Priority 10-13) para que IPs já bloqueados por reputação não consumam processamento de Rate Limiting. A prioridade 20 garante que esta regra seja avaliada apenas para IPs que passaram pelas verificações de reputação anteriores.
+
+**Por que isso importa para o Banco Meridian:** As 14.587 tentativas de credential stuffing da semana usaram bots com rotação de IPs. Sem Rate Limiting, cada IP tenta centenas de combinações antes da detecção. Com esta regra, o bloqueio ocorre após 100 tentativas em 5 minutos — imperceptível para clientes legítimos (que raramente erram a senha mais de 3 vezes), mas bloqueante para bots automatizados. Esta é a implementação do requisito BACEN 4.893 Art. 4: "controles de acesso que previnam tentativas repetidas de autenticação".
 
 ```python
 # Obter lock token atualizado
@@ -400,7 +418,15 @@ print(f"Total de regras: {len(all_rules)}")
 
 ## Seção 4 — Associar WAF ao ALB
 
-**Passo 4.1** — Associar Web ACL ao ALB:
+### Passo 4.1 — Associar Web ACL ao ALB do internet banking
+
+**O que este passo faz:** Associa a Web ACL criada e configurada (Passos 1.1-3.1) ao Application Load Balancer que distribui tráfego para o internet banking do Banco Meridian. Antes da associação, o ALB aceita qualquer tráfego HTTP/HTTPS sem nenhuma inspeção de conteúdo. Após a associação, CADA requisição que chega ao ALB é avaliada pelo WAF ANTES de ser encaminhada para as instâncias de back-end. O primeiro comando identifica o ARN do ALB pelo nome — necessário porque o `associate-web-acl` requer o ARN completo, não o nome do recurso.
+
+**Por que esta ordem:** A Web ACL deve estar completamente configurada (todas as regras adicionadas) ANTES da associação ao ALB. Associar o WAF antes de adicionar as regras de Rate Limiting significaria um período onde o WAF está ativo mas sem a proteção de Rate Limiting — uma janela de proteção incompleta.
+
+**Por que isso importa para o Banco Meridian:** Até este passo, todas as configurações de WAF existem mas não estão protegendo nada. A associação ao ALB é o momento em que a proteção entra em vigor. Para os 45.000 clientes do internet banking, este é o passo que resolve o problema relatado na Seção 3 — as 14.587 tentativas de credential stuffing agora serão interceptadas pelo WAF antes de chegarem aos servidores de autenticação.
+
+**Permissão IAM necessária:** `wafv2:AssociateWebACL` e `elasticloadbalancing:DescribeLoadBalancers` na conta Production (444444444444).
 
 ```bash
 # Obter ARN do ALB
@@ -424,7 +450,13 @@ echo "Web ACL associada ao ALB: $ALB_ARN"
 
 ## Seção 5 — Configurar WAF Logging
 
-**Passo 5.1** — Criar bucket de logs e configurar logging:
+### Passo 5.1 — Criar bucket de logs e habilitar WAF Logging centralizado
+
+**O que este passo faz:** O bucket S3 para logs do WAF tem um requisito específico: o nome DEVE começar com `aws-waf-logs-` — sem este prefixo, o WAFv2 rejeita a configuração com erro. Após criar o bucket, o `put-logging-configuration` habilita o envio de logs de todas as requisições avaliadas pelo WAF ao bucket especificado. Os logs são entregues em formato JSON comprimido (`.json.gz`) com até 5 minutos de latência. Cada registro de log contém: timestamp, IP do cliente, URI, método HTTP, ação tomada (Allow/Block), qual regra triggou, e os campos de cabeçalho inspecionados.
+
+**Por que esta ordem:** O bucket deve existir antes do `put-logging-configuration`. O WAF não cria o bucket automaticamente — ele apenas valida que o ARN fornecido aponta para um bucket acessível com a bucket policy correta.
+
+**Por que isso importa para o Banco Meridian:** Os logs do WAF são a evidência de proteção para auditorias do BACEN e resposta a incidentes. Um analista investigando um credential stuffing pode consultar os logs para ver todos os IPs que tentaram o endpoint `/api/auth/login` nas últimas 24 horas, filtrar os bloqueados (campo `action: BLOCK`) e os permitidos, e identificar IPs suspeitos que passaram pela proteção para investigação adicional com GuardDuty.
 
 ```bash
 # Criar bucket para logs WAF (nome deve começar com aws-waf-logs-)
@@ -465,7 +497,13 @@ echo "WAF Logging habilitado para: $WAF_LOG_BUCKET"
 
 ## Seção 6 — Testes de Efetividade
 
-**Passo 6.1** — Testes usando curl:
+### Passo 6.1 — Testes de efetividade com curl
+
+**O que este passo faz:** Executa testes automatizados que validam a efetividade das regras WAF configuradas. Os testes cubem os principais vetores de ataque: SQL injection (payload `' OR 1=1--`), XSS (payload `<script>alert(1)</script>`), e acesso com User-Agent de scanner malicioso. O código HTTP retornado indica o resultado: 200 significa que a requisição passou pelo WAF (ou foi bloqueada pelo back-end por outros motivos); 403 significa que o WAF bloqueou a requisição antes de chegar ao back-end.
+
+**Por que esta ordem:** Os testes devem ser executados após a associação do WAF ao ALB (Passo 4.1) e após todas as regras estarem configuradas. Testar antes pode validar um estado incompleto.
+
+**O que você deve ver:** SQL injection → 403; XSS → 403; Scanner UA → 403; requisição legítima → 200.
 
 ```bash
 ALB_URL="https://internetbanking.bancomeridian.com.br"  # substituir pela URL real

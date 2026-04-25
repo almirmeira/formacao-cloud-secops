@@ -1,5 +1,5 @@
 # Lab 05 — HashiCorp Vault: Eliminando Credenciais Estáticas
-## Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps · CECyber
+## Curso 4: Cloud Security — CNAPP, IaC e DevSecOps · CECyber
 
 > **Duração:** 2 horas  
 > **Dificuldade:** Avançado  
@@ -9,49 +9,46 @@
 
 ## 1. Contexto Situacional
 
-O Banco Meridian tem senhas de banco de dados hardcoded em variáveis de ambiente dos seus microserviços. Uma auditoria interna descobriu que a senha do banco de pagamentos está em texto claro em 3 repositórios GitHub, no Dockerfile, e em arquivos de configuração em 12 servidores. O CTO emitiu um mandato: "Eliminar todas as credenciais estáticas em 90 dias."
-
-Você foi designado para implementar o HashiCorp Vault como solução de secrets management e demonstrar o fluxo de dynamic credentials com PostgreSQL.
+O Banco Meridian tem a senha do banco de dados PostgreSQL hardcoded em todas as aplicações que acessam o banco. A senha `BancoMeridian@2024!` está visível em arquivos `docker-compose.yml`, variáveis de ambiente não criptografadas, e até em logs de CI/CD. A senha nunca foi rotacionada em 18 meses.
 
 ---
 
 ## 2. Situação Inicial
 
+Evidência encontrada no repositório:
+```yaml
+# docker-compose.yml:
+DB_PASSWORD: "BancoMeridian@2024!"
+DB_HOST: "postgres.interno.local"
+DB_PORT: "5432"
+DB_USER: "api_pagamentos"
 ```
-SITUAÇÃO ATUAL (problemática):
-  docker-compose.yml:
-    environment:
-      DB_PASSWORD: "BancoMeridian@2024!"   ← hardcoded em 3 repos
-      DB_HOST: "postgres.interno.local"
-      DB_USER: "api_pagamentos"
-
-  Problema: esta senha não foi rotacionada em 18 meses.
-  Risco: qualquer pessoa com acesso ao repositório conhece a senha.
-  Evidência forense: a senha aparece em 847 commits do git log.
-```
+Esta senha existe em texto claro em múltiplos sistemas. Não há rotação automática. Não há rastreabilidade de quem usou a senha e quando. Se um desenvolvedor copiar o docker-compose.yml, terá acesso permanente ao banco de produção.
 
 ---
 
 ## 3. Problema Identificado
 
-Credenciais estáticas hardcoded criam múltiplos riscos:
-1. Qualquer acesso ao repositório = acesso à credencial
-2. Sem auditoria de uso — impossível saber se foi usada por atacante
-3. Rotação requer downtime e coordenação manual
-4. Violação de BACEN 4.893 Art. 8 (gestão de credenciais)
+Credenciais estáticas violam o BACEN 4.893 Art. 8 (gestão de acessos com menor privilégio) porque:
+1. A senha permanece válida indefinidamente — sem TTL
+2. Não há rastreabilidade de uso — qual aplicação usou quando
+3. Comprometimento de um repositório expõe todas as aplicações
+4. Rotação manual requer downtime coordenado de todas as aplicações
 
 ---
 
 ## 4. Roteiro de Atividades
 
 1. Iniciar Vault em modo dev
-2. Configurar PostgreSQL secret engine
-3. Criar role de banco com TTL de 1 hora
-4. Gerar credencial dinâmica e testar conexão
-5. Verificar que a credencial expira automaticamente
-6. Configurar AppRole auth method
-7. Demonstrar fluxo de autenticação da aplicação
-8. Integrar com Kubernetes via External Secrets Operator
+2. Subir PostgreSQL local de teste
+3. Habilitar PostgreSQL Secret Engine
+4. Criar roles de credencial dinâmica
+5. Gerar credencial dinâmica e testar
+6. Revogar credencial e verificar expiração
+7. Configurar AppRole para autenticação da aplicação
+8. Demonstrar fluxo de autenticação da aplicação
+9. Criar KV store para configurações não-sensíveis
+10. Integrar com Kubernetes via External Secrets Operator
 
 ---
 
@@ -63,22 +60,16 @@ Ao final deste laboratório, você terá demonstrado que: (a) credenciais dinâm
 
 ## 6. Script Passo a Passo
 
-**O que esta seção faz (visão geral):** Os 10 passos deste laboratório seguem a progressão natural de uma implementação real de secrets management: primeiro o servidor (Passo 1), depois o recurso protegido (Passo 2), depois o mecanismo de proteção (Passos 3-4), depois a validação do mecanismo (Passos 5-6), depois a autenticação das aplicações (Passos 7-8), e finalmente a extensão para secrets estáticos e para orquestração Kubernetes (Passos 9-10). Esta ordem não é arbitrária — cada passo cria pré-requisitos concretos para o próximo.
-
-**Por que a ordem importa para a segurança:** No contexto do BACEN 4.893 Art. 8, o requisito é que "credenciais sejam gerenciadas com controles adequados". Isso significa que não basta ter um Vault funcionando — é preciso demonstrar o ciclo completo: geração, uso, expiração e auditoria. Cada passo deste lab documenta um elo desse ciclo.
-
----
-
 ### Passo 1: Iniciar Vault em Modo Dev
 
-**O que este passo faz:** Instala e inicia o HashiCorp Vault em modo desenvolvimento (`-dev`). O modo dev inicializa o Vault automaticamente com um seal key único, armazena dados em memória (não em disco) e usa HTTP sem TLS — tudo configurado para facilitar o aprendizado sem necessidade de uma infraestrutura complexa. O token fixo `lab-root-token` permite autenticação previsível durante o lab, substituindo o fluxo de unseal com múltiplos key shares que seria necessário em produção.
+**O que este passo faz:** Inicia o HashiCorp Vault em modo desenvolvimento (`-dev`). O modo dev é inseguro para produção mas perfeito para laboratórios — ele: inicia sem necessidade de unseal manual, usa armazenamento em memória (os dados somem ao reiniciar o Vault), e gera automaticamente um root token fixo que você especifica com `--dev-root-token-id`. As variáveis de ambiente `VAULT_ADDR` e `VAULT_TOKEN` configuram o cliente CLI para se comunicar com o servidor Vault local.
 
-**Por que este passo vem primeiro:** Sem o Vault iniciado e acessível, nenhum dos passos subsequentes é possível. O Vault é o ponto central de controle de todos os secrets — ele precisa estar operacional antes de configurar qualquer integração. Verificar `vault status` com `Sealed: false` é a garantia de que o servidor está pronto para receber configurações.
+**Por que agora:** O Vault precisa estar rodando antes de qualquer configuração de secret engine ou autenticação. O modo dev simplifica a inicialização para que você possa focar na lógica de secrets management, não na operação do Vault.
 
 ```bash
 # Instalar Vault (se não instalado)
 # macOS:
-brew tap hashicorp/tap && brew install hashicorp/tap/vault
+# brew tap hashicorp/tap && brew install hashicorp/tap/vault
 
 # Linux:
 wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
@@ -88,185 +79,163 @@ sudo apt update && sudo apt install vault
 # Verificar versão
 vault version
 
-# Iniciar Vault em modo dev com token fixo para laboratório
-# IMPORTANTE: modo dev NÃO É PARA PRODUÇÃO — dados em memória, sem TLS, sem HA
+# Iniciar Vault em modo dev com token fixo
 vault server -dev -dev-root-token-id="lab-root-token" &
 VAULT_PID=$!
 
-# Configurar variáveis de ambiente
 export VAULT_ADDR='http://127.0.0.1:8200'
 export VAULT_TOKEN='lab-root-token'
 
-# Verificar conexão
+# Verificar status
 vault status
 vault token lookup
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
-Key                Value
----                -----
-Seal Type          shamir
-Initialized        true
-Sealed             false
-Total Shares       1
-Threshold          1
-Version            1.x.x
-Cluster Name       vault-cluster-dev
-Storage Type       inmem
-HA Enabled         false
+Key             Value
+---             -----
+Seal Type       shamir
+Initialized     true
+Sealed          false
+Total Shares    1
+Threshold       1
+Version         1.15.x
+...
 ```
-
-**O que confirma que funcionou:** O campo `Sealed: false` é o indicador crítico. Um Vault "sealed" (selado) não serve nenhuma requisição — todos os dados estão criptografados e inacessíveis até que o unseal key correto seja fornecido. `Sealed: false` significa que o Vault foi devidamente inicializado e está pronto para operar. O campo `Storage Type: inmem` confirma que estamos em modo dev (dados em memória, não persistidos em disco).
-
-**Troubleshooting:** Se a porta 8200 estiver em uso:
-```bash
-vault server -dev -dev-root-token-id="lab-root-token" -dev-listen-address="127.0.0.1:8201" &
-export VAULT_ADDR='http://127.0.0.1:8201'
-```
+O `Sealed: false` confirma que o Vault está pronto para uso. Em produção, o Vault inicia `Sealed` e precisa de uma cerimônia de unseal com múltiplas chaves antes de aceitar requisições.
 
 ---
 
-### Passo 2: Iniciar PostgreSQL para o Laboratório
+### Passo 2: Subir PostgreSQL Local de Teste
 
-**O que este passo faz:** Sobe um container PostgreSQL com credenciais administrativas temporárias (`vault_admin`/`vault_lab_admin_2025`) e cria a tabela `transacoes` com dados fictícios do Banco Meridian. O usuário `vault_admin` é o "super usuário" de bootstrap — ele tem permissão de CREATE ROLE e GRANT, que o Vault usará nos Passos 3-5 para criar e revogar usuários dinamicamente. A tabela `transacoes` simula o recurso crítico que as credenciais dinâmicas protegerão.
+**O que este passo faz:** Inicia um container PostgreSQL de teste representando o banco de dados do Banco Meridian. O usuário `vault_admin` é o usuário que o Vault usará para criar e revogar credenciais dinâmicas — ele precisa ter permissão `CREATEROLE` no PostgreSQL. O script SQL cria a tabela `transacoes` e insere dados de teste para que as credenciais dinâmicas possam ser testadas com uma query real.
 
-**Por que este passo vem antes da configuração do Vault:** O Vault precisa testar a conectividade com o PostgreSQL no momento da configuração (Passo 3, `vault write database/config`). Se o PostgreSQL não estiver rodando, o `vault write` falhará com erro de conexão e o Passo 3 não poderá ser concluído. A ordem correta é: infraestrutura primeiro, Vault depois.
+**Por que agora:** O Vault precisa de um banco de dados real para configurar o secret engine. Sem o PostgreSQL rodando, os passos de configuração do database engine e geração de credenciais falharão.
 
 ```bash
-# Iniciar PostgreSQL com Docker (banco de teste)
+# Iniciar PostgreSQL via Docker
 docker run -d \
-  --name vault-postgres-lab \
-  -e POSTGRES_DB=bancomeridian \
+  --name bancomeridian-postgres \
   -e POSTGRES_USER=vault_admin \
   -e POSTGRES_PASSWORD=vault_lab_admin_2025 \
+  -e POSTGRES_DB=bancomeridian \
   -p 5432:5432 \
   postgres:15
 
-# Aguardar PostgreSQL iniciar
+# Aguardar PostgreSQL ficar pronto
 sleep 5
 
-# Verificar conexão
-PGPASSWORD=vault_lab_admin_2025 psql -h localhost -U vault_admin -d bancomeridian \
-  -c "SELECT version();"
-
-# Criar tabela de teste
+# Criar estrutura de teste
 PGPASSWORD=vault_lab_admin_2025 psql -h localhost -U vault_admin -d bancomeridian << 'SQL'
 CREATE TABLE IF NOT EXISTS transacoes (
-  id SERIAL PRIMARY KEY,
-  valor DECIMAL(10,2),
-  descricao TEXT,
-  criado_em TIMESTAMP DEFAULT NOW()
+    id SERIAL PRIMARY KEY,
+    valor DECIMAL(10,2),
+    descricao TEXT,
+    criado_em TIMESTAMP DEFAULT NOW()
 );
 
 INSERT INTO transacoes (valor, descricao) VALUES
-  (100.00, 'Depósito PIX'),
-  (250.50, 'Pagamento boleto'),
-  (75.00, 'TED recebida');
+    (100.00, 'Depósito PIX'),
+    (250.50, 'Pagamento boleto'),
+    (75.00, 'TED recebida');
 
 SELECT COUNT(*) as total_transacoes FROM transacoes;
 SQL
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
  total_transacoes
 ------------------
         3
 ```
 
-**O que confirma que funcionou:** A query `SELECT COUNT(*)` retorna 3 — confirmando que a tabela foi criada e os dados inseridos com sucesso. Se retornar 0 ou erro, o Vault não terá dados para demonstrar a diferença de acesso entre as roles `readonly-api` e `readwrite-transacoes`. O `SELECT version()` que precede a criação da tabela confirma que a conexão TCP com o PostgreSQL está funcionando — se este passo falhar, a causa mais comum é o container ainda estar inicializando (aumente o `sleep 5` para `sleep 10`).
-
 ---
 
-### Passo 3: Configurar PostgreSQL Secret Engine
+### Passo 3: Habilitar PostgreSQL Secret Engine
 
-**O que este passo faz:** Habilita o "database secret engine" do Vault — o módulo responsável por gerar credenciais dinâmicas para bancos de dados. Em seguida, configura a conexão entre o Vault e o PostgreSQL usando as credenciais do `vault_admin`. A partir deste momento, o Vault tem capacidade de executar statements DDL (`CREATE ROLE`, `GRANT`, `REVOKE`, `DROP ROLE`) no PostgreSQL como `vault_admin`, mas nenhuma aplicação cliente terá acesso direto a essas credenciais administrativas. O objetivo de segurança é que `vault_admin`/`vault_lab_admin_2025` nunca mais precise ser distribuída — o Vault age como proxy privilegiado.
+**O que este passo faz:** Habilita o secret engine `database` do Vault e configura a conexão com o PostgreSQL do Banco Meridian. O `vault secrets enable database` ativa o engine no caminho `/database/`. O `vault write database/config/bancomeridian-db` configura a conexão: o Vault armazena as credenciais do `vault_admin` (necessárias para criar roles dinâmicas) de forma criptografada — a aplicação nunca vê essas credenciais. O `{{username}}` e `{{password}}` na connection_url são substituídos pelo Vault em tempo de execução.
 
-**Por que este passo vem após o PostgreSQL estar funcionando:** O comando `vault write database/config` inclui um teste de conectividade implícito — o Vault tenta conectar ao PostgreSQL com as credenciais fornecidas para validar a configuração. Se o PostgreSQL estiver inacessível ou as credenciais estiverem erradas, o comando falhará com mensagem de erro de conexão. Este comportamento "fail fast" é intencional: melhor descobrir agora do que quando uma aplicação tentar obter uma credencial dinâmica.
+**Por que agora:** O database secret engine é o coração deste laboratório. Sem ele, o Vault não sabe como se conectar ao PostgreSQL para criar as credenciais dinâmicas. Esta configuração precisa vir antes da criação das roles e da geração de credenciais.
 
 ```bash
-echo "=== CONFIGURANDO DATABASE SECRET ENGINE ==="
-
-# Habilitar o database secret engine
+# Habilitar database secret engine
 vault secrets enable database
-echo "✓ Database secret engine habilitado"
+echo "Database secret engine habilitado"
 
-# Configurar conexão com PostgreSQL
+# Configurar conexão com PostgreSQL do Banco Meridian
 vault write database/config/bancomeridian-db \
-  plugin_name=postgresql-database-plugin \
-  allowed_roles="readonly-api,readwrite-transacoes" \
-  connection_url="postgresql://{{username}}:{{password}}@localhost:5432/bancomeridian?sslmode=disable" \
-  username="vault_admin" \
-  password="vault_lab_admin_2025" \
-  max_open_connections=5
-
-echo "✓ Conexão PostgreSQL configurada no Vault"
+    plugin_name=postgresql-database-plugin \
+    allowed_roles="readonly-api,readwrite-transacoes" \
+    connection_url="postgresql://{{username}}:{{password}}@localhost:5432/bancomeridian?sslmode=disable" \
+    username="vault_admin" \
+    password="vault_lab_admin_2025" \
+    max_open_connections=5
 
 # Verificar configuração
 vault read database/config/bancomeridian-db
 ```
 
-**O que confirma que funcionou:** O `vault write database/config/bancomeridian-db` não retorna erro. Em seguida, o `vault read database/config/bancomeridian-db` exibe a configuração com `allowed_roles: [readonly-api readwrite-transacoes]` — mas sem exibir a senha do `vault_admin` (o Vault armazena credenciais de forma criptografada e nunca as retorna em leitura, apenas as usa internamente). A ausência da senha na saída do `vault read` é evidência de que o mecanismo de proteção está funcionando.
+**O que você deve ver:** A configuração exibe os parâmetros sem a senha — o Vault nunca expõe a senha do `vault_admin` após a configuração. Apenas o campo `username` é visível.
 
 ---
 
-### Passo 4: Criar Roles com TTL
+### Passo 4: Criar Roles de Credencial Dinâmica
 
-**O que este passo faz:** Define duas "roles" no Vault — templates que descrevem quais permissões SQL uma credencial dinâmica receberá ao ser gerada. A role `readonly-api` cria usuários PostgreSQL com apenas `SELECT` (para a API de consulta de transações) e a role `readwrite-transacoes` cria usuários com `SELECT, INSERT, UPDATE` (para o serviço de processamento). Os templates `{{name}}`, `{{password}}` e `{{expiration}}` são substituídos pelo Vault no momento da geração — o banco recebe o DDL completo e cria o usuário com expiração já configurada no próprio PostgreSQL (`VALID UNTIL`). O TTL de 1h significa que mesmo que o Vault falhe, o PostgreSQL removerá o acesso quando o horário de expiração chegar.
+**O que este passo faz:** Cria duas roles no Vault que definem como as credenciais dinâmicas serão geradas:
 
-**Por que este passo vem antes da geração de credenciais:** Sem uma role definida, o comando `vault read database/creds/readonly-api` do Passo 5 retornará erro "role not found". As roles são o blueprint que o Vault usa para saber quais statements SQL executar — elas precisam existir antes de qualquer pedido de credencial.
+- **readonly-api**: role para a API de consultas — acesso de leitura apenas (SELECT). O `creation_statements` é o SQL que o Vault executa no PostgreSQL quando uma credencial é solicitada. O `{{name}}` é substituído pelo Vault por um nome único gerado automaticamente (ex: `v-role-readonly-api-KjNm-1714000000`). O TTL de 1h significa que o role PostgreSQL e suas permissões são automaticamente revogados após 1 hora.
+
+- **readwrite-transacoes**: role para a API de processamento de transações — acesso de leitura e escrita na tabela de transações.
+
+**Por que agora:** As roles definem os "moldes" das credenciais. Você precisa criá-las antes de poder solicitar credenciais dinâmicas. Cada role pode ter TTL e permissões diferentes — princípio de menor privilégio aplicado a credenciais.
 
 ```bash
-# Role readonly para a API (TTL de 1 hora)
+# Criar role readonly para a API de consultas
 vault write database/roles/readonly-api \
-  db_name=bancomeridian-db \
-  creation_statements="
-    CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';
-    GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{{name}}\";
-    GRANT USAGE ON SCHEMA public TO \"{{name}}\";
-  " \
-  revocation_statements="
-    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM \"{{name}}\";
-    REVOKE USAGE ON SCHEMA public FROM \"{{name}}\";
-    DROP ROLE IF EXISTS \"{{name}}\";
-  " \
-  default_ttl="1h" \
-  max_ttl="4h"
+    db_name=bancomeridian-db \
+    creation_statements="
+        CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';
+        GRANT CONNECT ON DATABASE bancomeridian TO \"{{name}}\";
+        GRANT USAGE ON SCHEMA public TO \"{{name}}\";
+        GRANT SELECT ON transacoes TO \"{{name}}\";
+    " \
+    revocation_statements="
+        REVOKE ALL ON transacoes FROM \"{{name}}\";
+        DROP ROLE IF EXISTS \"{{name}}\";
+    " \
+    default_ttl="1h" \
+    max_ttl="8h"
 
-echo "✓ Role readonly-api criada (TTL: 1h)"
+echo "Role readonly-api criada (TTL: 1h)"
 
-# Role readwrite para o serviço de transações
+# Criar role readwrite para processamento de transações
 vault write database/roles/readwrite-transacoes \
-  db_name=bancomeridian-db \
-  creation_statements="
-    CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';
-    GRANT SELECT, INSERT, UPDATE ON transacoes TO \"{{name}}\";
-    GRANT USAGE, SELECT ON SEQUENCE transacoes_id_seq TO \"{{name}}\";
-  " \
-  revocation_statements="
-    REVOKE ALL ON transacoes FROM \"{{name}}\";
-    DROP ROLE IF EXISTS \"{{name}}\";
-  " \
-  default_ttl="1h" \
-  max_ttl="8h"
+    db_name=bancomeridian-db \
+    creation_statements="
+        CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';
+        GRANT CONNECT ON DATABASE bancomeridian TO \"{{name}}\";
+        GRANT USAGE ON SCHEMA public TO \"{{name}}\";
+        GRANT SELECT, INSERT, UPDATE ON transacoes TO \"{{name}}\";
+    " \
+    revocation_statements="
+        REVOKE ALL ON transacoes FROM \"{{name}}\";
+        DROP ROLE IF EXISTS \"{{name}}\";
+    " \
+    default_ttl="1h" \
+    max_ttl="8h"
 
-echo "✓ Role readwrite-transacoes criada (TTL: 1h)"
+echo "Role readwrite-transacoes criada (TTL: 1h)"
 ```
-
-**O que confirma que funcionou:** Os dois comandos `vault write database/roles/...` retornam sem erro. Para verificar:
-```bash
-vault list database/roles
-```
-O resultado deve listar `readonly-api` e `readwrite-transacoes`. Se um nome aparecer diferente (ex.: `readonly_api` com underscore), o Passo 5 falhará porque o nome da role é case-sensitive e exact-match.
 
 ---
 
 ### Passo 5: Gerar Credencial Dinâmica e Testar
 
-**O que este passo faz:** Este é o momento central do laboratório — a primeira geração de uma credencial dinâmica. O comando `vault read database/creds/readonly-api` instrui o Vault a: (1) gerar um nome de usuário único com timestamp (ex.: `v-role-readonly-api-KjNm-1714000000`), (2) gerar uma senha aleatória de alta entropia, (3) executar os `creation_statements` da role no PostgreSQL como `vault_admin`, e (4) retornar o nome e a senha para quem requisitou — junto com um `lease_id` para rastrear e eventualmente revogar esta credencial específica. Todo esse processo ocorre em milissegundos e sem qualquer intervenção humana.
+**O que este passo faz:** Solicita uma credencial dinâmica ao Vault para a role `readonly-api` e usa imediatamente para conectar ao PostgreSQL. O `vault read database/creds/readonly-api` instrui o Vault a: (1) se conectar ao PostgreSQL como `vault_admin`, (2) executar o `creation_statements` da role com um nome único, (3) retornar o username e password gerados. O `Lease ID` é o identificador desta credencial específica — você pode usá-lo para revogar antecipadamente. O TTL de 1h é o tempo até que o Vault automaticamente execute o `revocation_statements` e remova o role do PostgreSQL.
 
-**Por que este passo vem após definir as roles:** A geração de credenciais referencia uma role existente (`readonly-api`). O Vault usa a role para saber quais statements executar, qual TTL aplicar e qual banco de dados usar. Sem a role, o Vault não tem como saber quais permissões conceder ao novo usuário.
+**Por que agora:** Esta é a demonstração central do laboratório — substituindo `BancoMeridian@2024!` estático por uma credencial única, rastreável, com TTL automático. O contraste com a situação inicial é imediato.
 
 ```bash
 echo ""
@@ -276,311 +245,246 @@ echo "Depois do Vault: credencial única gerada agora, expira em 1h"
 echo ""
 
 # Gerar credencial dinâmica
-DB_CREDS=$(vault read -format=json database/creds/readonly-api)
-DB_USER=$(echo $DB_CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['username'])")
-DB_PASS=$(echo $DB_CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['password'])")
-LEASE_ID=$(echo $DB_CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['lease_id'])")
-TTL=$(echo $DB_CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['lease_duration'])")
+CREDS=$(vault read -format=json database/creds/readonly-api)
+DB_USER=$(echo $CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['username'])")
+DB_PASS=$(echo $CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['password'])")
+LEASE_ID=$(echo $CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['lease_id'])")
+TTL=$(echo $CREDS | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['lease_duration'])")
 
 echo "Credencial gerada:"
-echo "  Usuario: $DB_USER"
+echo "  Usuário: $DB_USER"
 echo "  Senha: [REDACTED — não logada por segurança]"
-echo "  TTL: $TTL"
+echo "  TTL: ${TTL}s ($(($TTL/3600))h)"
 echo "  Lease ID: $LEASE_ID"
-echo ""
 
 # Testar conexão com a credencial dinâmica
+echo ""
 echo "Testando conexão com credencial dinâmica..."
 PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d bancomeridian \
-  -c "SELECT current_user, NOW()::text as hora_acesso;" \
-  -c "SELECT COUNT(*) as transacoes_visiveis FROM transacoes;"
-
-echo ""
-echo "✓ Credencial dinâmica funciona!"
-
-# Verificar no PostgreSQL que o usuário foi criado
-PGPASSWORD=vault_lab_admin_2025 psql -h localhost -U vault_admin -d bancomeridian \
-  -c "SELECT rolname, rolvaliduntil FROM pg_roles WHERE rolname LIKE 'v-%';"
+  -c "SELECT current_user, COUNT(*) as transacoes FROM transacoes;" 2>&1
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
 Credencial gerada:
-  Usuario: v-role-readonly-api-KjNm-1714000000
-  Senha: [REDACTED]
-  TTL: 3600
+  Usuário: v-role-readonly-api-KjNm-1714000000
+  TTL: 3600s (1h)
   Lease ID: database/creds/readonly-api/abc123xyz
 
- current_user                               | hora_acesso
---------------------------------------------+------------------------
- v-role-readonly-api-KjNm-1714000000       | 2025-04-24 15:30:01
-
- transacoes_visiveis
----------------------
-                   3
+ current_user                           | transacoes
+----------------------------------------+-----------
+ v-role-readonly-api-KjNm-1714000000   |          3
 ```
-
-**O que confirma que funcionou:** Três confirmações simultâneas: (1) `current_user` mostra o nome `v-role-readonly-api-...` — confirmando que a conexão PostgreSQL usou o usuário dinâmico, não o `vault_admin`; (2) `transacoes_visiveis = 3` — confirmando que o `GRANT SELECT` foi aplicado corretamente; (3) a query `pg_roles` mostra o usuário com `rolvaliduntil` definido para 1h no futuro — confirmando que o TTL foi aplicado também no nível do PostgreSQL como dupla garantia.
+O nome do usuário como `v-role-readonly-api-KjNm-1714000000` é o padrão do Vault — cada credencial tem um nome único com timestamp, tornando-a rastreável nos logs do PostgreSQL.
 
 ---
 
-### Passo 6: Demonstrar Expiração Automática
+### Passo 6: Revogar Credencial e Verificar Expiração
 
-**O que este passo faz:** Simula a expiração automática revogando manualmente o lease da credencial gerada no Passo 5. Em produção, o Vault executaria este processo automaticamente após 1h — aqui fazemos manualmente para demonstrar o comportamento sem esperar. Quando `vault lease revoke` é chamado, o Vault executa os `revocation_statements` da role no PostgreSQL (`REVOKE ALL` e `DROP ROLE`) usando o `vault_admin`. O resultado é que o usuário dinâmico deixa de existir no PostgreSQL imediatamente — qualquer conexão ativa com aquele usuário seria terminada.
+**O que este passo faz:** Revoga antecipadamente a credencial dinâmica usando o Lease ID e verifica que o role PostgreSQL foi removido. Esta é a demonstração do poder da revogação instantânea — em vez de rotacionar manualmente todas as aplicações, você revoga o lease e o Vault executa o `revocation_statements` automaticamente. Após a revogação, qualquer tentativa de usar aquela credencial resulta em "role does not exist" — exatamente o que você quer após um vazamento de credencial.
 
-**Por que este passo vem imediatamente após a geração:** A demonstração de expiração só faz sentido logo após a geração, enquanto o `LEASE_ID` ainda está na variável de ambiente. Este é o fechamento do ciclo de vida de uma credencial dinâmica: geração (Passo 5) → uso → expiração (Passo 6). Demonstrar os três momentos em sequência é o que faz o aluno internalizar que credenciais dinâmicas têm um ciclo de vida gerenciado, diferente de senhas estáticas que simplesmente "existem" até alguém decidir rotacioná-las.
+**Por que agora:** A revogação instantânea é um dos principais benefícios do Vault. No cenário do Banco Meridian: se um desenvolvedor vazar uma credencial estática, você precisa rotacionar a senha em todos os sistemas (downtime). Com Vault: você revoga o lease e a credencial expira em segundos, sem downtime.
 
 ```bash
-echo "=== DEMONSTRANDO EXPIRAÇÃO AUTOMÁTICA ==="
-echo ""
-
-# Para demonstrar sem esperar 1h, vamos revogar manualmente o lease
-# (em produção, o Vault faria isso automaticamente após 1h)
-
-echo "Revogando a credencial imediatamente (simulando expiração)..."
+echo "Revogando credencial imediatamente (antes da expiração)..."
 vault lease revoke "$LEASE_ID"
-echo "Credencial revogada."
-echo ""
+echo "Credencial revogada!"
 
-# Tentar usar a credencial revogada
-echo "Tentando usar credencial revogada..."
+echo ""
+echo "Tentando usar a credencial revogada (deve falhar)..."
 PGPASSWORD="$DB_PASS" psql -h localhost -U "$DB_USER" -d bancomeridian \
-  -c "SELECT 1;" 2>&1 | head -3 || true
+  -c "SELECT 1;" 2>&1 || true
 
 echo ""
-echo "Resultado esperado: FATAL: role does not exist"
-echo ""
-
-# Verificar que o usuário foi removido do PostgreSQL
+echo "Verificando que o role foi removido do PostgreSQL..."
 PGPASSWORD=vault_lab_admin_2025 psql -h localhost -U vault_admin -d bancomeridian \
-  -c "SELECT rolname FROM pg_roles WHERE rolname = '$DB_USER';"
-echo "(Resultado esperado: 0 rows — usuário foi removido pelo Vault)"
+  -c "SELECT rolname FROM pg_roles WHERE rolname LIKE 'v-role-readonly-api-%';"
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 ```
-Revogando a credencial imediatamente...
+Revogando...
 Success! Revoked lease: database/creds/readonly-api/abc123xyz
 
-Tentando usar credencial revogada...
-psql: FATAL:  role "v-role-readonly-api-KjNm-1714000000" does not exist
+psql: error: connection to server at "localhost" (127.0.0.1), port 5432 failed:
+FATAL: role "v-role-readonly-api-KjNm-1714000000" does not exist
 
  rolname
 ---------
 (0 rows)
 ```
-
-**O que confirma que funcionou:** O erro `FATAL: role does not exist` e o resultado `(0 rows)` da query `pg_roles` confirmam dois níveis de proteção: (1) o Vault executou os `revocation_statements` com sucesso (o PostgreSQL eliminou o role); (2) o banco de dados não tem vestígio do usuário — um atacante que obtivesse o `LEASE_ID` após a revogação não conseguiria reutilizá-lo. Este comportamento contrasta diretamente com o cenário de credencial estática: se a senha `BancoMeridian@2024!` fosse comprometida, ela continuaria funcional indefinidamente até rotação manual.
+O `(0 rows)` confirma que o role PostgreSQL foi removido pelo Vault após a revogação. Em um cenário de vazamento de credencial, essa seria a resposta em segundos — sem necessidade de reiniciar aplicações.
 
 ---
 
-### Passo 7: Configurar AppRole Auth
+### Passo 7: Configurar AppRole para Autenticação da Aplicação
 
-**O que este passo faz:** Habilita o método de autenticação AppRole e cria uma política (`api-pagamentos-policy`) que define exatamente o que a aplicação pode acessar no Vault. A política usa o princípio de least privilege: a aplicação `api-pagamentos` pode apenas ler credenciais da role `readonly-api`, renovar seus próprios leases e revogar seu próprio token — nada mais. O Role ID gerado ao final é o "endereço público" da aplicação no Vault — pode estar no código-fonte sem comprometer a segurança, pois sozinho não concede nenhum acesso.
+**O que este passo faz:** Configura o método de autenticação AppRole, que permite que a aplicação (API de pagamentos) se autentique no Vault sem usar o root token. O AppRole funciona com dois componentes: `Role ID` (identificador público da aplicação, pode ser commitado no código) e `Secret ID` (credencial temporária que o CI/CD injeta na aplicação em runtime). A política `api-pagamentos-policy` define o que a aplicação pode fazer após autenticar — apenas ler credenciais da role `readonly-api` e nada mais.
 
-**Por que este passo vem após validar as credenciais dinâmicas:** A ordem correta é: primeiro provar que o mecanismo de credenciais dinâmicas funciona (Passos 3-6), depois configurar o mecanismo de autenticação que as aplicações usarão para acessá-lo (Passo 7). Se o database engine não estivesse funcionando, configurar o AppRole seria inútil — a aplicação autenticaria no Vault mas não conseguiria obter credenciais do banco.
+**Por que agora:** Sem AppRole, a aplicação precisaria usar o root token para se autenticar no Vault — isso seria tão ruim quanto hardcodar a senha do banco. O AppRole implementa o princípio de menor privilégio para a autenticação da aplicação no Vault.
 
 ```bash
-echo "=== CONFIGURANDO APPROLE AUTH METHOD ==="
-
-# Habilitar AppRole auth
-vault auth enable approle
-echo "✓ AppRole auth habilitado"
-
 # Criar política para a API de pagamentos
 vault policy write api-pagamentos-policy - << 'HCL'
-# Acesso ao KV para configurações
-path "secret/data/api-pagamentos/*" {
-  capabilities = ["read"]
-}
-
-# Acesso a credenciais dinâmicas do banco (readonly)
+# Política: API de pagamentos pode APENAS gerar credenciais readonly
 path "database/creds/readonly-api" {
   capabilities = ["read"]
 }
 
-# Acesso a credenciais de escrita para o serviço de transações
-path "database/creds/readwrite-transacoes" {
-  capabilities = ["read"]
-}
-
-# Renovar leases
+# Pode renovar seus leases
 path "sys/leases/renew" {
   capabilities = ["update"]
 }
 
-# Revogar o próprio token
-path "auth/token/revoke-self" {
+# Pode revogar seus próprios leases
+path "sys/leases/revoke" {
   capabilities = ["update"]
+}
+
+# Pode ler configurações não-sensíveis
+path "bancomeridian/data/api-pagamentos/*" {
+  capabilities = ["read"]
 }
 HCL
 
-echo "✓ Política api-pagamentos-policy criada"
+# Habilitar AppRole
+vault auth enable approle
+echo "AppRole habilitado"
 
-# Criar role AppRole
+# Criar role AppRole para a API de pagamentos
 vault write auth/approle/role/api-pagamentos \
-  token_policies=api-pagamentos-policy \
-  secret_id_ttl=10m \
-  token_num_uses=10 \
-  token_ttl=20m \
-  token_max_ttl=60m
+    policies="api-pagamentos-policy" \
+    token_ttl="1h" \
+    token_max_ttl="4h" \
+    secret_id_ttl="10m" \
+    secret_id_num_uses=1
 
-echo "✓ Role AppRole api-pagamentos criada"
-
-# Obter Role ID (público — pode estar no código ou ambiente)
+# Obter Role ID (este é público, pode ser commitado)
 ROLE_ID=$(vault read -field=role_id auth/approle/role/api-pagamentos/role-id)
-echo ""
 echo "Role ID (público): $ROLE_ID"
 ```
-
-**O que confirma que funcionou:** O Role ID é exibido como UUID (formato `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Para verificar a política:
-```bash
-vault policy read api-pagamentos-policy
-```
-A saída deve mostrar exatamente as 5 paths configuradas. Se qualquer path estiver faltando ou com capability errada, a aplicação receberá erros de permissão no Passo 8.
 
 ---
 
 ### Passo 8: Demonstrar Fluxo de Autenticação da Aplicação
 
-**O que este passo faz:** Simula o fluxo completo de uma aplicação real usando AppRole: o CI/CD gera um Secret ID efêmero (expira em 10 minutos), a aplicação usa Role ID + Secret ID para obter um token Vault (válido por 20 minutos), e com esse token a aplicação obtém a credencial dinâmica do banco. Nenhum momento neste fluxo a aplicação conhece a senha do `vault_admin` ou a senha do usuário dinâmico que será usado — ela recebe apenas credenciais com escopo mínimo e tempo de vida limitado.
+**O que este passo faz:** Demonstra o fluxo completo de autenticação que a API de pagamentos executa em cada inicialização:
 
-**Por que este passo demonstra o conceito de "zero trust para aplicações":** O Secret ID tem `ttl=10m` — se o pipeline CI/CD for comprometido, o atacante tem no máximo 10 minutos para usar o Secret ID antes que expire. O token tem `token_num_uses=10` — mesmo que interceptado, só pode ser usado 10 vezes. A credencial do banco tem `ttl=1h` — mesmo que o banco de dados seja atacado e os processos listados, as credenciais expiram automaticamente. Três camadas de limitação temporal: Secret ID, Token, Credencial. Cada camada independente.
+1. **CI/CD gera Secret ID** (expira em 10min, uso único) — o Secret ID é tão efêmero que mesmo que seja interceptado, expira antes de ser utilizável
+2. **Aplicação faz login no Vault** com Role ID + Secret ID → recebe um token temporário (TTL: 1h)
+3. **Aplicação usa o token** para gerar credencial dinâmica do PostgreSQL
+4. **Aplicação conecta ao banco** com a credencial dinâmica
+
+Este fluxo garante que nem a senha do banco nem o root token do Vault existem em nenhum momento na memória da aplicação por mais de 1 hora.
+
+**Por que agora:** Este é o passo que fecha o ciclo — demonstrando que a aplicação funciona sem nunca ter conhecimento de `BancoMeridian@2024!`. O fluxo AppRole é a arquitetura de referência para autenticação de aplicações no Vault.
 
 ```bash
-echo ""
-echo "=== FLUXO DA APLICAÇÃO: AppRole → Token → Dynamic DB Credential ==="
-echo ""
+echo "=== FLUXO: CI/CD → AppRole → Credential → DB ==="
 
 # PASSO 1: CI/CD injeta o Secret ID no ambiente da aplicação
-# (em produção: gerado pelo CI/CD pipeline no momento do deploy)
 SECRET_ID=$(vault write -force -field=secret_id auth/approle/role/api-pagamentos/secret-id)
 echo "Etapa 1 — CI/CD gerou Secret ID (expira em 10min): ${SECRET_ID:0:20}..."
 
-# PASSO 2: Aplicação autentica com Role ID + Secret ID
+# PASSO 2: Role ID + Secret ID → Token temporário
 APP_TOKEN=$(vault write -field=token auth/approle/login \
-  role_id="$ROLE_ID" \
-  secret_id="$SECRET_ID")
+    role_id="$ROLE_ID" \
+    secret_id="$SECRET_ID")
 echo "Etapa 2 — Aplicação autenticou, recebeu token: ${APP_TOKEN:0:20}..."
 
-# PASSO 3: Aplicação usa o token para obter credenciais do banco
-export VAULT_TOKEN="$APP_TOKEN"
-
+# PASSO 3: Token → Credencial dinâmica do banco
+VAULT_TOKEN="$APP_TOKEN"
 DB_CREDS_APP=$(vault read -format=json database/creds/readonly-api)
 DB_USER_APP=$(echo $DB_CREDS_APP | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['username'])")
 DB_PASS_APP=$(echo $DB_CREDS_APP | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['data']['password'])")
-
 echo "Etapa 3 — Aplicação obteve credencial dinâmica: $DB_USER_APP"
 
-# PASSO 4: Aplicação usa as credenciais para conectar ao banco
+# PASSO 4: Credencial dinâmica → Conexão ao banco
 echo "Etapa 4 — Conectando ao banco com credencial dinâmica..."
 PGPASSWORD="$DB_PASS_APP" psql -h localhost -U "$DB_USER_APP" -d bancomeridian \
-  -c "SELECT 'Conexão bem-sucedida! Usuário: ' || current_user AS resultado;"
+  -c "SELECT current_user, SUM(valor) as total FROM transacoes;" 2>&1
 
 echo ""
-echo "=== COMPARATIVO ANTES/DEPOIS ==="
-echo ""
-echo "ANTES: DB_PASSWORD=BancoMeridian@2024! (hardcoded, 18 meses sem rotação)"
-echo "DEPOIS: Credencial única, expira em 1h, auditada no Vault, sem hardcoding"
-echo ""
-echo "✓ Laboratório de Vault concluído com sucesso!"
-
-# Restaurar token do admin
-export VAULT_TOKEN='lab-root-token'
+echo "Fluxo completo: a aplicação nunca conheceu BancoMeridian@2024!"
 ```
 
-**O que confirma que funcionou:** A query final retorna `Conexão bem-sucedida! Usuário: v-role-readonly-api-EfGh...` — confirmando que a aplicação (representada pelo `APP_TOKEN`) conseguiu se autenticar no Vault com as permissões restritas da política `api-pagamentos-policy` e obter uma credencial dinâmica funcional para o banco. Se ocorrer erro de permissão (`permission denied`) no Passo 3 (obtenção da credencial), verifique se a política foi aplicada corretamente à role AppRole.
+**O que você deve ver:**
+```
+Etapa 1 — CI/CD gerou Secret ID (expira em 10min): c9d4e8f2-...
+Etapa 2 — Aplicação autenticou, recebeu token: s.XXXXXXXXXXXXXXXX...
+Etapa 3 — Aplicação obteve credencial dinâmica: v-role-readonly-api-EfGh5678-...
+Etapa 4 — Conectando ao banco com credencial dinâmica...
+
+ current_user                         | total
+--------------------------------------+--------
+ v-role-readonly-api-EfGh5678-...    | 425.50
+
+Fluxo completo: a aplicação nunca conheceu BancoMeridian@2024!
+```
 
 ---
 
-### Passo 9: Configurar KV v2 para Secrets Estáticos
+### Passo 9: Criar KV Store para Configurações
 
-**O que este passo faz:** Habilita o Key-Value versão 2 (KV v2) no path `bancomeridian` — um mecanismo de armazenamento de secrets estáticos com versionamento. Enquanto o database engine (Passos 3-6) gerencia credenciais que mudam a cada request, o KV v2 gerencia secrets que mudam com menos frequência: configurações de host/porta, API keys de terceiros, valores de configuração. O versionamento do KV v2 permite auditoria histórica — é possível ver não apenas o valor atual de um secret, mas também todos os valores anteriores com timestamps de quem e quando alterou.
+**O que este passo faz:** Configura o secret engine KV (Key-Value) versão 2 para armazenar configurações não-sensíveis mas controladas da aplicação, como `db_host`, `redis_host`, `api_timeout`. O KV v2 tem versionamento automático — toda alteração cria uma nova versão, e você pode recuperar versões antigas. Também armazena chaves de APIs de terceiros (gateway de pagamento, SMS) que precisam estar centralizadas mas não hardcodadas.
 
-**Por que este passo complementa (e não substitui) os passos anteriores:** KV v2 é para o que NÃO pode ser dinâmico — o endereço do servidor de banco (`db_host`), que não muda a cada request, deve estar no KV v2. A senha do banco (`db_password`), que PODE ser dinâmica, deve usar o database engine. Esta separação é a arquitetura correta de secrets management: use dynamic credentials onde possível, use KV v2 com rotação regular onde não for possível.
+**Por que agora:** Nem todo secret precisa ser dinâmico. Configurações como host do banco de dados e API keys de terceiros se beneficiam do vault como centralizador seguro, mas não precisam ser geradas dinamicamente. O KV é a solução para esses casos.
 
 ```bash
-echo "=== CONFIGURANDO KV v2 PARA SECRETS ESTÁTICOS ==="
-
-# Habilitar KV v2
+# Habilitar KV v2 no caminho bancomeridian/
 vault secrets enable -path=bancomeridian kv-v2
-echo "✓ KV v2 habilitado no path 'bancomeridian'"
 
-# Escrever configurações da aplicação (não-sensitivas)
+# Armazenar configurações da API de pagamentos
 vault kv put bancomeridian/api-pagamentos/config \
-  db_host="postgres.bancomeridian.internal" \
-  db_port="5432" \
-  db_name="bancomeridian" \
-  redis_host="redis.bancomeridian.internal" \
-  api_timeout="30" \
-  log_level="INFO"
+    db_host="postgres.bancomeridian.internal" \
+    db_port="5432" \
+    db_name="bancomeridian" \
+    redis_host="redis.bancomeridian.internal" \
+    api_timeout="30" \
+    log_level="INFO"
 
-echo "✓ Configurações da API escritas no Vault"
-
-# Ler configurações
-vault kv get bancomeridian/api-pagamentos/config
-
-# Escrever API key de terceiro (rotacionável)
+# Armazenar API keys de terceiros
 vault kv put bancomeridian/api-pagamentos/external-apis \
-  payment_gateway_key="pgw_live_abc123" \
-  sms_api_key="sms_live_xyz789"
+    payment_gateway_key="pgw_live_abc123" \
+    sms_api_key="sms_live_xyz789"
 
-echo "✓ API keys de terceiros escritas no Vault"
-
-# Verificar versões
+echo "Configurações armazenadas no KV store"
 vault kv metadata get bancomeridian/api-pagamentos/config
 ```
-
-**O que confirma que funcionou:** O `vault kv get bancomeridian/api-pagamentos/config` exibe os pares chave-valor escritos, com o cabeçalho mostrando `version = 1` e `created_time`. O `vault kv metadata get` exibe o histórico de versões — mesmo que só exista a versão 1, a estrutura está pronta para registrar versões futuras. Em um audit de conformidade BACEN, este histórico de versões demonstra que a gestão de secrets tem rastreabilidade completa de alterações.
 
 ---
 
 ### Passo 10: Integrar com Kubernetes via External Secrets Operator
 
-**O que este passo faz:** Configura o External Secrets Operator (ESO) — um operador Kubernetes que sincroniza automaticamente secrets do Vault para objetos `Secret` nativos do Kubernetes. O ESO usa a autenticação Kubernetes (Service Account + JWT Token) para se autenticar no Vault, lê os secrets do KV v2, e os projeta como Kubernetes Secrets no namespace da aplicação. A aplicação Kubernetes acessa seus secrets como variáveis de ambiente ou volumes — sem nunca interagir diretamente com a API do Vault. O `refreshInterval: 55m` garante que se um secret for rotacionado no Vault, o Kubernetes Secret será atualizado automaticamente em até 55 minutos.
+**O que este passo faz:** Configura a integração entre o Vault e o Kubernetes via External Secrets Operator (ESO). O ESO é um controller Kubernetes que sincroniza secrets do Vault para Kubernetes Secrets — a aplicação usa o Secret Kubernetes normalmente, sem saber que veio do Vault. O `SecretStore` define a conexão com o Vault (usando autenticação Kubernetes). O `ExternalSecret` define quais secrets buscar do Vault e como mapeá-los para o Kubernetes Secret.
 
-**Por que este passo fecha o ciclo do laboratório:** Os Passos 1-8 demonstraram o Vault como solução de secrets management standalone. O Passo 10 demonstra como integrar essa solução ao ambiente de produção real do Banco Meridian — que roda workloads containerizadas em Kubernetes. Sem esta integração, o Vault seria uma ferramenta auxiliar que os desenvolvedores precisariam chamar explicitamente; com o ESO, o Vault se torna transparente para as aplicações e automático para as operações.
+**Por que agora:** A integração com Kubernetes é o passo final que torna a solução transparente para a aplicação. Os desenvolvedores continuam usando `env.valueFrom.secretKeyRef` normalmente — a mágica do Vault acontece no controller do ESO, invisível para a aplicação.
 
 ```bash
 echo "=== INTEGRAÇÃO VAULT + KUBERNETES ==="
 
 # Habilitar Kubernetes auth no Vault
 vault auth enable kubernetes
-echo "✓ Kubernetes auth method habilitado"
+echo "Kubernetes auth habilitado"
 
-# Configurar com informações do cluster kind
-# (o Vault Agent dentro do cluster fornece essas informações)
+# Configurar Kubernetes auth
 KUBE_CA=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d | base64 -w 0)
 KUBE_HOST=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.server}')
 
 vault write auth/kubernetes/config \
-  kubernetes_host="$KUBE_HOST" \
-  kubernetes_ca_cert="$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d)"
-
-# Criar role Kubernetes → Vault
-vault write auth/kubernetes/role/api-pagamentos-k8s \
-  bound_service_account_names=api-pagamentos-sa \
-  bound_service_account_namespaces=lab05-vault \
-  policies=api-pagamentos-policy \
-  ttl=1h
-
-echo "✓ Role Kubernetes auth configurada"
+    kubernetes_host="$KUBE_HOST" \
+    kubernetes_ca_cert="$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d)"
 
 # Instalar External Secrets Operator
 helm repo add external-secrets https://charts.external-secrets.io
 helm install external-secrets external-secrets/external-secrets \
-  --namespace external-secrets \
-  --create-namespace \
-  --set installCRDs=true \
-  --wait
+    -n external-secrets-system \
+    --create-namespace
 
-echo "✓ External Secrets Operator instalado"
-
-# Criar namespace e ServiceAccount
+# Criar namespace para a aplicação
 kubectl create namespace lab05-vault
-kubectl create serviceaccount api-pagamentos-sa -n lab05-vault
 
-# Criar SecretStore e ExternalSecret
+# Criar SecretStore (conexão com Vault)
 kubectl apply -f - << 'YAML'
 apiVersion: external-secrets.io/v1beta1
 kind: SecretStore
@@ -590,16 +494,19 @@ metadata:
 spec:
   provider:
     vault:
-      server: "http://host.docker.internal:8200"  # Vault no host
+      server: "http://host.docker.internal:8200"
       path: "bancomeridian"
       version: "v2"
       auth:
         kubernetes:
           mountPath: "kubernetes"
-          role: "api-pagamentos-k8s"
+          role: "lab05-vault-role"
           serviceAccountRef:
-            name: api-pagamentos-sa
----
+            name: "default"
+YAML
+
+# Criar ExternalSecret (quais secrets buscar)
+kubectl apply -f - << 'YAML'
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -626,19 +533,13 @@ YAML
 
 sleep 10
 kubectl get externalsecret -n lab05-vault
-kubectl get secret api-pagamentos-config -n lab05-vault -o jsonpath='{.data}' | \
-  python3 -c "
+kubectl get secret api-pagamentos-config -n lab05-vault -o jsonpath='{.data}' | python3 -c "
 import json, sys, base64
 data = json.load(sys.stdin)
 for key, val in data.items():
-    decoded = base64.b64decode(val).decode()
-    print(f'{key}: {decoded}')
+    print(f'{key}: {base64.b64decode(val).decode()}')
 "
-
-echo "✓ External Secrets sincronizando secrets do Vault para K8s Secret nativo"
 ```
-
-**O que confirma que funcionou:** O `kubectl get externalsecret -n lab05-vault` deve mostrar o ExternalSecret `api-config` com `READY = True` e `STATUS = SecretSynced`. Se mostrar `SecretSyncedError`, os logs do ESO (`kubectl logs -n external-secrets deploy/external-secrets`) indicarão se o problema é de autenticação (Vault rejeitou o Service Account) ou de path (key incorreta no KV v2). O script Python que lê o Kubernetes Secret (`api-pagamentos-config`) deve exibir `db_host: postgres.bancomeridian.internal` — confirmando que o valor do Vault chegou ao Kubernetes sem que nenhuma credencial intermediária precisasse ser gerenciada manualmente.
 
 ---
 
@@ -649,56 +550,56 @@ echo "✓ External Secrets sincronizando secrets do Vault para K8s Secret nativo
 | 1 | Vault iniciado | `vault status` retorna `Sealed: false` |
 | 2 | PostgreSQL rodando | `psql` conecta com sucesso |
 | 3 | Database engine configurado | `vault read database/config/bancomeridian-db` |
-| 4 | Roles criadas | `vault list database/roles` mostra 2 roles |
-| 5 | Credencial dinâmica gerada | `psql` conecta com usuário `v-role-...` |
-| 6 | Expiração demonstrada | Após revogação, `psql` retorna `role does not exist` |
-| 7 | AppRole configurado | `vault read auth/approle/role/api-pagamentos/role-id` retorna UUID |
-| 8 | Fluxo AppRole testado | Aplicação obteve token e credencial dinâmica |
-| 9 | KV v2 configurado | `vault kv get bancomeridian/api-pagamentos/config` |
-| 10 | ESO instalado | `kubectl get externalsecret -n lab05-vault` |
+| 4 | Roles criadas | `vault list database/roles` |
+| 5 | Credencial dinâmica gerada | Username com prefixo `v-role-readonly-api-` |
+| 6 | Revogação funciona | `psql` com credencial revogada retorna "role does not exist" |
+| 7 | AppRole configurado | Role ID gerado |
+| 8 | Fluxo AppRole completo | Aplicação conecta ao banco sem senha estática |
+| 9 | KV store configurado | `vault kv get bancomeridian/api-pagamentos/config` |
+| 10 | ESO integrado | ExternalSecret sincronizado com Kubernetes Secret |
 
 ---
 
 ## 8. Gabarito Completo
 
-### Saída Esperada — Geração de Credencial Dinâmica
+### Saída Esperada — Revogação de Credencial (Passo 6)
 
 ```
-Key                Value
----                -----
-lease_id           database/creds/readonly-api/KjNmQrStUvWxYzAb
-lease_duration     1h
-lease_renewable    true
-password           A1B2c3d4-E5F6g7H8-i9J0kL1M
-username           v-role-readonly-api-AbCd1234-1714000000
-```
+Revogando...
+Success! Revoked lease: database/creds/readonly-api/abc123xyz
 
-### Saída Esperada — Verificação de Expiração
-
-```
-Credencial revogada. Tentando conexão...
 psql: error: connection to server at "localhost" (127.0.0.1), port 5432 failed:
-FATAL:  role "v-role-readonly-api-AbCd1234-1714000000" does not exist
+FATAL: role "v-role-readonly-api-AbCd1234-1714000000" does not exist
 
-rolname
--------
+ rolname
+---------
 (0 rows)
 ```
 
-### Saída Esperada — Fluxo AppRole Completo
+**Por que esta é a resposta correta:** O `Success! Revoked lease` confirma que o Vault executou o `revocation_statements` da role — que contém `DROP ROLE IF EXISTS "{{name}}"`. O erro `FATAL: role does not exist` ao tentar conectar com a credencial revogada confirma que a revogação foi efetiva no PostgreSQL. O `(0 rows)` na consulta de roles confirma que não há nenhum role dinâmico pendente. Este é o comportamento que transforma um vazamento de credencial de um incidente de horas (rotação manual) para segundos (vault lease revoke).
+
+**Erro mais comum:** Não exportar as variáveis `VAULT_ADDR` e `VAULT_TOKEN` antes de executar os comandos vault. Sem essas variáveis, o cliente vault tenta se conectar em `https://127.0.0.1:8200` com HTTPS, o que falha no modo dev (HTTP). O sintoma é `Error making API request: dial tcp 127.0.0.1:8200: connect: connection refused`.
+
+---
+
+### Saída Esperada — Fluxo AppRole Completo (Passo 8)
 
 ```
-Etapa 1 — CI/CD gerou Secret ID (expira em 10min): yyyyyyyy-yyyy-yyyy...
-Etapa 2 — Aplicação autenticou, recebeu token: s.XXXXXXXXXXXXXXXX...
+Etapa 1 — CI/CD gerou Secret ID (expira em 10min): c9d4e8f2-...
+Etapa 2 — Aplicação token: s.XXXXXXXXXXXXXXXX...
 Etapa 3 — Aplicação obteve credencial dinâmica: v-role-readonly-api-EfGh5678-...
-Etapa 4 — Conectando ao banco com credencial dinâmica...
+Etapa 4 — Conectando banco com credencial dinâmica...
 
- resultado
----------------------------------------------------------
- Conexão bem-sucedida! Usuário: v-role-readonly-api-...
+Conexão bem-sucedida! Usuario: v-role-readonly-api-...
 ```
 
-### Comparativo Audit Log — Antes/Depois
+**Por que esta é a resposta correta:** O fluxo de 4 etapas implementa o princípio de Zero Trust para acesso a banco de dados: (1) identidade efêmera (Secret ID expira em 10min, uso único), (2) token de curto prazo (TTL 1h), (3) credencial dinâmica única (rastreável no PostgreSQL), (4) acesso com menor privilégio (apenas SELECT na tabela de transações). Nenhuma credencial de longa duração existe em memória ou em disco na aplicação.
+
+**Erro mais comum:** Tentar usar o mesmo Secret ID duas vezes. O `secret_id_num_uses=1` foi configurado deliberadamente — o Secret ID é destruído após o primeiro uso. Um segundo login com o mesmo Secret ID retorna `invalid secret id`. Isso é uma medida de segurança: mesmo que o Secret ID seja interceptado em trânsito, ele já foi consumido.
+
+---
+
+### Comparativo Antes/Depois
 
 | Dimensão | Antes do Vault | Depois do Vault |
 |:---------|:--------------:|:---------------:|
@@ -709,8 +610,12 @@ Etapa 4 — Conectando ao banco com credencial dinâmica...
 | Comprometimento | Toda a duração de vida da senha | Apenas 1 hora (TTL restante) |
 | Conformidade BACEN Art. 8 | Violação | Conforme |
 
+**Por que esta é a resposta correta:** O comparativo demonstra que a solução Vault resolve especificamente cada item do Art. 8 do BACEN 4.893 (gestão de acessos com menor privilégio). A linha "Comprometimento" é a mais impactante: com a senha estática, um vazamento expõe a credencial permanentemente até rotação manual; com o Vault, o pior caso é 1 hora de exposição (o TTL da credencial dinâmica).
+
+**Erro mais comum:** Confundir o TTL do token do AppRole (1h) com o TTL da credencial do banco (também 1h neste laboratório, mas configurável). São TTLs independentes — o token do AppRole controla quanto tempo a aplicação está autenticada no Vault, enquanto o TTL da credencial do banco controla quanto tempo o role PostgreSQL dinâmico existe. Em produção, você pode configurar TTLs diferentes para cada um.
+
 ---
 
 *Lab 05 — HashiCorp Vault: Eliminando Credenciais Estáticas*  
-*Curso 4: Ferramentas de Cloud Security — CNAPP, IaC e DevSecOps*  
+*Curso 4: Cloud Security — CNAPP, IaC e DevSecOps*  
 *CECyber — Educação Corporativa em Cibersegurança*

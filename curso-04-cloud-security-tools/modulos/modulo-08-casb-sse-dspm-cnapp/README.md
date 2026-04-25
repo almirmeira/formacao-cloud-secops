@@ -39,6 +39,9 @@ Para o Banco Meridian, um analista pode estar uploadando planilhas com dados de 
 
 ### 1.3 Arquitetura CASB
 
+**O que este diagrama demonstra:** Os três modos de operação do CASB — inline proxy (bloqueia em tempo real no caminho do tráfego), API-based (analisa eventos já ocorridos via APIs dos provedores SaaS) e reverse proxy (controla sessões completas, interceptando após autenticação no IdP).
+**Por que isso importa:** Para o Banco Meridian, a escolha do modo de operação define o nível de proteção e a complexidade de implantação. O modo inline garante DLP em tempo real — um analista não consegue finalizar o upload de uma planilha com CPFs para o Gmail pessoal. O modo API-based é mais fácil de implantar mas reativo: o arquivo já foi enviado quando o CASB detecta e potencialmente remove.
+
 ```
 CASB — MODOS DE OPERAÇÃO
 ──────────────────────────────────────────────────────────────────────────────
@@ -65,7 +68,9 @@ MODO 3: Reverse Proxy (Session Control)
 
 ### 1.4 Ferramentas CASB
 
-**Netskope:**
+**O que esta ferramenta faz:** Netskope é uma plataforma CASB/SSE cloud-native que atua como proxy entre os usuários e as aplicações SaaS. O agente Netskope Client no endpoint encaminha todo o tráfego web para os PoPs da Netskope onde inspeção SSL, classificação de dados por ML e aplicação de políticas de DLP são realizadas antes de liberar ou bloquear a conexão.
+**Por que isso importa:** Para o Banco Meridian proteger dados de clientes em trânsito (requisito LGPD Art. 46), a inspeção SSL inline do Netskope é necessária — sem ela, tráfego criptografado para o Gmail pessoal é opaco. O diferencial do Netskope em classificação por ML (não apenas regex de CPF) reduz falsos positivos e aumenta a confiança das equipes em ativar políticas de bloqueio.
+
 ```
 Netskope é o líder de mercado em CASB puro e SSE.
 Pontos fortes:
@@ -82,7 +87,9 @@ Arquitetura de deployment:
   - IPSec/GRE tunnel para branch offices
 ```
 
-**Zscaler Internet Access (ZIA):**
+**O que esta ferramenta faz:** Zscaler Internet Access (ZIA) é um forward proxy cloud-based que substitui proxies on-premises. Todo o tráfego web dos colaboradores é roteado para os data centers da Zscaler, onde inspeção SSL, filtragem de URLs, detecção de malware via sandbox e DLP são aplicados antes de chegar ao destino.
+**Por que isso importa:** A integração nativa do ZIA com o Zscaler Private Access (ZPA) cria uma plataforma SSE unificada — o mesmo agente que protege o acesso à internet também protege o acesso às aplicações internas via ZTNA. Para o Banco Meridian migrar de uma arquitetura hub-and-spoke de VPN para Zero Trust, ter CASB e ZTNA na mesma plataforma simplifica enormemente a operação e a política de segurança.
+
 ```
 ZIA é o forward proxy cloud-based mais adotado no mundo.
 Pontos fortes:
@@ -97,7 +104,9 @@ Diferencial vs Netskope:
   - Mais adotado em enterprises grandes com foco em substituição de proxy on-premises
 ```
 
-**Microsoft Defender for Cloud Apps:**
+**O que esta ferramenta faz:** Microsoft Defender for Cloud Apps é o CASB nativo do ecossistema Microsoft. Utiliza a integração direta com Microsoft 365 via APIs nativas e com o Entra ID para aplicar Session Control (Conditional Access App Control) sem necessidade de agente proxy adicional — a política é aplicada no nível da autenticação SSO.
+**Por que isso importa:** Para o Banco Meridian que já usa Microsoft 365 e Entra ID, o Defender for Cloud Apps não é um produto adicional a ser implantado — está incluído no M365 E5. A integração com Microsoft Purview DLP e as labels de sensibilidade significa que arquivos já classificados como "Confidencial" são automaticamente protegidos em todos os apps Microsoft, eliminando a necessidade de reconfigurar políticas em múltiplas ferramentas.
+
 ```
 CASB nativo do ecossistema Microsoft.
 Pontos fortes:
@@ -116,6 +125,9 @@ Limitação:
 ## 2. SSE — Security Service Edge
 
 ### 2.1 A Morte da VPN Tradicional
+
+**O que este diagrama demonstra:** A comparação arquitetural entre o modelo VPN tradicional (acesso à rede inteira, backhauling obrigatório, sem verificação contínua de dispositivo) e o modelo SSE/ZTNA (acesso à aplicação específica, tráfego direto, verificação contínua de identidade e contexto).
+**Por que isso importa:** No Banco Meridian, cada colaborador remoto com VPN tem acesso lateral a toda a rede corporativa após autenticação — se comprometido via phishing, o atacante pode mover-se para qualquer sistema. Com ZTNA, o colaborador comprometido tem acesso apenas às aplicações que foram explicitamente autorizadas para ele naquele momento, naquele dispositivo, naquele contexto — reduzindo dramaticamente o raio de explosão de qualquer comprometimento.
 
 ```
 POR QUE VPN TRADICIONAL NÃO FUNCIONA EM CLOUD
@@ -144,29 +156,49 @@ MODELO SSE/ZTNA:
 
 ### 2.2 Principais Soluções SSE
 
-**Zscaler Private Access (ZPA):**
+**O que esta solução faz:** Zscaler Private Access (ZPA) implementa ZTNA usando App Connectors implantados no datacenter/cloud que estabelecem conexões de saída para o Zscaler Exchange. Quando um usuário autenticado solicita acesso a uma aplicação, o ZPA Broker cria um túnel direto entre o dispositivo e o App Connector — a aplicação nunca precisa ter IP público.
+**Por que isso importa:** Para o Banco Meridian migrar suas aplicações internas de VPN para ZTNA, o ZPA elimina a necessidade de abrir firewalls de entrada — o App Connector faz conexão de saída apenas. Isso reduz significativamente a superfície de ataque: aplicações não têm IPs expostos na internet, e mesmo que um atacante obtenha as credenciais VPN de um colaborador, não conseguirá escanear a rede interna porque não existe mais "rede" para escanear — apenas aplicações específicas acessíveis por política.
+
+```
+Zscaler Private Access (ZPA):
 - App Connectors no datacenter/cloud conectam ao Zscaler Exchange (broker)
 - Usuário com Zscaler Client → autentica no IdP → ZPA Broker verifica política → estabelece túnel para App Connector
 - App nunca precisa de IP público — firewall inbound fechado
 - Zero trust: política granular por aplicação, usuário, grupo, dispositivo, hora
+```
 
-**Netskope SASE:**
+**O que esta solução faz:** Netskope SASE converge CASB, SSE e SD-WAN em uma única plataforma, conectando branch offices, usuários remotos e workloads cloud ao mesmo broker Netskope com política unificada de segurança e acesso.
+**Por que isso importa:** Para o Banco Meridian com agências em múltiplas cidades, o SASE elimina a necessidade de múltiplos produtos separados (proxy, VPN, DLP, firewall de borda) — substituindo toda essa stack por uma plataforma gerenciada onde a mesma política se aplica para o colaborador em casa, na agência ou no escritório central. A simplificação operacional é significativa: um único console de gestão vs cinco produtos independentes.
+
+```
+Netskope SASE:
 - Convergência de CASB + SSE em uma plataforma + SD-WAN
 - SASE = Secure Access Service Edge (Gartner 2019)
 - Branch offices, remote users e cloud conectados ao mesmo broker Netskope
+```
 
-**Prisma Access (Palo Alto Networks):**
+**O que esta solução faz:** Prisma Access da Palo Alto Networks é a versão cloud da infraestrutura GlobalProtect, substituindo concentradores VPN on-premises por um serviço global. Mantém compatibilidade com as regras de firewall Palo Alto existentes e conecta branch offices via túneis IPSec.
+**Por que isso importa:** Para organizações que já investiram em Palo Alto NGFWs on-premises, o Prisma Access permite migrar para cloud-delivered SSE sem descartar o conhecimento existente em regras de firewall e políticas de segurança — é uma evolução, não uma substituição. O Banco Meridian pode manter suas políticas de segurança de rede atuais enquanto as move para a nuvem.
+
+```
+Prisma Access (Palo Alto Networks):
 - GlobalProtect cloud infrastructure
 - Substitui VPN GlobalProtect on-premises com versão cloud
 - Integração com Palo Alto NGFW rules
 - IPSec tunnels para branch offices
+```
 
-**Cloudflare One:**
+**O que esta solução faz:** Cloudflare One integra ZTNA (Cloudflare Access), gateway web (Cloudflare Gateway), CASB e Magic WAN (SD-WAN) na infraestrutura global da Cloudflare. O tráfego de usuários é roteado pelo backbone da Cloudflare antes de chegar às aplicações, com políticas de acesso aplicadas na borda da rede.
+**Por que isso importa:** Para o Banco Meridian avaliar custo-benefício, o Cloudflare One oferece funcionalidades SSE comparáveis aos líderes com modelo de preço mais acessível. A infraestrutura global da Cloudflare (presença no Brasil) resolve preocupações de latência e, para startups fintech ou projetos piloto, permite validar o conceito de ZTNA antes de um investimento maior em Zscaler ou Netskope.
+
+```
+Cloudflare One:
 - ZTNA + CASB + SWG + Magic WAN (SD-WAN)
 - Zero trust: Cloudflare Access (ZTNA)
 - Gateway: web filtering + DLP
 - Menor custo entre os grandes players
 - Muito adotado por startups e mid-market
+```
 
 ---
 
@@ -175,6 +207,9 @@ MODELO SSE/ZTNA:
 ### 3.1 O Novo Campo de DSPM
 
 DSPM é um campo emergente (Gartner Magic Quadrant inaugural em 2023) que resolve o problema fundamental da segurança de dados em cloud: você não pode proteger dados que não sabe que tem.
+
+**O que este diagrama demonstra:** O contraste entre o cenário sem DSPM — onde dados de clientes existem em repositórios cloud desconhecidos pela equipe de segurança — e o cenário com DSPM — onde todos os data stores são descobertos, classificados e avaliados quanto ao risco de forma automática e contínua.
+**Por que isso importa:** Para o Banco Meridian, a LGPD (Art. 46–48) e o BACEN 4.893 exigem controles sobre dados de clientes. A questão prática é: como implementar controles sobre dados que você não sabe que existem? O DSPM resolve esse problema de bootstrap — antes de qualquer controle, você precisa de visibilidade. Sem DSPM, a resposta a "onde estão os CPFs dos seus clientes?" é honestamente "não sei ao certo", o que já configura não-conformidade com a LGPD.
 
 ```
 O PROBLEMA QUE DSPM RESOLVE
@@ -212,36 +247,59 @@ COM DSPM:
 
 ### 3.3 Soluções DSPM
 
-**Wiz DSPM:**
+**O que esta ferramenta faz:** Wiz DSPM é um módulo nativo da plataforma Wiz que escaneia automaticamente todos os data stores em contas AWS/Azure/GCP (S3, RDS, Redshift, BigQuery, Blob Storage, etc.) usando as APIs cloud sem instalar agentes. Classifica os dados encontrados por ML em categorias (PII, PCI, PHI) e correlaciona com o contexto de segurança do CNAPP — se um bucket tem CPFs e também está público, isso é uma toxic combination de dados.
+**Por que isso importa:** Para o Banco Meridian, a correlação do Wiz DSPM com o restante do Security Graph é o diferencial crítico: não apenas "este bucket tem CPFs" mas "este bucket tem CPFs, está publicamente acessível, a role IAM que acessa tem mais permissões do que precisa, e existe um caminho de ataque que passa por uma EC2 comprometida". Essa correlação transforma o DSPM de uma ferramenta de inventário para uma ferramenta de priorização de risco real.
+
+```
+Wiz DSPM:
 - Nativo ao Wiz CNAPP (não requer produto separado no tier superior)
 - Descoberta automática de todos os data stores na conta AWS/Azure/GCP
 - Classificação por ML (não apenas regex)
 - Risco contextual: dados sensíveis + misconfiguration + acesso excessivo = toxic combination de dados
 - Correção em-linha: botão "Fix" diretamente na interface Wiz
+```
 
-**Varonis:**
+**O que esta ferramenta faz:** Varonis é uma plataforma de Data Access Governance que rastreia quem acessa quais dados em toda a infraestrutura — cloud, file shares, Microsoft 365 e Active Directory. Usa behavioral analytics para detectar acessos anômalos e insider threats, como um funcionário acessando volumes incomuns de dados sensíveis fora do horário de trabalho.
+**Por que isso importa:** Para o Banco Meridian, a detecção de insider threat é uma preocupação regulatória específica — o BACEN 4.893 exige controles para acesso não autorizado a dados por colaboradores. O Varonis cobre o ponto cego do DSPM tradicional: não apenas "os dados estão bem configurados" mas "quem está acessando esses dados, e o padrão de acesso é normal?". Isso é especialmente relevante para dados de clientes VIP ou operações de tesouraria onde o insider threat tem maior impacto financeiro.
+
+```
+Varonis:
 - Foco em data access governance (quem acessa o quê nos dados)
 - Cobertura ampla: cloud + file shares + M365 + Active Directory
 - Behavior analytics: detecta acesso anormal a dados (insider threat)
 - Data classification engine maduro (empresa de 20 anos em DLP/DG)
+```
 
-**Dig Security (adquirida pela Palo Alto):**
+**O que esta ferramenta faz:** Dig Security (adquirida pela Palo Alto Networks) é uma plataforma DSPM cloud-native focada em data lineage (rastreamento da origem e movimentação dos dados) e compliance automático. Identifica de onde os dados vieram, por quais pipelines passaram e onde estão agora.
+**Por que isso importa:** Para o Banco Meridian responder a uma notificação de vazamento em conformidade com a LGPD (prazo de 72 horas para comunicar à ANPD), é necessário saber não apenas que dados vazaram, mas também quais titulares foram afetados. O data lineage do Dig Security permite rastrear que "os dados no bucket S3 comprometido vieram do sistema core banking via ETL de março/2024 e contêm CPFs de 45.280 clientes da carteira de crédito pessoal" — informação essencial para a notificação regulatória.
+
+```
+Dig Security (adquirida pela Palo Alto):
 - Cloud-native DSPM from-scratch
 - Agentless scan via cloud APIs
 - Data lineage e provenance
 - Foco em compliance automático (LGPD, GDPR, HIPAA)
+```
 
-**Cyera:**
+**O que esta ferramenta faz:** Cyera é uma plataforma DSPM API-only (agentless) especializada em classificação automática de dados com suporte nativo ao contexto brasileiro (CPF, CNPJ, dados bancários). Realiza shadow data discovery — encontra dados que a organização não sabia que tinha, incluindo dados em ambientes de teste ou backup que frequentemente escapam dos controles formais.
+**Por que isso importa:** Para o Banco Meridian, o shadow data discovery é especialmente crítico em ambientes de desenvolvimento onde dumps de produção são frequentemente usados sem anonimização adequada. A Cyera identificaria que o banco de dados de desenvolvimento `bancomeridian-dev` contém dados reais de clientes (CPFs, números de conta), o que viola a LGPD e cria risco de vazamento por um ambiente com controles mais fracos que produção.
+
+```
+Cyera:
 - Automatic data classification em português (suporte a LGPD)
 - API-only (agentless)
 - Shadow data discovery: dados que a organização não sabia que tinha
 - Privacidade por design: foco em campos específicos (CPF, CNPJ, dados bancários)
+```
 
 ---
 
 ## 4. Comparativo CNAPP Vendors 2025
 
 ### 4.1 Tabela Técnica e Econômica Completa
+
+**O que esta tabela demonstra:** Uma comparação objetiva entre as cinco principais plataformas CNAPP do mercado em dimensões técnicas (cobertura de CSPM, CWPP, CIEM, DSPM, IaC, runtime, containers, multi-cloud, attack path) e comerciais (preço, modelo de licenciamento, complexidade, tempo de implantação, presença no Brasil).
+**Por que isso importa:** Para o CISO do Banco Meridian justificar um investimento de USD 80–150k/ano em uma plataforma CNAPP, é necessário um comparativo objetivo e documentado. Esta tabela serve como base para uma RFP formal, garantindo que a decisão é baseada em critérios técnicos mensuráveis e não em apresentações de vendedores — reduzindo o risco de "vendor lock-in" ou de escolher um produto inadequado para o perfil específico da organização.
 
 | Dimensão | Wiz | Prisma Cloud (Palo Alto) | Orca Security | Defender for Cloud (Microsoft) | Lacework |
 |:---------|:---:|:------------------------:|:-------------:|:-------------------------------:|:--------:|
@@ -360,6 +418,9 @@ Pontos fracos:
 
 ### 5.1 RFP Mínima para CNAPP
 
+**O que este documento demonstra:** Uma RFP (Request for Proposal) estruturada em 5 seções — escopo/contexto, requisitos técnicos mandatórios (knock-out criteria), requisitos desejáveis, requisitos de negócio e critérios de avaliação ponderados.
+**Por que isso importa:** Para o CISO do Banco Meridian conduzir um processo de seleção de CNAPP rigoroso e auditável, a RFP é o documento que norteia todas as avaliações. Os knock-out criteria eliminam vendors que não atendem requisitos inegociáveis (ex: dados no Brasil para CMN 4.658) antes mesmo do PoC, economizando semanas de avaliação. A ponderação explícita dos critérios (60% técnico, 40% negócio) remove subjetividade e permite comparação objetiva entre propostas de diferentes vendors.
+
 ```
 RFP MÍNIMA — PLATAFORMA CNAPP
 BANCO MERIDIAN — 2025
@@ -414,6 +475,9 @@ SEÇÃO 5: CRITÉRIOS DE AVALIAÇÃO
 
 ### 5.2 Critérios de PoC
 
+**O que este plano demonstra:** Um PoC (Proof of Concept) de 30 dias estruturado em 4 semanas com objetivos específicos, KPIs mensuráveis e critérios de aprovação/reprovação binários para cada dimensão avaliada.
+**Por que isso importa:** Sem um plano de PoC estruturado, avaliações de CNAPP frequentemente resultam em decisões baseadas na qualidade da apresentação de vendas, não nas capacidades reais do produto. Para o Banco Meridian, os KPIs objetivos — especialmente "detecta >80% dos findings do Prowler" e "dados em data center Brasil confirmado" — criam critérios inegociáveis que protegem a organização de escolher um produto que falha em requisitos fundamentais descobertos apenas após a compra.
+
 ```
 PLANO DE POC — CNAPP BANCO MERIDIAN (30 dias)
 
@@ -450,6 +514,9 @@ CRITÉRIOS DE APROVAÇÃO:
 ```
 
 ### 5.3 Cálculo de TCO (3 anos)
+
+**O que este modelo demonstra:** Um cálculo estruturado de TCO (Total Cost of Ownership) de 3 anos comparando uma plataforma CNAPP comercial (Wiz, estimativa) contra um stack open-source equivalente (Prowler + Trivy + Falco + OPA + Vault) para 500 workloads — incluindo custos de licença, implementação, treinamento e operação (FTE).
+**Por que isso importa:** Decisões de compra de software de segurança frequentemente comparam apenas o custo de licença, ignorando o custo operacional. Para o Banco Meridian, o stack open-source parece mais barato em licença (gratuito) mas requer pelo menos 0,5 FTE de engenheiro sênior dedicado — um custo que frequentemente não aparece no orçamento de TI mas é real. A comparação honesta de TCO mostra que a diferença de USD 106.000 em 3 anos pode ser justificada pelas capacidades únicas do CNAPP (attack path analysis, correlação, relatórios automáticos) que reduzem o MTTD e economizam tempo da equipe.
 
 ```
 MODELO TCO — BANCO MERIDIAN (500 workloads)
@@ -517,41 +584,54 @@ Justificativa: A diferença arquitetural é fundamental. Wiz usa apenas APIs clo
 ---
 
 ### Questão 3
-Por que o Microsoft Defender for Cloud é preferível para um banco que opera 90% na Azure com Microsoft 365?
+Por que DSPM é considerado um requisito crescente para conformidade com LGPD no Brasil?
 
-**a)** Porque é mais barato em todos os casos  
-**b)** Porque a integração nativa com Entra ID, Sentinel, M365 e o fato de ter dados no Brasil (Azure Brazil South) elimina os problemas de CMN 4.658 e reduz drasticamente a complexidade operacional  
-**c)** Porque tem mais checks de CIS Benchmark que qualquer outro CNAPP  
-**d)** Porque é o único CNAPP com suporte a BACEN 4.893  
+**a)** LGPD exige explicitamente o uso de ferramentas DSPM certificadas  
+**b)** LGPD exige que as organizações saibam onde estão seus dados pessoais, implementem controles adequados e possam notificar sobre vazamentos — impossível sem saber que os dados existem em determinados repositórios cloud  
+**c)** DSPM é necessário apenas para empresas acima de 100 funcionários  
+**d)** LGPD proíbe armazenamento de dados fora do Brasil, e DSPM verifica a localização dos dados  
 
 **Gabarito: b)**  
-Justificativa: Para uma organização Microsoft-first, o Defender for Cloud tem integração incomparável: identidades do Entra ID aparecem diretamente nos findings, alertas alimentam o Sentinel automaticamente, postura do M365 é visível no mesmo console. E fundamentalmente para bancos brasileiros: os dados ficam na Azure Brazil South (garantindo CMN 4.658 sem necessidade de aprovação especial do BACEN).
+Justificativa: A LGPD (Art. 46–48) exige "medidas técnicas e administrativas aptas a proteger os dados pessoais". A ANPD pode questionar: "Você sabe onde estão todos os dados pessoais dos seus titulares?" Sem DSPM, a resposta honesta é "não completamente". Um banco com dados espalhados em 17 buckets S3 que não sabe que existem não consegue implementar controles adequados nem notificar sobre vazamentos de dados que não sabia que tinha.
 
 ---
 
 ### Questão 4
-O que é o SideScanning™ da Orca Security e qual é sua principal limitação?
+No contexto da CMN 4.658/2018 (regulação BACEN para cloud em IFs), qual vendor CNAPP tem a menor fricção para conformidade por parte de bancos brasileiros?
 
-**a)** Um agente leve que roda em cada container para análise de rede — limitação: overhead de CPU  
-**b)** Uma tecnologia que cria snapshots efêmeros dos volumes de disco para análise profunda sem agente — limitação: análise é estática (snapshot), sem proteção de runtime em tempo real  
-**c)** Uma API que intercepta chamadas de sistema no kernel — limitação: requer modificação do kernel  
-**d)** Um scanner de rede que analisa tráfego de saída — limitação: não vê dados em repouso  
+**a)** Wiz — por ser o líder de mercado com mais checks  
+**b)** Microsoft Defender for Cloud — por ter dados processados nativamente na Azure Brazil South, eliminando a necessidade de aprovação especial do BACEN  
+**c)** Orca Security — por ser o mais barato  
+**d)** Prisma Cloud — por ter mais frameworks de compliance  
 
 **Gabarito: b)**  
-Justificativa: SideScanning™ cria snapshots efêmeros dos volumes EBS/discos, os monta em ambiente isolado da Orca, analisa o filesystem completo (pacotes, configs, secrets), e depois deleta o snapshot. Vantagem: profundidade sem agente. Limitação crítica: é uma foto, não um filme. Não detecta comportamentos anômalos em runtime — apenas o estado da imagem em um momento específico.
+Justificativa: A CMN 4.658 Art. 16 restringe processamento de dados de clientes fora do Brasil sem aprovação prévia do BACEN. O Microsoft Defender for Cloud processa dados na Azure Brazil South (sa-east-1 equivalente da Microsoft). Wiz e Orca são SaaS e podem processar dados em regiões sem data center no Brasil, o que cria fricção regulatória para bancos brasileiros.
 
 ---
 
 ### Questão 5
-No cálculo de TCO de 3 anos para 500 workloads, qual fator torna o CNAPP comercial frequentemente justificável economicamente, mesmo sendo mais caro em custo de licença?
+Um banco brasileiro com 80% de workloads na Azure está escolhendo entre Wiz e Microsoft Defender for Cloud. Qual critério é o mais relevante para essa decisão específica?
 
-**a)** Licenças CNAPP incluem treinamento gratuito ilimitado  
-**b)** O custo oculto do stack open-source — principalmente o FTE qualificado dedicado à manutenção e integração, que pode superar o custo da licença comercial — além da falta de correlação entre ferramentas que aumenta o tempo de detecção e resposta  
-**c)** CNAPP comercial elimina completamente a necessidade de analistas de segurança  
-**d)** CNAPP comercial inclui seguro de cyber liability  
+**a)** Número total de checks de CIS Benchmark  
+**b)** A combinação de localização de dados (CMN 4.658), integração nativa com Microsoft Sentinel e Entra ID (redução de complexidade), e custo (Foundational CSPM gratuito para Azure) que favorece o Defender for Cloud para esse perfil  
+**c)** A popularidade global do vendor  
+**d)** Qual vendor tem o maior número de clientes no Brasil  
 
 **Gabarito: b)**  
-Justificativa: O stack open-source não é "gratuito" — requer 0,5–1 FTE de engenheiro sênior dedicado à manutenção, integração, atualização e operação. A horas de engenheiro sênior de segurança são caras. Além disso, a falta de correlação entre ferramentas open-source aumenta o MTTD (Mean Time to Detect) e o MTTR (Mean Time to Respond) — o custo de um incidente não detectado a tempo pode superar anos de licença de CNAPP comercial.
+Justificativa: Para 80% Azure, o Defender for Cloud tem vantagens estruturais sobre o Wiz: (1) conformidade CMN 4.658 sem fricção regulatória; (2) integração nativa Sentinel/Entra elimina conectores externos; (3) Foundational CSPM gratuito para Azure reduz o TCO drasticamente. O Wiz tem vantagens em correlação e DSPM, mas para o perfil descrito o Defender tem ROI mais claro.
+
+---
+
+### Questão 6 (Extra)
+No PoC de CNAPP do Banco Meridian, qual métrica define se o vendor passa na semana de CSPM?
+
+**a)** O vendor encontra todos os resources do sandbox em menos de 1 hora  
+**b)** O vendor detecta mais de 80% dos findings identificados pelo Prowler como benchmark na conta sandbox  
+**c)** O vendor gera um relatório PDF automático  
+**d)** O vendor tem a interface mais bonita entre os testados  
+
+**Gabarito: b)**  
+Justificativa: O critério técnico objetivo para CSPM é: o vendor deve detectar pelo menos 80% dos findings que o Prowler (ferramenta gratuita e de referência) encontra na mesma conta. Isso garante que a plataforma comercial tem cobertura técnica mínima e não tem um baseline de detecção inferior ao que você consegue de graça.
 
 ---
 

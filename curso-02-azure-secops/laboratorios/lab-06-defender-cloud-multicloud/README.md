@@ -94,6 +94,10 @@ Ao final deste laboratório:
 
 ### Passo 1: Habilitar Defender Plans
 
+**O que este passo faz:** O Microsoft Defender for Cloud opera em dois modos: gratuito (Free), que oferece inventário de recursos e recomendações básicas de configuração sem custo; e pago (Standard/Defender Plans), que adiciona proteção ativa, detecção de ameaças em tempo real, análise comportamental e alertas de segurança específicos por tipo de recurso. Habilitar os planos neste passo é o que transforma o Defender for Cloud de uma ferramenta de auditoria passiva em um sistema ativo de proteção. O Plano P2 para Servers, por exemplo, adiciona: avaliação de vulnerabilidades integrada (sem agente externo), Just-In-Time VM Access, análise de comportamento de processos via MDE integrado, e varredura sem agente para secrets expostos em discos. Para o Banco Meridian, que tem VMs rodando workloads financeiros e bancos SQL com dados de contratos de crédito, operá-las sem esses planos é equivalente a ter câmeras de segurança desligadas em uma agência bancária.
+
+**Por que agora:** Os planos devem ser habilitados antes de qualquer análise de compliance ou remediação, porque sem eles o Defender for Cloud não tem visibilidade suficiente para gerar as recomendações completas. Um finding de "SQL Server sem auditoria" só aparece no painel se o Defender for SQL estiver ativo.
+
 **Portal Azure → Defender for Cloud → Environment settings → [Subscription] → Defender plans**
 
 Habilitar os seguintes planos:
@@ -133,6 +137,10 @@ Get-AzSecurityPricing | Select-Object Name, PricingTier |
 
 ### Passo 2: Verificar Secure Score Inicial
 
+**O que este passo faz:** O Secure Score é o indicador quantitativo principal da postura de segurança de uma organização no Defender for Cloud. Funciona como um termômetro de compliance: cada controle de segurança avaliado contribui com um número de pontos, e o score final é a porcentagem de pontos obtidos sobre o total possível. Para o Banco Meridian, o score inicial provavelmente será baixo (entre 30% e 55%) porque o ambiente de lab tem configurações padrão que frequentemente violam boas práticas — VMs com RDP público, storage accounts sem criptografia, SQL sem auditoria. Documentar este valor agora é fundamental: ao final do lab, depois das remediações, o delta do score vai demonstrar o impacto real das ações executadas. Este dado — "ambiente passou de 42% para 68% de secure score" — é exatamente o tipo de evidência que o CISO usa para comunicar resultados ao board e que os auditores do BACEN usam para validar maturidade de controles.
+
+**Por que agora:** O score inicial deve ser registrado ANTES de qualquer remediação, para que a comparação final seja válida. Um score capturado após qualquer alteração não reflete o estado real do ambiente no momento do início do lab.
+
 **Defender for Cloud → Security posture**
 
 1. Anotar o Secure Score atual: ____%
@@ -150,11 +158,17 @@ SecurityResources
 | summarize AvgScore = avg(Score), TotalAssessments = count()
 ```
 
+**O que você deve ver:** O score inicial aparece como um percentual no painel circular do Security posture. O número de recursos avaliados indica quantos assets estão sob análise. Controles com seta vermelha para baixo são os que têm maior impacto potencial na melhoria do score — priorizar esses na remediação.
+
 **Anote**: Score inicial = ____%. Este será o ponto de partida para medir a melhoria.
 
 ---
 
 ### Passo 3: Onboardar Conta AWS
+
+**O que este passo faz:** O Banco Meridian usa Azure como cloud primária, mas — como é comum em empresas financeiras de tier 2 — tem workloads também na AWS: o sistema de backup de documentos de crédito usa S3, e uma PoC de analytics usa instâncias EC2 na região us-east-1. Sem visibilidade multicloud unificada, os analistas do SOC precisariam alternar entre o portal Azure e o console AWS para ter uma visão completa da postura de segurança — criando silos de informação e aumentando o risco de configurações inseguras passarem despercebidas. Este passo conecta a conta AWS ao Defender for Cloud usando uma role IAM criada via CloudFormation stack, permitindo que o Defender avalie configurações de segurança dos serviços AWS (S3 bucket policies, IAM permissões, Security Groups, CloudTrail) contra benchmarks como CIS AWS Foundations e AWS Foundational Security Best Practices. A conexão é feita via delegação segura de acesso (trust policy) — o Defender não armazena credenciais AWS, apenas assume a role para leitura periódica de configurações. O plano CSPM é o mais relevante para este cenário: ele avalia e pontua a postura de segurança dos recursos AWS, gerando recomendações que aparecem no mesmo painel dos recursos Azure.
+
+**Por que agora:** A conexão multicloud deve ser feita depois dos planos estarem habilitados (Passo 1), porque é o plano CSPM que habilita o engine de avaliação de conformidade que analisará os recursos AWS conectados. Conectar antes de habilitar o CSPM resultaria em uma conta AWS visível no inventário mas sem recomendações de segurança.
 
 **Defender for Cloud → Environment settings → Add environment → Amazon Web Services**
 
@@ -190,6 +204,10 @@ Get-AzSecurityConnector -ResourceGroupName "rg-meridian-secops" |
 
 ### Passo 4: Habilitar Standard BACEN 4.893
 
+**O que este passo faz:** O Defender for Cloud suporta múltiplos frameworks regulatórios como standards de compliance que podem ser habilitados e avaliados automaticamente. Ao habilitar o standard "Brazilian Financial Institutions - BACEN Resolution 4893", o Defender passa a verificar automaticamente se os recursos Azure do Banco Meridian atendem aos controles técnicos exigidos pela resolução do Banco Central. Cada artigo da resolução é mapeado para um ou mais controles de configuração verificáveis: MFA obrigatório para administradores (Art. 5° II), criptografia de dados em repouso (Art. 5° III), retenção de logs por 5 anos (Art. 19), e assim por diante. O resultado é um dashboard de conformidade que mostra, para cada artigo do BACEN, quantos recursos estão conformes e quantos têm gaps — precisamente o tipo de relatório que um auditor do Banco Central solicitaria durante uma inspeção. Ter este standard habilitado transforma um exercício técnico de configuração em evidência documentada de conformidade regulatória.
+
+**Por que agora:** Os standards de compliance devem ser habilitados depois do Secure Score inicial (Passo 2), para que o score inclua os controles dos standards quando for comparado no Passo 10.
+
 **Defender for Cloud → Regulatory compliance → Manage compliance policies**
 
 1. Selecionar a Subscription: Banco-Meridian-Sandbox
@@ -212,6 +230,10 @@ Get-AzSecurityConnector -ResourceGroupName "rg-meridian-secops" |
 
 ### Passo 5: Habilitar Standard PCI DSS 4.0
 
+**O que este passo faz:** O PCI DSS (Payment Card Industry Data Security Standard) versão 4.0 é o framework de segurança obrigatório para qualquer organização que processa, armazena ou transmite dados de cartões de pagamento. O Banco Meridian emite cartões Visa e Mastercard para seus clientes de varejo — portanto está sujeito ao PCI DSS. Habilitar este standard adiciona verificações automáticas focadas em proteção de dados de cartão: segmentação de rede (requerimento 1), proteção de dados em repouso com criptografia (requerimento 3), controle de acesso mínimo (requerimento 7), e monitoramento e logging contínuos (requerimento 10-11). A combinação de BACEN 4.893 + PCI DSS 4.0 no mesmo painel do Defender for Cloud permite que o CISO e o Compliance Officer visualizem simultaneamente a conformidade com os dois frameworks mais relevantes para o banco — sem precisar de ferramentas externas de GRC. Remediações prioritárias são aquelas que melhoram ambos os scores simultaneamente: um controle como "Storage encryption at rest" atende tanto ao BACEN (proteção de dados) quanto ao PCI DSS (proteção de dados de cartão).
+
+**Por que agora:** Habilitar o PCI DSS junto ao BACEN, na mesma sessão, permite identificar sobreposições entre os dois frameworks. Executar ambos em sequência antes de começar as remediações garante que o Secure Score do Passo 2 seja o baseline correto para a comparação no Passo 10.
+
 **Defender for Cloud → Regulatory compliance → Manage compliance policies**
 
 1. Localizar "PCI DSS 4.0"
@@ -228,6 +250,10 @@ Regulatory compliance dashboard deve mostrar:
 ---
 
 ### Passo 6: Analisar Top 5 Findings Críticos
+
+**O que este passo faz:** O painel de Recommendations do Defender for Cloud lista todas as configurações inseguras identificadas no ambiente, priorizadas por impacto no Secure Score e severidade. Este passo é o equivalente a uma revisão de código de segurança, mas para infraestrutura: o Defender "leu" a configuração de cada recurso Azure e apontou os problemas mais graves. Filtrar por "Critical" mostra os findings que, se explorados por um atacante, poderiam resultar em comprometimento total de um recurso (RDP público exposto para a internet é um finding crítico porque é o vetor mais simples de ataque a VMs Windows). Para o Banco Meridian, os findings críticos são exatamente o que o CISO precisa saber para priorizar o esforço de hardening: quais são os "portões abertos" que um atacante como o Grupo Lazarus-BR poderia usar para entrar na infraestrutura cloud do banco?
+
+**Por que agora:** A análise de findings vem após os standards de compliance estarem habilitados, porque com BACEN 4.893 e PCI DSS 4.0 ativos, cada finding é contextualizado não apenas por severidade técnica, mas por impacto regulatório — um finding que viola tanto o BACEN quanto o PCI tem prioridade mais alta de remediação.
 
 **Defender for Cloud → Recommendations → filtrar por Severity: Critical**
 
@@ -249,6 +275,10 @@ Para o lab, focaremos nos 3 seguintes (pré-configurados no ambiente):
 ---
 
 ### Passo 7: Remediar Finding 1 — VM com RDP Público
+
+**O que este passo faz:** O Just-In-Time (JIT) VM Access é uma funcionalidade do Defender for Cloud que transforma o acesso remoto a VMs de permanente para temporário e auditado. Sem JIT, uma VM com a porta 3389 (RDP) ou 22 (SSH) aberta no Network Security Group está permanentemente exposta à internet — qualquer atacante pode tentar brute force de credenciais 24 horas por dia. O JIT fecha essas portas por padrão no NSG e as abre somente quando um usuário autorizado solicita acesso, especificando o IP de origem e a duração máxima da sessão. Após o tempo configurado, a porta fecha automaticamente. Isso reduz a janela de ataque de 525.600 minutos por ano (porta sempre aberta) para os minutos específicos em que a porta foi deliberadamente aberta por um usuário identificado. O JIT também cria um registro de auditoria completo: quem solicitou acesso, de qual IP, quando e por quanto tempo. Para o Banco Meridian, que precisa demonstrar controle de acesso aos seus servidores cloud para o BACEN, essa evidência de auditoria é parte da documentação regulatória exigida.
+
+**Por que agora:** A remediação de JIT deve vir antes das outras remediações porque é a que reduz a superfície de ataque ativa mais rapidamente. Uma VM com RDP público está sendo varrida por bots de internet neste momento — cada minuto que permanece assim é uma janela de risco real.
 
 **Defender for Cloud → Recommendations → "Management ports of VMs should be protected with JIT"**
 
@@ -285,6 +315,10 @@ Get-AzJitNetworkAccessPolicy -ResourceGroupName "rg-meridian-secops" -VirtualMac
 ---
 
 ### Passo 8: Remediar Finding 2 — Storage Account Público
+
+**O que este passo faz:** Uma storage account Azure com acesso público habilitado significa que qualquer pessoa na internet pode listar e baixar os arquivos armazenados — sem autenticação. Para um Blob Storage comum com imagens de website isso pode ser intencional, mas para o Banco Meridian, qualquer storage com documentos de clientes, contratos, relatórios financeiros ou dados de sistemas internos exposta publicamente é uma violação grave da LGPD e da BACEN 4.893. O finding "Storage account public access should be disallowed" identifica storage accounts onde a propriedade `AllowBlobPublicAccess = true` está habilitada, mesmo que nenhum container individual esteja configurado como público. Desabilitar essa propriedade no nível da storage account age como um controle preventivo: mesmo que algum container seja erroneamente configurado como público no futuro, o acesso anônimo será bloqueado pela configuração da conta. O script PowerShell aplica a correção em todas as storage accounts do resource group, garantindo cobertura completa sem necessidade de verificar cada conta individualmente.
+
+**Por que agora:** Storage públicas são vulnerabilidades que podem ser exploradas passivamente — um scanner automático na internet pode indexar e baixar os dados sem qualquer interação com o banco. A remediação deve ser aplicada o mais rápido possível após a identificação.
 
 **Defender for Cloud → Recommendations → "Storage account public access should be disallowed"**
 
@@ -325,6 +359,10 @@ Get-AzStorageAccount -ResourceGroupName "rg-meridian-secops" |
 
 ### Passo 9: Remediar Finding 3 — SQL Database sem Auditoria
 
+**O que este passo faz:** A auditoria de banco de dados SQL registra todas as atividades executadas contra o banco: queries executadas, logins bem-sucedidos e falhos, alterações de schema, operações administrativas. Para o Banco Meridian, o SQL Database que armazena contratos de crédito (`db-contratos`) sem auditoria habilitada representa um gap de visibilidade crítico: se um funcionário ou atacante executar uma query que exfiltra dados de milhares de clientes, não haverá nenhum registro da operação. A habilitação da auditoria direcionada ao workspace Log Analytics do Sentinel tem dois benefícios: (1) os logs de auditoria SQL ficam disponíveis para queries KQL no Sentinel, permitindo detecção de anomalias como leituras em massa de tabelas de clientes; (2) os logs ficam sob a política de retenção de 5 anos configurada no Passo 3, atendendo ao BACEN 4.893. A configuração `AuditActionGroup` define quais operações são auditadas — o conjunto mínimo recomendado pelo BACEN inclui DATABASE_LOGOUT_GROUP (sessões), SUCCESSFUL_DATABASE_AUTHENTICATION_GROUP e DATABASE_OBJECT_ACCESS_GROUP (acesso a objetos).
+
+**Por que agora:** A auditoria de SQL deve ser habilitada assim que o SQL database é criado — mas no contexto do lab, é habilitada aqui como remediação de um finding do Defender. Em ambientes de produção, este controle deve fazer parte do pipeline de IaC (Infrastructure as Code) para garantir que qualquer novo banco criado já tenha auditoria habilitada por padrão.
+
 **Defender for Cloud → Recommendations → "SQL databases should have auditing enabled"**
 
 1. Ver lista de SQL databases afetados
@@ -364,7 +402,11 @@ Get-AzSqlDatabaseAudit `
 
 ### Passo 10: Verificar Melhoria do Secure Score e Exportar Relatório
 
-**Verificar melhoria**:
+**O que este passo faz:** Este é o passo de fechamento do ciclo PDCA (Plan-Do-Check-Act) do lab: após planejar as remediações (Passo 6), executá-las (Passos 7-9) e ajustar configurações, agora verificamos o resultado quantitativo e documentamos o estado para auditoria. A melhoria no Secure Score demonstra numericamente que o ambiente está mais seguro. A exportação do relatório de compliance BACEN 4.893 em PDF é o documento que o CISO do Banco Meridian entregaria a um auditor do Banco Central em uma inspeção: cada artigo da resolução aparece com status "Compliant" ou "Non-compliant", junto com a lista de recursos afetados e evidências de configuração. Ter esse relatório disponível a qualquer momento — em vez de precisar preparar manualmente planilhas de auditoria — é um dos maiores valores práticos do Defender for Cloud para bancos sob supervisão do BACEN e da CMN 4.658.
+
+**Por que agora:** O passo de verificação vem por último porque a melhoria do score só é mensurável após as remediações estarem concluídas. A query KQL de comparação usa os últimos 2 horas para garantir que apenas as configurações pós-remediação sejam refletidas.
+
+**Verificar melhoria:**
 
 ```
 Defender for Cloud → Security posture → Secure Score atual: ____%

@@ -380,6 +380,10 @@ O **Automatic Attack Disruption** é uma capacidade do Defender XDR que contém 
 
 ### 7.2 Query 1 — BEC (Business Email Compromise)
 
+O **Business Email Compromise** é o ataque de maior impacto financeiro contra bancos e instituições financeiras, segundo o FBI IC3. No cenário típico de BEC contra o Banco Meridian: o atacante envia um e-mail de phishing para um funcionário com acesso ao sistema de transferências, o funcionário clica no link e entrega as credenciais em um site falso, e o atacante usa essas credenciais para autorizar transferências fraudulentas usando a conta comprometida do funcionário. Esta query cross-domain une três fontes: `EmailUrlInfo` (MDO — registra URLs clicadas nos e-mails), `EmailEvents` (MDO — metadados do e-mail, incluindo remetente e destinatário), e `IdentityLogonEvents` (MDI/Entra ID — logins do usuário). A correlação temporal `| where LoginTime > ClickTime` é o que torna esta query poderosa: não estamos procurando logins suspeitos genéricos, mas especificamente logins que ocorreram DEPOIS de um clique em URL de phishing — o padrão exato de uma conta comprometida por BEC.
+
+O resultado desta query, se positivo, é evidência de comprometimento confirmado e deve ativar imediatamente o playbook de conta comprometida do Lab 04.
+
 ```kql
 // ═══════════════════════════════════════════════════════════════════
 // ADVANCED HUNTING: Business Email Compromise (BEC)
@@ -437,6 +441,10 @@ phishingEmails
 
 ### 7.3 Query 2 — Lateral Movement (MDI + MDE)
 
+O **movimento lateral** é a fase do ataque onde o adversário expande seu acesso de uma máquina ou conta comprometida para outros sistemas da rede interna — em direção aos ativos de alto valor (servidores de banco de dados, controladores de domínio, sistemas de transferência). Para o Banco Meridian, a rota típica de lateral movement é: endpoint de funcionário comprometido via phishing → servidor de arquivos do financeiro → servidor de banco de dados com contratos de crédito → controlador de domínio. Esta query une `IdentityLogonEvents` (MDI — registra logins de identidade, incluindo Kerberos e NTLM) com `DeviceNetworkEvents` (MDE — registra conexões de rede no nível de processo), correlacionando pelo hostname. O padrão de alerta é um usuário que logou recentemente em um host (`IdentityLogonEvents`) e esse mesmo host está fazendo conexões SMB (porta 445) para múltiplos hosts internos em sequência — padrão típico de worm de rede ou ferramenta de lateral movement como Impacket ou CrackMapExec.
+
+A presença de `DeviceNetworkEvents` nesta query é o que diferencia o Advanced Hunting XDR de uma análise de logs de identidade simples: o MDI vê a identidade, o MDE vê a rede, e juntos revelam a cadeia completa.
+
 ```kql
 // ═══════════════════════════════════════════════════════════════════
 // ADVANCED HUNTING: Lateral Movement Detection
@@ -488,6 +496,8 @@ authenticatedHosts
 ---
 
 ### 7.4 Query 3 — AiTM Phishing (MDO + Entra ID)
+
+O **AiTM (Adversary-in-the-Middle) phishing** é o vetor que o FS-ISAC identificou especificamente como ameaça ao Banco Meridian. No AiTM, o atacante opera um proxy reverso entre a vítima e o site legítimo da Microsoft: quando o funcionário acessa o link de phishing, ele está na verdade conectado ao servidor do atacante, que encaminha a comunicação para o Microsoft 365. O funcionário passa pelo MFA normalmente, a Microsoft aprova a sessão — e o atacante intercepta o cookie/token de sessão já autenticado. A partir daí, o MFA não protege mais: o atacante tem um token válido, completamente independente de senha ou MFA. Esta query detecta o padrão post-exploitation do AiTM: um login bem-sucedido na conta que historicamente usa MFA, mas neste login específico o `AuthenticationRequirement` é `singleFactorAuthentication` (a sessão foi autenticada sem MFA porque o token já era válido). Combina com eventos do MDO que indicam que um e-mail de phishing foi recebido e clicado, aumentando a confiança do alerta.
 
 ```kql
 // ═══════════════════════════════════════════════════════════════════
@@ -544,6 +554,8 @@ aitm_victims
 
 ### 7.5 Query 4 — Credential Dump via LSASS (MDE)
 
+O **dump de credenciais via LSASS** (Local Security Authority Subsystem Service) é a técnica de coleta de credenciais mais usada em ataques avançados em redes Windows. O processo LSASS mantém em memória os hashes de senhas e tickets Kerberos de todos os usuários que autenticaram na máquina — uma mina de ouro para um atacante. Ferramentas como Mimikatz, ProcDump (usada com argumento de LSASS) e ferramentas de RAT/C2 acessam a memória do LSASS para extrair essas credenciais sem precisar de nenhuma senha adicional. Para o Banco Meridian, um endpoint de TI que tem acesso a sistemas administrativos é um alvo prioritário: comprometer esse endpoint e fazer dump do LSASS pode revelar hashes de contas de administrador de domínio. Esta query monitora três tipos de eventos do MDE: processo `lsass.exe` sendo acessado por processos que não deveriam fazê-lo, criação de dump files com nome referenciando `lsass`, e execução de ferramentas conhecidas de credential dumping na linha de comando. A combinação dessas três fontes de evidência dentro do mesmo endpoint no mesmo período de tempo é um indicador de alta confiança de comprometimento.
+
 ```kql
 // ═══════════════════════════════════════════════════════════════════
 // ADVANCED HUNTING: LSASS Credential Dumping
@@ -589,6 +601,10 @@ union method1, method2
 ---
 
 ### 7.6 Query 5 — OAuth App Abuse (MDA + Entra ID)
+
+O **abuso de OAuth App** é uma técnica sofisticada de persistência que contorna completamente a autenticação baseada em usuário/senha/MFA. Após comprometer uma conta, o atacante cria ou registra um aplicativo OAuth no Entra ID e convence (ou autoriza com as credenciais roubadas) um usuário privilegiado a conceder permissões ao app. A partir desse momento, o app tem um token OAuth independente da conta do usuário — reconfigurar a senha, revogar sessões e resetar o MFA não remove o acesso do app malicioso. Permissões como `Mail.Read`, `Files.ReadWrite.All` e `User.ReadWrite.All` dão ao app acesso perpétuo às caixas de e-mail, documentos do SharePoint e gestão de usuários do banco. Esta técnica foi usada no ataque ao SolarWinds e em múltiplos ataques a instituições financeiras. Para o Banco Meridian, a query une `CloudAppEvents` (MDA — registra atividades em apps cloud) com `IdentityDirectoryEvents` (MDI/Entra — registra criação de app registrations) e filtra por permissões de alto risco, correlacionando com atividade de exfiltração posterior à autorização do app.
+
+O campo `AdditionalFields` do `CloudAppEvents` contém o JSON completo da atividade, incluindo as permissões específicas concedidas — informação crítica para determinar o impacto do comprometimento.
 
 ```kql
 // ═══════════════════════════════════════════════════════════════════

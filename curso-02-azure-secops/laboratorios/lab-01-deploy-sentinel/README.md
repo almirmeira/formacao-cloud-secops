@@ -122,6 +122,10 @@ Ao final deste laboratório, o Banco Meridian terá:
 
 ### Passo 1: Criar o Workspace Log Analytics
 
+**O que este passo faz:** O workspace Log Analytics é o repositório central de dados do Microsoft Sentinel — é onde todos os logs ingeridos ficam armazenados e onde o KQL é executado. Pense nele como o banco de dados que sustenta tudo: cada query, cada alerta, cada dashboard consome dados desse workspace. Sem ele, o Sentinel não existe. Escolher a região Brazil South é deliberado: a legislação BACEN e a LGPD exigem que dados de cidadãos e operações financeiras brasileiras sejam preferencialmente armazenados em território nacional. Um workspace em East US, por exemplo, significaria que logs de autenticação dos 2.800 funcionários do Banco Meridian trafegam para fora do Brasil.
+
+**Por que agora:** O workspace deve ser o primeiro recurso criado porque todos os demais — o próprio Sentinel, os data connectors, as tabelas de retenção — dependem de sua existência. Criar o Sentinel sem workspace é impossível.
+
 **Portal Azure → Create a resource → pesquisar "Log Analytics workspace" → Create**
 
 ```
@@ -135,9 +139,9 @@ Preencher o formulário:
 
 Clicar em **Review + Create** → **Create**
 
-**Resultado esperado**: Workspace criado em 2-3 minutos. Verificar no portal que o resource aparece em `rg-meridian-secops`.
+**O que você deve ver:** Workspace criado em 2-3 minutos. Verificar no portal que o resource aparece em `rg-meridian-secops` com Region = Brazil South. Se a região aparecer diferente, o workspace foi criado no local errado e precisará ser recriado — dados não podem ser migrados entre regiões.
 
-**Troubleshooting**:
+**O que fazer se der errado:**
 - Se Brazil South não estiver disponível: usar East US 2 (segunda opção preferida)
 - Se receber erro de quotas: contatar o instrutor para ajuste da sandbox
 
@@ -145,22 +149,26 @@ Clicar em **Review + Create** → **Create**
 
 ### Passo 2: Habilitar o Microsoft Sentinel
 
+**O que este passo faz:** Habilitar o Sentinel sobre o workspace Log Analytics é o ato de ativar a camada de SIEM/SOAR. O Sentinel não é um serviço independente — ele é uma extensão do Log Analytics que adiciona capacidades de detecção (analytics rules), investigação (incidents, entity behavior), hunting e resposta automatizada (playbooks). Internamente, o Sentinel registra um resource provider no Azure (`Microsoft.SecurityInsights`) e cria metadados de configuração dentro do workspace. Após este passo, o workspace passa a ter uma fila de incidentes, suporte a analytics rules e o Content Hub disponível.
+
+**Por que agora:** O Sentinel precisa do workspace existente antes de ser habilitado. E ele precisa estar habilitado antes de qualquer data connector ser configurado — conectar fontes de dados sem o Sentinel ativo faz os logs chegarem ao workspace, mas sem capacidade de detecção ou gestão de incidentes.
+
 1. Navegar para o workspace criado: **meridian-secops-prod**
 2. No menu lateral, localizar **Microsoft Sentinel**
 3. Clicar em **Add Microsoft Sentinel**
 4. Selecionar o workspace **meridian-secops-prod**
 5. Clicar em **Add**
 
-**Resultado esperado**: O Sentinel é habilitado em 2-3 minutos. O portal redireciona automaticamente para o Overview do Sentinel.
+**O que você deve ver:** O Sentinel é habilitado em 2-3 minutos. O portal redireciona automaticamente para o Overview do Sentinel, com painéis de incidentes, alertas e saúde dos conectores — todos zerados, pois nenhuma fonte de dados foi conectada ainda.
 
-**Verificação**:
+**Verificação:**
 ```powershell
 # PowerShell: verificar que o Sentinel está habilitado
 Get-AzSentinelWorkspace -ResourceGroupName "rg-meridian-secops" -WorkspaceName "meridian-secops-prod"
 # Deve retornar o objeto com o workspace ID
 ```
 
-**Troubleshooting**:
+**O que fazer se der errado:**
 - Erro "already exists": o Sentinel já pode estar habilitado — verificar navegando diretamente
 - Erro de permissão: você precisa de pelo menos Contributor na subscription
 
@@ -168,9 +176,13 @@ Get-AzSentinelWorkspace -ResourceGroupName "rg-meridian-secops" -WorkspaceName "
 
 ### Passo 3: Configurar Retenção por Tabela
 
+**O que este passo faz:** Por padrão, o Log Analytics retém dados por 30 dias no armazenamento interativo (pesquisável via KQL) e depois os descarta. Para o Banco Meridian, isso é inadequado sob dois aspectos regulatórios críticos: (1) a Resolução BACEN 4.893, art. 19, exige que logs de acesso a sistemas de informação financeira sejam mantidos por no mínimo 5 anos; (2) a CMN 4.658 exige rastreabilidade de acessos. Este passo configura cada tabela crítica para retenção de 1.825 dias (5 anos), sendo 90 dias em armazenamento interativo de baixo custo (busca instantânea por KQL) e o restante em armazenamento de arquivo (recuperável em minutos quando necessário para auditorias). Sem esta configuração, um auditor do BACEN que pedir logs de um incidente ocorrido há 18 meses receberá uma resposta de "dados não disponíveis" — o que configura descumprimento regulatório.
+
+**Por que agora:** A retenção deve ser configurada antes de qualquer dado começar a chegar. O Sentinel aplica a política de retenção a dados novos, não retroativamente a dados já armazenados. Se você configurar depois de 30 dias de operação, os primeiros 30 dias de logs podem já ter sido descartados.
+
 **Portal Azure → meridian-secops-prod → Tables**
 
-Configurar as seguintes tabelas para retenção estendida (BACEN 4.893):
+Configurar as seguintes tabelas para retenção estendida (BACEN 4.893 e CMN 4.658):
 
 ```
 Para cada tabela abaixo, clicar na tabela → Edit → ajustar valores:
@@ -203,14 +215,19 @@ $ws = Get-AzOperationalInsightsWorkspace -ResourceGroupName "rg-meridian-secops"
 Write-Output "Workspace retention: $($ws.RetentionInDays) days"
 ```
 
-**Resultado esperado**: Cada tabela mostra Interactive: 90d, Total: 1825d (5 anos).
+**O que você deve ver:** Cada tabela editada exibe Interactive: 90d, Total: 1825d (5 anos). O custo de armazenamento de arquivo é significativamente menor que o de armazenamento interativo — aproximadamente 1/10 do preço. Isso torna a retenção de 5 anos economicamente viável mesmo para bancos de médio porte como o Meridian.
 
-**Troubleshooting**:
+**O que fazer se der errado:**
 - Tabelas aparecem somente após a primeira ingestão de dados — algumas podem não estar disponíveis ainda. Configure as que estiverem disponíveis e retorne após a ingestão para as demais.
+- Se o campo "Total retention period" não aparecer, a subscription pode não ter a feature de archive habilitada — verificar com o instrutor.
 
 ---
 
 ### Passo 4: Conectar Microsoft Entra ID
+
+**O que este passo faz:** O conector Microsoft Entra ID é o mais crítico do ambiente do Banco Meridian — é ele que alimenta o Sentinel com os logs de autenticação de todos os 2.800 funcionários. Sem este conector, ataques de credential stuffing, password spray, AiTM phishing e impossible travel são completamente invisíveis. Ao habilitar os quatro tipos de log (Sign-in interativos, Audit, não-interativos e de Service Principal), o Sentinel passa a receber: cada tentativa de login (bem-sucedida ou falha), com IP de origem, país, dispositivo, aplicativo acessado e código de resultado; cada alteração de configuração no Entra ID (criação de usuário, adição a grupo, reset de MFA); e cada autenticação de aplicação ou serviço. Esse volume de telemetria é a base sobre a qual todas as analytics rules de identidade serão construídas nos módulos seguintes.
+
+**Por que agora:** O conector de identidade deve ser configurado antes das analytics rules, porque as rules consultam tabelas como `SigninLogs` e `AuditLogs` que só existem após a conexão. Além disso, o Sentinel começa a receber dados históricos desde o momento da conexão — quanto antes conectar, mais histórico estará disponível para as regras de detecção baseadas em baseline (como impossible travel e detecção de anomalias).
 
 **Sentinel → Data connectors → Pesquisar "Microsoft Entra ID" → Open connector page**
 
@@ -222,9 +239,9 @@ Write-Output "Workspace retention: $($ws.RetentionInDays) days"
    - ✓ Service Principal Sign-In Logs
 3. Clicar em **Apply Changes**
 
-**Resultado esperado**: Status do conector muda para "Connected" em até 15 minutos.
+**O que você deve ver:** Status do conector muda para "Connected" em até 15 minutos. A tabela `SigninLogs` começa a aparecer no Log Analytics com eventos reais de autenticação do tenant.
 
-**Verificação após 15 minutos**:
+**Verificação após 15 minutos:**
 ```kql
 SigninLogs
 | where TimeGenerated > ago(30m)
@@ -232,17 +249,21 @@ SigninLogs
 // Deve retornar pelo menos 1 registro
 ```
 
-**Troubleshooting**:
+**O que fazer se der errado:**
 - Se o conector aparecer como "Disconnected" após 20 minutos: verificar se a conta tem permissão de Global Admin ou Security Admin no tenant M365
-- Se o count retornar 0: aguardar mais 15 minutos e tentar novamente. Logins precisam ocorrer para gerar logs.
+- Se o count retornar 0: aguardar mais 15 minutos e tentar novamente — logins precisam ocorrer para gerar registros em `SigninLogs`
 
 ---
 
 ### Passo 5: Conectar Microsoft Defender XDR
 
+**O que este passo faz:** O conector Microsoft Defender XDR unifica o ecossistema de detecção Microsoft dentro do Sentinel. Ele sincroniza incidentes criados no portal security.microsoft.com (Defender XDR) para o Sentinel, e opcionalmente ingere tabelas avançadas de telemetria de endpoint (DeviceEvents, DeviceProcessEvents, DeviceNetworkEvents) e e-mail (EmailEvents). Para o Banco Meridian, isso significa que um analista pode investigar um incidente que começou como phishing no Defender for Office 365, passou por comprometimento de identidade no Defender for Identity e culminou em execução de código no endpoint — tudo dentro do Sentinel, sem precisar trocar de portal. A opção "Turn off all Microsoft incident creation rules" é especialmente importante: sem ela, o Defender XDR cria incidentes na sua plataforma E o Sentinel cria incidentes separados para os mesmos eventos, resultando em duplicatas que confundem os analistas e distorcem as métricas de MTTD/MTTR.
+
+**Por que agora:** Configurar o XDR connector logo após o Entra ID garante que o Sentinel receba telemetria de endpoint e e-mail desde o início. Incidentes do Defender XDR que chegam ao Sentinel antes das analytics rules customizadas estarem prontas servem como "primeiros alertas" enquanto o SOC está sendo construído — ou seja, o banco já tem algum nível de detecção mesmo durante o período de configuração.
+
 **Sentinel → Data connectors → Pesquisar "Microsoft Defender XDR" → Open connector page**
 
-**ATENÇÃO — Configuração crítica**:
+**ATENÇÃO — Configuração crítica:**
 
 1. Na seção "Configuration":
    - ✓ **Turn off all Microsoft incident creation rules for these products** (OBRIGATÓRIO)
@@ -260,9 +281,9 @@ SigninLogs
    - ✓ IdentityLogonEvents
 4. Clicar em **Apply Changes**
 
-**Resultado esperado**: Status "Connected". Incidentes do Defender XDR começam a aparecer no Sentinel.
+**O que você deve ver:** Status "Connected". Incidentes do Defender XDR começam a aparecer no Sentinel. As tabelas avançadas como `DeviceEvents` e `EmailEvents` passam a ter dados disponíveis para queries KQL.
 
-**Verificação**:
+**Verificação:**
 ```kql
 // Verificar se incidentes chegaram
 SecurityIncident
@@ -270,13 +291,17 @@ SecurityIncident
 | count
 ```
 
-**Troubleshooting**:
-- Se não aparecerem incidentes: verificar se há alertas ativos no portal security.microsoft.com; sem alertas, sem incidentes sincronizados
-- Se aparecerem incidentes duplicados: verificar se a opção "Turn off all Microsoft incident creation rules" foi ativada
+**O que fazer se der errado:**
+- Se não aparecerem incidentes: verificar se há alertas ativos no portal security.microsoft.com — sem alertas no XDR, não há incidentes para sincronizar
+- Se aparecerem incidentes duplicados: verificar se a opção "Turn off all Microsoft incident creation rules" foi ativada — editar o conector e marcar a opção
 
 ---
 
 ### Passo 6: Conectar Azure Activity
+
+**O que este passo faz:** O conector Azure Activity captura todos os eventos do plano de controle do Azure — criação e exclusão de recursos, mudanças de configuração, atribuição de roles, modificações em Network Security Groups (NSGs), ativação de políticas. Para o Banco Meridian, isso é crítico para detectar ataques de escalada de privilégio na nuvem: um atacante que comprometeu uma conta de desenvolvedor e tenta se tornar Contributor ou Owner na subscription gerará eventos no AzureActivity. Além disso, a exclusão acidental ou maliciosa de recursos críticos (VMs, Key Vaults, workspaces) fica registrada aqui. O mecanismo de conexão via Azure Policy é diferente dos outros conectores: em vez de uma configuração direta, uma política de diagnóstico é aplicada via Azure Policy a toda a subscription, garantindo que qualquer novo resource group criado no futuro também envie logs automaticamente — sem necessidade de reconfiguração.
+
+**Por que agora:** Configurar o Azure Activity agora garante que operações de administração do ambiente de lab — incluindo a criação dos próprios recursos deste lab — sejam auditadas. É uma boa prática de segurança: o Banco Meridian deve ter visibilidade de todas as operações administrativas na sua subscription desde o primeiro dia.
 
 **Sentinel → Data connectors → Pesquisar "Azure Activity" → Open connector page**
 
@@ -288,9 +313,9 @@ SecurityIncident
 4. Na aba **Remediation**: ✓ Create a remediation task
 5. Clicar em **Review + Create → Create**
 
-**Resultado esperado**: Em 5-10 minutos, logs de operações Azure começam a chegar na tabela `AzureActivity`.
+**O que você deve ver:** Em 5-10 minutos, logs de operações Azure começam a chegar na tabela `AzureActivity`. Operações como "Create or Update Workspace" (criação do próprio workspace neste lab) devem aparecer entre os primeiros eventos.
 
-**Verificação**:
+**Verificação:**
 ```kql
 AzureActivity
 | where TimeGenerated > ago(1h)
@@ -298,12 +323,16 @@ AzureActivity
 | top 10 by count_
 ```
 
-**Troubleshooting**:
-- Se não houver dados: a remediação automática pode demorar até 30 minutos. Aguardar e tentar novamente.
+**O que fazer se der errado:**
+- Se não houver dados: a remediação automática pode demorar até 30 minutos. Aguardar e tentar novamente — a policy assignment precisa de tempo para propagar na subscription.
 
 ---
 
 ### Passo 7: Conectar Office 365
+
+**O que este passo faz:** O conector Office 365 alimenta a tabela `OfficeActivity` com eventos de atividade nos três principais workloads do Microsoft 365: Exchange Online (envio/recebimento de e-mails, regras de caixa de entrada, acesso a caixas alheias), SharePoint Online (download, upload, compartilhamento de arquivos, criação de sites) e Microsoft Teams (mensagens, criação de canais, adição de membros externos). Para o Banco Meridian, essa telemetria é fundamental para dois cenários de insider threat frequentes em instituições financeiras: a detecção de encaminhamento de e-mail para endereços externos (T1114.003), onde um funcionário ou atacante cria regras para copiar toda a correspondência corporativa; e a detecção de download em massa de arquivos do SharePoint (T1213.002), onde arquivos de clientes ou estratégias confidenciais são exfiltrados antes de uma demissão ou em apoio a um concorrente. Esses eventos não aparecem nos logs de autenticação do Entra ID — eles são exclusivos do `OfficeActivity`.
+
+**Por que agora:** Configurar o conector M365 em paralelo com os demais garante que eventos de e-mail e SharePoint sejam correlacionáveis com eventos de autenticação desde o início. Uma investigação de insider threat que depende de correlacionar "login suspeito" (SigninLogs) com "download de arquivos" (OfficeActivity) só é possível se ambas as fontes tiverem histórico simultâneo.
 
 **Sentinel → Data connectors → Pesquisar "Office 365" → Open connector page**
 
@@ -313,22 +342,26 @@ AzureActivity
    - ✓ Teams
 2. Clicar em **Apply Changes**
 
-**Resultado esperado**: Logs de atividade de Exchange, SharePoint e Teams chegam na tabela `OfficeActivity`.
+**O que você deve ver:** Logs de atividade de Exchange, SharePoint e Teams chegam na tabela `OfficeActivity`. Cada tipo de workload gera eventos com `RecordType` diferente: ExchangeItem, SharePointFileOperation, MicrosoftTeams.
 
-**Verificação**:
+**Verificação:**
 ```kql
 OfficeActivity
 | where TimeGenerated > ago(2h)
 | summarize count() by RecordType
 ```
 
-**Troubleshooting**:
-- Alguns workloads (especialmente Teams) podem demorar até 24h para ingestão inicial
-- Exchange geralmente tem dados em 15-20 minutos se há atividade de e-mail
+**O que fazer se der errado:**
+- Alguns workloads (especialmente Teams) podem demorar até 24h para ingestão inicial — isso é comportamento normal da Microsoft, não um erro de configuração
+- Exchange geralmente tem dados em 15-20 minutos se há atividade de e-mail no tenant
 
 ---
 
 ### Passo 8: Instalar Solução via Content Hub
+
+**O que este passo faz:** O Content Hub é o marketplace de conteúdo de segurança do Microsoft Sentinel. A solução "Microsoft Entra ID" publicada pela própria Microsoft contém dezenas de analytics rules pré-construídas, workbooks de visualização e hunting queries prontas para uso — todo baseado em anos de expertise do time de segurança da Microsoft e da comunidade global de analistas SOC. Em vez de criar detecções do zero, o Banco Meridian herda imediatamente um catálogo de detecções para os principais padrões de ataque contra identidades Microsoft: brute force, MFA fatigue, impossible travel, sign-in com IP de VPN anonimizador, roubo de token, entre outros. Isso é equivalente a contratar uma equipe especializada de detection engineers por alguns minutos de instalação — o valor real está em adaptar e calibrar essas regras para o ambiente específico do banco nos módulos seguintes.
+
+**Por que agora:** O Content Hub deve ser instalado antes de ativar as analytics rules, pois ele é justamente a fonte dos templates de regra. Sem a solução instalada, o painel de analytics rules terá muito menos opções disponíveis.
 
 **Sentinel → Content Hub → Pesquisar "Microsoft Entra ID"**
 
@@ -337,11 +370,23 @@ OfficeActivity
 3. Aguardar a instalação (~3 minutos)
 4. Clicar em **Manage** para visualizar o conteúdo instalado
 
-**Resultado esperado**: 30+ analytics rules, 15 workbooks e 20+ hunting queries instalados.
+**O que você deve ver:** 30+ analytics rules templates, 15 workbooks e 20+ hunting queries instalados e disponíveis em seus respectivos painéis. O painel "Analytics → Rule templates" passará a listar essas regras filtradas por "Microsoft Entra ID".
 
 ---
 
 ### Passo 9: Ativar 3 Analytics Rules
+
+**O que este passo faz:** Analytics rules são o coração da detecção automática no Sentinel. Elas executam queries KQL em intervalos regulares e geram alertas (e incidentes) quando encontram padrões suspeitos nos dados. Ativar as três rules a seguir é a diferença entre ter um workspace com dados e ter um SOC funcionando: sem rules ativas, os logs de 2.800 funcionários chegam e ficam no banco de dados sem nenhuma análise. Com as rules ativas, qualquer padrão de ataque correspondente gera um incidente automaticamente na fila do SOC.
+
+As três rules escolhidas cobrem os vetores mais relevantes para o contexto de AiTM phishing e credential attacks que o CISO mencionou no relatório do FS-ISAC:
+
+- **Suspicious Sign-In to Privileged Account**: detecta logins bem-sucedidos em contas com roles administrativas vindos de IPs novos, países incomuns ou dispositivos não registrados. Um attacker que comprometeu a conta de um administrador e tenta acessar o Azure Portal geraria este alerta.
+
+- **Brute Force Attack**: detecta múltiplas tentativas de senha falhadas na mesma conta. Um attacker tentando adivinhar a senha de um funcionário usando uma lista de senhas comuns (credential stuffing) dispara esta regra. O threshold padrão é conservador — recomenda-se baixar para 5 tentativas no ambiente de lab para facilitar a visualização do comportamento.
+
+- **MFA Rejected by User**: detecta quando um usuário recebe e rejeita uma notificação push de MFA. Isso é o indicador mais claro de MFA fatigue attack: o attacker já tem a senha correta e envia dezenas de notificações push esperando que o usuário aprove por exaustão ou engano. Cada rejeição ativa é um sinal de que alguém com a senha está tentando entrar.
+
+**Por que agora:** As rules precisam de dados para funcionar — ativá-las antes de ter os connectors seria inútil. Agora que os quatro connectors estão ativos e produzindo telemetria, as rules têm dados para analisar e podem gerar incidentes a partir deste momento.
 
 **Sentinel → Analytics → Rule templates → filtrar por "Microsoft Entra ID"**
 
@@ -366,19 +411,27 @@ OfficeActivity
 2. Criar rule com configurações padrão
 3. Esta rule detecta quando um usuário recebe e REJEITA uma notificação de MFA — sinal de MFA fatigue attack
 
-**Resultado esperado**: 3 rules aparecem em **Analytics → Active rules** com status "Enabled".
+**O que você deve ver:** As 3 rules aparecem em **Analytics → Active rules** com status "Enabled". O campo "Last run" ficará vazio até a primeira execução (até 1 hora após a ativação). O campo "Next run" indica o agendamento configurado.
 
-**Verificação**:
+**Verificação:**
 ```kql
-// Verificar se as rules estão sendo executadas
+// Verificar se as rules estão sendo executadas e gerando alertas
 SecurityAlert
 | where TimeGenerated > ago(24h)
 | summarize count() by AlertName
 ```
 
+**O que fazer se der errado:**
+- Se a rule não aparecer nos templates: verificar se a solução "Microsoft Entra ID" foi instalada pelo Content Hub no Passo 8
+- Se a rule criar mas ficar em status "Disabled": editar a rule e mudar o Status para Enabled manualmente
+
 ---
 
 ### Passo 10: Validação Final de Ingestão
+
+**O que este passo faz:** A validação final não é apenas uma formalidade — é a prova técnica de que o ambiente está funcionando conforme especificado. A query de validação usa `union` para consultar todas as tabelas críticas em uma única execução, retornando um painel de saúde do workspace: quantos eventos chegaram por tabela e quando foi o último evento. Este resultado é o "relatório de status às 17h" que o CISO solicitou no início do lab. Mais do que uma confirmação interna, esta query representa a linha de base do ambiente: o analista Felipe Andrade pode executá-la a qualquer momento para saber instantaneamente se algum conector deixou de funcionar (tabela com contagem zerada ou LastEvent muito antigo).
+
+**Por que agora:** A validação vem no final porque só faz sentido após todos os passos anteriores estarem completos. Executar antes dos connectors estarem ativos retornaria 0 em todas as linhas — sem diagnóstico útil. Executada agora, ela confirma que o lab atingiu o objetivo proposto: 4 fontes de dados ativas com dados fluindo para o Sentinel do Banco Meridian.
 
 Execute a query de validação completa:
 

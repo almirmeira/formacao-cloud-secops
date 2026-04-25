@@ -85,6 +85,10 @@ Pod Security Standards substituiu o deprecado PodSecurityPolicy (PSP) no Kuberne
 
 ### 2.2 Como Aplicar PSS por Namespace
 
+**O que estes manifestos fazem:** Os três namespaces a seguir implementam o padrão de segmentação de privilégios do Banco Meridian no cluster Kubernetes. O namespace `production` usa o perfil **Restricted** — o mais seguro — e aplica os três modos simultaneamente: `enforce` bloqueia qualquer pod que viole o perfil antes de ser criado (prevenção), `audit` registra violações no audit log do API server (rastreabilidade), e `warn` emite um aviso no terminal do desenvolvedor durante o `kubectl apply` (feedback imediato). O `enforce-version: v1.28` garante que as regras do PSS sejam as do Kubernetes 1.28 — isso evita surpresas quando o cluster é atualizado para uma versão que pode ter regras mais restritivas.
+
+**Por que três namespaces com perfis diferentes:** Não é possível aplicar o perfil Restricted universalmente porque alguns componentes legítimos de sistema precisam de permissões elevadas. O Falco precisa de acesso ao kernel (perfil Privileged). Ferramentas de observabilidade como o Prometheus node-exporter precisam montar volumes do host (perfil Baseline). A API de pagamentos do Banco Meridian não precisa de nenhuma permissão elevada, portanto usa Restricted. Misturar tudo em um único namespace com perfil mais permissivo seria o caminho errado — o atacante que comprometesse um pod de pagamentos num namespace Privileged teria acesso ao kernel do nó.
+
 ```yaml
 # PSS é aplicado via label no namespace
 # Três modos de enforcement:
@@ -133,6 +137,8 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: privileged
 ```
+
+**O que o Pod a seguir demonstra:** O Pod `api-pagamentos` exemplifica uma configuração que satisfaz completamente o perfil Restricted. Cada campo do `securityContext` tem uma finalidade específica de segurança: `runAsNonRoot: true` impede que o container rode como root (UID 0), que é o usuário default em muitas imagens Docker e o vetor de múltiplos ataques de container escape; `allowPrivilegeEscalation: false` bloqueia chamadas de sistema como `setuid` ou `sudo` que elevam privilégios dentro do container; `readOnlyRootFilesystem: true` impede que malware persista no filesystem do container modificando binários; `capabilities: drop: [ALL]` remove todas as capabilities Linux (mesmo as concedidas por padrão ao root), como `NET_ADMIN` e `SYS_PTRACE`, que poderiam ser abusadas para atacar outros containers ou o nó. O uso de digest SHA256 na imagem (`@sha256:abc123`) garante imutabilidade — não é possível substituir a imagem silenciosamente via um novo push com a mesma tag.
 
 ```yaml
 # Pod que satisfaz o perfil Restricted
@@ -187,6 +193,12 @@ NetworkPolicies são recursos Kubernetes que controlam o tráfego de rede entre 
 **Ponto crítico:** Por padrão, sem NetworkPolicy, TODOS os pods se comunicam com TODOS. Um pod comprometido pode alcançar qualquer banco de dados, API interna ou serviço em qualquer namespace.
 
 ### 3.2 Default-Deny Pattern
+
+**O que esta sequência de NetworkPolicies faz:** Implementa o padrão de segurança de rede mais fundamental em Kubernetes — o "default-deny". Funciona em duas etapas complementares: (1) a política `default-deny-all` bloqueia literalmente todo o tráfego de rede de entrada e saída em todos os pods do namespace, usando `podSelector: {}` (aplica a todos os pods) e sem definir regras de `ingress` ou `egress` (bloqueio implícito total); (2) as políticas subsequentes re-autorizam apenas o tráfego estritamente necessário — DNS (sem isso nenhum pod consegue resolver nomes), comunicação do Ingress Controller para a API gateway, da API gateway para o serviço de pagamentos, e deste para o banco de dados.
+
+**Por que o default-deny é essencial para o Banco Meridian:** Sem NetworkPolicies, qualquer pod comprometido no cluster Kubernetes do Banco Meridian pode alcançar diretamente o banco de dados de produção com os dados de clientes, APIs de outros microserviços, e até o API server do Kubernetes. Com o padrão default-deny, um atacante que comprometesse o pod de um serviço de notificações, por exemplo, não conseguiria fazer nenhuma conexão — nem para o banco de dados de pagamentos, nem para exfiltrar dados pela internet. A superfície de movimento lateral é reduzida ao mínimo necessário.
+
+**Por que incluir allow-dns:** A NetworkPolicy `allow-dns` é necessária para que os pods consigam resolver nomes DNS dentro do cluster (como `postgres.production.svc.cluster.local`). Sem ela, o `default-deny-all` bloquearia as consultas DNS na porta 53, fazendo com que todas as conexões por nome falhassem — quebrando os microserviços mesmo que as conexões de rede em si estivessem autorizadas.
 
 ```yaml
 # Passo 1: Aplicar default-deny em cada namespace de produção
@@ -301,6 +313,10 @@ spec:
 ## 4. RBAC — Role-Based Access Control
 
 ### 4.1 Boas Práticas de RBAC no Kubernetes
+
+**O que estes manifestos de RBAC fazem e por que a estrutura importa:** O RBAC no Kubernetes controla quais ações cada processo (identificado por uma ServiceAccount) pode realizar sobre os recursos da API do Kubernetes — não sobre o sistema operacional nem sobre o banco de dados, mas sobre os próprios objetos Kubernetes (Pods, Deployments, Secrets, ConfigMaps). A sequência a seguir cria: (1) uma `ServiceAccount` específica para o microserviço de pagamentos com `automountServiceAccountToken: false` — impedindo que o token seja montado automaticamente no filesystem do container, pois muitos microserviços nunca precisam interagir com a API Kubernetes e manter o token montado cria um vetor de ataque desnecessário; (2) uma `Role` mínima que só permite ler (`get`, `watch`) um único ConfigMap específico pelo nome (`resourceNames: ["api-pagamentos-config"]`); (3) um `RoleBinding` que vincula a ServiceAccount à Role.
+
+**Por que a separação Role (namespace) vs ClusterRole (cluster) importa:** Uma `Role` tem escopo de namespace — ela só existe e só funciona dentro do namespace `production`. Uma `ClusterRole` tem escopo de cluster inteiro. Para aplicações como a API de pagamentos do Banco Meridian que precisam apenas dos seus próprios ConfigMaps e Secrets, uma Role é sempre a escolha correta. Usar ClusterRole permitiria ao microserviço acessar ConfigMaps de qualquer namespace — incluindo o namespace `falco-system` e `kube-system` onde ficam os componentes críticos de segurança do cluster.
 
 ```
 HIERARQUIA DE RBAC KUBERNETES
@@ -421,6 +437,12 @@ kubectl get pods -n gatekeeper-system
 ```
 
 ### 6.2 Exemplos de Políticas OPA Gatekeeper
+
+**O que o ConstraintTemplate e a Constraint fazem:** O OPA Gatekeeper funciona com dois tipos de objetos Kubernetes. O **ConstraintTemplate** define a lógica da política em OPA Rego — é o equivalente a uma "classe" ou "template". Ele especifica: o CRD que será criado (`K8sRequiredLabels`), quais campos são aceitos como parâmetros (`labels` no spec), e a lógica Rego que valida os recursos (`violation[{"msg": msg}]`). A **Constraint** é a instância da política — especifica em quais recursos e namespaces ela se aplica, e fornece os valores dos parâmetros (quais labels são obrigatórios).
+
+**Por que esta separação é poderosa:** Você define a lógica do ConstraintTemplate uma vez e cria múltiplas Constraints com parâmetros diferentes. Por exemplo, um único template `K8sRequiredLabels` pode ser instanciado para exigir labels diferentes em namespaces diferentes: o namespace `production` exige `app`, `team`, `version` e `cost-center`, enquanto o namespace `development` exige apenas `app` e `team`. Sem precisar duplicar a lógica Rego.
+
+**Por que o Gatekeeper em vez de apenas PSS:** O Pod Security Standards (seção 2) cobre configurações de segurança dos Pods. O OPA Gatekeeper cobre políticas de governança corporativa — como labels obrigatórios, registry de imagens permitida, limites de recursos obrigatórios, ou qualquer política que o Banco Meridian precise além do que o PSS nativo oferece. Juntos, PSS + Gatekeeper cobrem tanto a segurança técnica quanto a governança organizacional.
 
 **Exigir labels obrigatórios:**
 ```yaml
@@ -721,6 +743,10 @@ spec:
 ## 8. CIS Kubernetes Benchmark com kube-bench
 
 ### 8.1 Como Executar
+
+**O que estes comandos fazem:** Implantam o kube-bench como um Job Kubernetes no master node e depois no worker node, e coletam os resultados. O kube-bench é a ferramenta de referência para auditar um cluster Kubernetes contra o CIS Kubernetes Benchmark — o guia de configuração segura mantido pelo Center for Internet Security. O kube-bench precisa rodar dentro do cluster (como Job) porque precisa inspecionar arquivos de configuração do API Server, etcd e kubelet que estão no sistema de arquivos do próprio nó (montados via `hostPath`). Ele verifica mais de 60 controles de segurança organizados por componente: Control Plane (seção 1), etcd (seção 2), Control Plane Configuration (seção 3), Worker Nodes (seção 4) e Policies (seção 5).
+
+**Por que o kube-bench é importante para o Banco Meridian:** O CIS Kubernetes Benchmark é o padrão de baseline de segurança reconhecido pelo BACEN e pelo setor financeiro. Executar o kube-bench periodicamente fornece evidência objetiva de conformidade com controles como: `--anonymous-auth=false` no API Server (bloqueia acessos não autenticados), `--authorization-mode=Node,RBAC` (garante que RBAC está habilitado), `--etcd-certfile` (comunição criptografada com etcd) e `protectKernelDefaults=true` no kubelet (proteção contra ataques ao kernel). Sem o kube-bench, vulnerabilidades de configuração do cluster permanecem invisíveis até que um atacante as explore.
 
 ```bash
 # Executar kube-bench no master node
