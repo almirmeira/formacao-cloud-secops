@@ -177,6 +177,10 @@ PARTE 1 — DISTRIBUIÇÃO DE TEMPO SUGERIDA
 
 ### 3.2 Fase A: Detecção Inicial (20 min)
 
+**O que esta fase faz:** Estabelece o contexto global do incidente usando as três fontes de visibilidade disponíveis: Risk Analytics (pontuação comportamental acumulada), UEBA (anomalias específicas detectadas) e Alertas YARA-L (detecções baseadas em regras). A combinação das três perspectivas forma o panorama que guiará toda a investigação subsequente. O ponto de entrada do incidente — o "paciente zero" — é identificado aqui.
+
+**Por que começar aqui:** O Risk Analytics e UEBA fornecem o "quando" do incidente — identificam há quanto tempo o comportamento anômalo está ocorrendo. Analistas que pulam esta fase e vão diretamente para UDM Search tendem a usar janelas de tempo erradas nas queries, perdendo os eventos iniciais do comprometimento.
+
 Comece pela visão geral. Antes de mergulhar em queries, entenda o estado do ambiente:
 
 1. Acesse o **Risk Analytics** (`Detection → Risk Analytics`):
@@ -194,9 +198,15 @@ Comece pela visão geral. Antes de mergulhar em queries, entenda o estado do amb
 **Pergunta guia:** "Qual foi o primeiro sinal no Google SecOps que indicava que algo estava
 errado com marcos.pereira?"
 
+**O que você deve encontrar:** O Risk Score de marcos.pereira começou a subir em 2026-04-15 — 9 dias antes do alerta. O UEBA sinaliza "Volume anômalo de conexões de saída" e "Login de geolocalização incomum". Nenhuma regra YARA-L disparou antes do alerta de `login_fora_horario` às 02:47 do dia 24 — isso é o gap de detecção que as 3 regras da Fase C devem fechar.
+
 Anote sua descoberta — ela vai aparecer no seu relatório na seção "Detecção".
 
 ### 3.3 Fase B: Investigação e Hunting (30 min)
+
+**O que esta fase faz:** Aplica as técnicas de UDM Search e pivoting aprendidas nos Labs 02 e 03 para reconstruir a cadeia de ataque completa. O pivoting sequencial — rede → processo → arquivo → identidade → impacto — é a metodologia central de threat hunting. Ao final desta fase, você terá os timestamps precisos de cada fase da kill chain, os IOCs concretos e a evidência técnica para o relatório ao CISO.
+
+**Por que esta fase é a mais crítica:** A qualidade da timeline da Fase B determina a qualidade de TODOS os outros entregáveis. Regras YARA-L escritas sem entender o comportamento real do malware terão thresholds errados; o relatório BACEN exige timestamps e IOCs específicos. Não avance para a Fase C sem uma timeline com pelo menos 8 eventos.
 
 Com o contexto da Fase A, agora mergulhe nos dados:
 
@@ -217,8 +227,9 @@ Com o contexto da Fase A, agora mergulhe nos dados:
 - `target.user.userid = "marcos.pereira" AND security_result.action = "ALLOW"`
 - `principal.user.userid = "marcos.pereira" AND metadata.event_type = "USER_CREATION"`
 
-**Resultado esperado ao final da Fase B:** Uma timeline rascunho com pelo menos 8 eventos
-identificados, em ordem cronológica, com timestamps.
+**O que você deve encontrar ao final:** O IP de C2 `45.77.123.89` com 12.847 conexões; o processo `svchost.exe` (PID 4829) como origem do beaconing; `bc_cert_helper.exe` em %TEMP% como dropper criado por `AcroRd32.exe`; 4,7 GB exfiltrados para `185.220.101.34`; e a conta `administrador_ti2` criada e adicionada ao Domain Admins.
+
+**Resultado esperado ao final da Fase B:** Uma timeline rascunho com pelo menos 8 eventos identificados, em ordem cronológica, com timestamps precisos e técnicas MITRE mapeadas.
 
 ### 3.4 Fase C: Criação das Três Regras YARA-L (30 min)
 
@@ -442,17 +453,60 @@ táticas do ATT&CK é o que estrutura o relatório BACEN e evidencia a extensão
 
 ### Gabarito — Regras YARA-L Esperadas
 
-**Regra 1 (C2 Beaconing com Processo Pai em %TEMP%):** Deve ter `$e2` detectando lançamento
-de svchost.exe por processo em `%TEMP%` ou `%APPDATA%`, e correlacionar com as conexões
-C2 (`$e1`) pelo `$hostname_origem`. Threshold mínimo aceitável: `#e1 >= 20` em `1h`.
+**Regra 1 (C2 Beaconing com Processo Pai em %TEMP%):**
 
-**Regra 2 (Privilege Escalation):** Deve detectar `USER_CREATION` seguido de adição a grupo
-admin no mesmo host dentro de 5 minutos. Severidade: CRITICAL. Ausência de exclusões para
-`administrador_ti2` confirma corretude — contas de backdoor não estão nas watchlists.
+O código correto inclui dois eventos correlacionados: `$e1` para conexões de rede e `$e2` para o lançamento de svchost.exe por processo em %TEMP% ou %APPDATA%. O threshold mínimo aceitável é `#e1 >= 20` em janela de `1h`.
 
-**Regra 3 (Exfiltração em massa HTTPS):** Threshold de `sum(sent_bytes) >= 1073741824` (1 GB)
-em janela de `4h` é aceitável. Thresholds mais baixos (100 MB em 1h) também são aceitos se
-justificados. Qualquer threshold acima de 10 GB é excessivo para detecção de exfiltração.
+```yara-l
+rule c2_beaconing_svchost_injetado {
+  meta:
+    author = "SOC Banco Meridian"
+    severity = "CRITICAL"
+    mitre_attack = "T1071.001, T1055.001"
+  events:
+    $e1.metadata.event_type = "NETWORK_CONNECTION"
+    $e1.network.direction = "OUTBOUND"
+    $e1.principal.process.file.full_path = /.*svchost.exe/
+    $hostname_origem = $e1.principal.hostname
+
+    $e2.metadata.event_type = "PROCESS_LAUNCH"
+    $e2.target.process.file.full_path = /.*svchost.exe/
+    $e2.principal.process.file.full_path = /(.*AppData.*|.*Temp.*)/
+    $e2.principal.hostname = $hostname_origem
+  match:
+    $hostname_origem over 1h
+  condition:
+    #e1 >= 20
+    AND max($e1.network.received_bytes) - min($e1.network.received_bytes) <= 512
+    AND $e1 and $e2
+}
+```
+
+**Por que esta é a resposta correta:** A correlação dos dois eventos (`$e1` e `$e2`) é o que diferencia beaconing por injeção de processo de beaconing direto. Sem o `$e2`, a regra excluiria o `svchost.exe` (processo legítimo) e nunca detectaria este caso. A correlação pelo `$hostname_origem` garante que ambos os eventos ocorreram no mesmo host. O threshold de 512 bytes de variação captura a uniformidade do payload do Cobalt Strike.
+
+**Erro mais comum neste passo:** Não incluir o `$e2` (evento de lançamento de processo) e apenas verificar as conexões de rede. Isso faz com que a regra exclua `svchost.exe` (que estava na watchlist de processos legítimos) e o beaconing nunca seja detectado. A lição: exclusões de processos legítimos devem ser condicionais ao processo pai, não absolutas.
+
+---
+
+**Regra 2 (Privilege Escalation — Conta Backdoor):**
+
+O código correto detecta `USER_CREATION` seguido de adição ao grupo Domain Admins dentro de 5 minutos no mesmo host.
+
+**Por que esta é a resposta correta:** A detecção da sequência (criação + adição a grupo admin) dentro de uma janela curta identifica a criação de backdoor com certeza muito maior do que qualquer um dos eventos isoladamente. A criação de conta é legítima no dia-a-dia do AD; a adição imediata a Domain Admins não é. A janela de 5 minutos é calibrada no intervalo observado no incidente (33 segundos), com margem para variação. Severidade CRITICAL é correta — conta Domain Admin não autorizada é o indicador mais crítico de persistência em um ambiente Windows.
+
+**Erro mais comum neste passo:** Detectar apenas `USER_CREATION` sem a correlação com adição ao grupo admin. Isso geraria dezenas de alertas diários de criação de contas normais do AD, tornando a regra inoperante na prática.
+
+---
+
+**Regra 3 (Exfiltração em massa HTTPS):**
+
+O threshold correto é `sum(sent_bytes) >= 1073741824` (1 GB) em janela de `4h`. Thresholds mais baixos (100 MB em 1h) também são aceitos se justificados com dados históricos de backup legítimo do Banco Meridian.
+
+**Por que esta é a resposta correta:** O Banco Meridian tem backups noturnos que transferem ~500 MB para o Azure Backup — um threshold abaixo de 500 MB geraria alertas de backup diariamente. 1 GB em 4h é um threshold que excede o backup máximo esperado mas ainda captura a exfiltração de 4,7 GB observada no incidente. Qualquer threshold acima de 10 GB é excessivo para um banco tier-2 e deixaria passar exfiltrações menores mas ainda críticas.
+
+**Erro mais comum neste passo:** Definir threshold muito baixo (ex: 10 MB em 1h) sem considerar os backups legítimos. Na validação com Retrohunt, retornaria centenas de alertas de FP por dia — um volume que tornaria a regra inutilizável no SOC. A calibração do threshold com dados históricos de backups legítimos é obrigatória antes de ativar a regra.
+
+---
 
 **Variações aceitáveis:**
 - A janela temporal das regras pode variar ±50% (ex: `2h` em vez de `1h` para beaconing)
@@ -462,13 +516,13 @@ justificados. Qualquer threshold acima de 10 GB é excessivo para detecção de 
 
 ### Gabarito — Erros Comuns e Como Identificar
 
-| Erro                                          | Sinal de Identificação                        | Solução                                              |
+| Erro                                          | Sinal de Identificação                        | Diagnóstico e Solução                                |
 |:----------------------------------------------|:----------------------------------------------|:-----------------------------------------------------|
-| Timeline não inclui a exfiltração             | Timeline tem < 10 eventos; missing T1048      | Buscar `sum(network.sent_bytes)` agrupado por dia    |
-| Regra de beaconing não detectou o caso        | Retrohunt retorna 0 detecções                 | Verificar se svchost.exe está na watchlist — remover |
-| Regra de exfil com threshold irreal (< 1 MB)  | Retrohunt retorna centenas de FPs (backups)   | Aumentar threshold; calibrar com dados históricos    |
-| Conta backdoor não identificada               | Timeline não tem T1136 / T1098                | Buscar `metadata.event_type = "USER_CREATION"` no período |
-| Relatório sem seção de recomendações          | Rubrica: -2 pontos na seção 6 do relatório    | Adicionar 3–5 recomendações técnicas pós-incidente   |
+| Timeline não inclui a exfiltração             | Timeline tem < 10 eventos; missing T1048      | **Diagnóstico:** A exfiltração ocorreu às 03:17 de 20/04 para IP em Moldova. Buscar: `target.ip = "185.220.101.34" AND principal.hostname = "WRK-MARCOS-015"`. Se o IP não aparecer, buscar por `sum(network.sent_bytes) > 1000000000` agrupado por destino |
+| Regra de beaconing não detectou o caso        | Retrohunt retorna 0 detecções                 | **Diagnóstico:** `svchost.exe` estava na watchlist de processos legítimos. Adicionar `$e2` de correlação de processo pai em `%TEMP%` conforme gabarito acima |
+| Regra de exfil com threshold irreal (< 1 MB)  | Retrohunt retorna centenas de FPs (backups)   | **Diagnóstico:** Backups noturnos do Azure Backup geram ~500 MB/noite. Aumentar threshold para ≥ 1 GB; calibrar com dados históricos dos últimos 30 dias |
+| Conta backdoor não identificada               | Timeline não tem T1136 / T1098                | **Diagnóstico:** A conta `administrador_ti2` foi criada em 2026-04-22 09:14. Buscar: `metadata.event_type = "USER_CREATION" AND target.user.userid = "administrador_ti2"` |
+| Relatório sem seção de recomendações          | Rubrica: -2 pontos na seção 6 do relatório    | **Diagnóstico:** As 5 recomendações mínimas devem incluir: (1) patch do Adobe Reader CVE explorado, (2) regra de beaconing atualizada, (3) MFA para todos os Domain Admins, (4) monitoramento de criação de contas com privilégio alto, (5) segmentação de rede para limitar exfiltração |
 
 ---
 

@@ -36,6 +36,10 @@ Ao concluir este módulo, o aluno será capaz de:
 
 ### Anatomia de uma Key Policy KMS
 
+**O que este comando/configuração faz:** Uma Key Policy KMS é o documento JSON que define quem pode administrar e usar uma chave de criptografia. Ela opera em cinco camadas distintas: acesso raiz da conta, administradores da chave, usuários (aplicações que encriptam/decriptam dados), acesso cross-account e regras de negação explícita. Sem a instrução de acesso raiz, nem mesmo o root consegue recuperar a chave caso as demais permissões sejam removidas acidentalmente.
+
+**Por que isso importa para o Banco Meridian:** O BACEN 4.893 exige que o acesso às chaves criptográficas seja restrito ao mínimo necessário e que qualquer operação de exclusão de chave seja auditável. A política abaixo implementa o princípio do menor privilégio separando quem administra a chave (equipe de segurança) de quem a usa (aplicações), além de exigir MFA para qualquer operação de exclusão — impedindo que um insider ou conta comprometida destrua dados criptografados irreversivelmente.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -134,6 +138,10 @@ Ao concluir este módulo, o aluno será capaz de:
 
 ### Envelope Encryption — Padrão DEK
 
+**O que este comando/configuração faz:** O envelope encryption é o padrão pelo qual o KMS gera uma chave de dados temporária (DEK — Data Encryption Key) que é usada localmente para criptografar o dado, enquanto apenas o DEK é enviado ao KMS para ser protegido. O dado em si nunca trafega pelo KMS. Isso resolve dois problemas simultaneamente: o limite de 64 KB do KMS por operação e a latência/custo de chamar o serviço para cada byte de dado.
+
+**Por que isso importa para o Banco Meridian:** O banco processa milhares de transações por segundo, cada uma com registros de vários kilobytes. Criptografar cada registro diretamente via KMS seria inviável em termos de custo (cada chamada custa $0,03 por 10 mil requisições) e latência (cada chamada de API adiciona dezenas de milissegundos). Com o padrão DEK, a criptografia local usa AES-256 na memória da aplicação, e o KMS é chamado apenas para proteger o DEK — uma chamada por "envelope", não por transação.
+
 ```
 ENVELOPE ENCRYPTION (KMS + DEK)
 ══════════════════════════════════════════════════════
@@ -162,6 +170,10 @@ ENVELOPE ENCRYPTION (KMS + DEK)
 ```
 
 ### Multi-Region Keys
+
+**O que este comando/configuração faz:** Multi-Region Keys (MRK) são chaves KMS sincronizadas entre regiões AWS que compartilham o mesmo material criptográfico. Isso permite que dados criptografados em sa-east-1 sejam decriptografados em us-east-1 sem operações de re-encriptação, usando a chave réplica local na região de destino — reduzindo latência e eliminando chamadas cross-region para o KMS primário.
+
+**Por que isso importa para o Banco Meridian:** O BACEN 4.893 (Art. 16) exige que instituições financeiras mantenham planos de continuidade de negócios com capacidade de recuperação em outra localidade. O banco utiliza us-east-1 como região de DR (Disaster Recovery). Sem MRK, ao ativar o failover em us-east-1, todos os dados criptografados em sa-east-1 seriam inacessíveis até que o KMS primário fosse restaurado — exatamente o momento em que mais se precisaria dos dados. A chave réplica em us-east-1 garante que o RTO (Recovery Time Objective) não seja comprometido pela indisponibilidade criptográfica.
 
 ```python
 # Criar Multi-Region Primary Key em sa-east-1
@@ -262,6 +274,10 @@ CICLO DE ROTAÇÃO AUTOMÁTICA — RDS
 
 ### Configurar Rotação via CLI
 
+**O que este comando/configuração faz:** Os três comandos abaixo cobrem o ciclo de vida completo de um segredo de banco de dados no Secrets Manager. O primeiro cria o segredo com metadados estruturados (usuário, senha, host, porta e nome do banco) criptografado com a CMK do banco de dados. O segundo habilita a rotação automática delegada a uma função Lambda que conhece a API do RDS PostgreSQL. O terceiro é o comando de emergência para forçar uma rotação imediata quando há suspeita de comprometimento.
+
+**Por que isso importa para o Banco Meridian:** O BACEN 4.893 (Art. 4) determina que credenciais de acesso privilegiado devem ser gerenciadas com controles que incluem rotação periódica. Desenvolvedores do banco frequentemente codificam senhas de banco de dados diretamente em variáveis de ambiente ou arquivos de configuração — uma vulnerabilidade crítica que o Secrets Manager elimina. A integração nativa com o RDS PostgreSQL do cluster de transações permite que a senha seja trocada a cada 30 dias sem interrupção de serviço e sem que nenhum desenvolvedor precise conhecer ou manipular a credencial.
+
 ```bash
 # Criar segredo para RDS do Banco Meridian
 aws secretsmanager create-secret \
@@ -325,6 +341,10 @@ aws secretsmanager rotate-secret \
 
 ### Configurar Discovery Job para S3
 
+**O que este comando/configuração faz:** Este script Python cria um job de classificação no Amazon Macie que varre automaticamente quatro buckets S3 do Banco Meridian em busca de dados sensíveis — CPF, números de cartão, senhas em texto claro e outros identificadores. O parâmetro `samplingPercentage=100` indica análise exaustiva de todos os objetos, não apenas amostragem. O job é do tipo `ONE_TIME`, mas pode ser alterado para `SCHEDULED` para análise contínua com frequência configurável.
+
+**Por que isso importa para o Banco Meridian:** O LGPD (Art. 10) e o BACEN 4.893 (Art. 3) exigem que a instituição mantenha inventário atualizado de onde estão seus dados pessoais e críticos. Sem o Macie, o banco depende de auditorias manuais periódicas — ineficientes e propensas a lacunas. Um único arquivo CSV com dados de clientes copiado inadvertidamente para um bucket de uploads pode passar meses sem ser detectado. O Macie automatiza esse inventário e gera findings que integram diretamente com o Security Hub, fechando o ciclo de visibilidade de dados.
+
 ```python
 import boto3
 import json
@@ -370,6 +390,10 @@ print(f"Discovery Job criado: {job_response['jobId']}")
 ```
 
 ### Exemplo de Finding do Macie
+
+**O que este comando/configuração faz:** Este JSON representa um finding gerado pelo Macie após detectar dados financeiros em um objeto S3. O finding estrutura todas as informações relevantes: a severidade do achado, qual bucket e objeto foram afetados, o tipo de dado sensível encontrado, a quantidade de ocorrências e até a coluna do CSV onde os dados aparecem. A integração com Security Hub encaminha esse finding automaticamente para o painel centralizado de segurança.
+
+**Por que isso importa para o Banco Meridian:** Este finding específico representa um cenário real de risco: 1.247 números de cartão de crédito em um arquivo de extrato no bucket de uploads de clientes. Embora o arquivo esteja criptografado com KMS e o bucket não seja público, a presença de dados PCI fora do escopo certificado PCI DSS é uma violação de conformidade. O DPO do banco e o responsável por PCI precisam ser notificados para investigar se os dados são legítimos ou resultado de um erro de processo, e avaliar se o escopo de certificação PCI precisa ser expandido.
 
 ```json
 {
@@ -418,6 +442,13 @@ print(f"Discovery Job criado: {job_response['jobId']}")
 }
 ```
 
+**Interpretando o resultado:**
+- `severity.score: 90` — classificado como HIGH; o Macie usa escala de 0 a 100, e dados financeiros em quantidade elevada atingem pontuação máxima
+- `publicAccess.effectivePermission: NOT_PUBLIC` — o bucket não é publicamente acessível, o que mitiga o risco imediato mas não elimina a violação de escopo PCI
+- `encryptionType: aws:kms` — o objeto está criptografado com KMS; a criptografia protege em repouso mas não corrige o problema de localização dos dados
+- `csvHeaders: ["numero_cartao"]` — o Macie identificou exatamente a coluna no CSV que contém os dados sensíveis, facilitando a investigação
+- `lineRanges: [{"start": 1, "end": 1247}]` — todas as 1.247 linhas do arquivo contêm dados de cartão, não apenas algumas
+
 ---
 
 ## 6. S3 Object Lock e Block Public Access
@@ -440,6 +471,10 @@ print(f"Discovery Job criado: {job_response['jobId']}")
 
 **Configuração no nível da conta (recomendado para Banco Meridian):**
 
+**O que este comando/configuração faz:** O comando `put-public-access-block` aplicado no nível da conta (`s3control`) cria um escudo global que prevalece sobre qualquer configuração individual de bucket. Mesmo que um desenvolvedor crie um bucket com uma política pública explicitamente ou esqueça de marcar a opção de bloqueio, a configuração da conta anula essa permissão. O segundo comando verifica e confirma que as quatro configurações foram aplicadas com sucesso.
+
+**Por que isso importa para o Banco Meridian:** Um dos vetores de vazamento de dados mais comuns em AWS é a criação acidental de buckets S3 públicos. Dados de clientes, extratos bancários e relatórios de transações já foram expostos publicamente por erros de configuração em diversas instituições financeiras no Brasil. Habilitar Block Public Access no nível da conta elimina essa classe de erro completamente — independentemente de quem cria o bucket e de como o configura. Esta é uma das primeiras configurações que deve ser aplicada em qualquer conta AWS que processe dados do Banco Meridian.
+
 ```bash
 # Habilitar Block Public Access para TODA a conta (aplica a todos os buckets)
 aws s3control put-public-access-block \
@@ -450,6 +485,8 @@ aws s3control put-public-access-block \
 # Verificar configuração
 aws s3control get-public-access-block --account-id 444444444444
 ```
+
+**Interpretando o resultado:** O comando `get-public-access-block` retorna um JSON com os quatro campos configurados. Todos devem estar `true` para garantia completa. Se qualquer um estiver `false`, existe uma janela de exposição potencial que precisa ser corrigida imediatamente.
 
 ---
 

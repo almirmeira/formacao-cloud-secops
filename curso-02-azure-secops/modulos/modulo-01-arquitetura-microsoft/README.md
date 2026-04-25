@@ -103,7 +103,11 @@ Opere como se o attacker já estivesse dentro. Minimize o raio de explosão:
 
 ### 2.3 Microsoft Zero Trust Deployment Guide
 
-A Microsoft publicou o **Zero Trust Deployment Guide** (aka.ms/ZTGuide) com 6 áreas de implantação, ordenadas por prioridade para a maioria das organizações:
+A Microsoft publicou o **Zero Trust Deployment Guide** (aka.ms/ZTGuide) com 6 áreas de implantação, ordenadas por prioridade para a maioria das organizações.
+
+**Por que a ordem de implantação importa para o Banco Meridian:** Organizações frequentemente tentam implementar Zero Trust em todas as 6 áreas simultaneamente, o que resulta em projetos que duram anos sem entregar valor. A ordem de prioridade (Identidade → Dispositivos → Aplicações → Dados → Infraestrutura → Redes) reflete a progressão natural do risco: 80% dos ataques bem-sucedidos começam por comprometimento de identidade. Fortalecer a identidade primeiro (MFA, Conditional Access, PIM) reduz o risco imediatamente. Infraestrutura e redes são importantes, mas têm menor impacto se a identidade já estiver protegida.
+
+> **💡 Dica do instrutor:** Ao apresentar o roadmap de segurança para o CISO do Banco Meridian, use a tabela abaixo para traduzir cada área do Zero Trust em produtos Microsoft específicos e ações concretas. Executivos precisam de conexão entre o framework conceitual e o que o banco efetivamente vai comprar e configurar.
 
 | Área                    | Produto(s) Microsoft              | Banco Meridian — ação prioritária                           |
 |:------------------------|:----------------------------------|:------------------------------------------------------------|

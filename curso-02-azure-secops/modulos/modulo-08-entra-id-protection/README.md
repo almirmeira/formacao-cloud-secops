@@ -37,6 +37,10 @@ O **Entra ID Protection** (anteriormente Azure AD Identity Protection) é um ser
 
 Requer **Entra ID P2** (incluído no M365 E5 ou E5 Security).
 
+**Por que o Entra ID Protection vai além de simples MFA:** O MFA tradicional valida "algo que você sabe + algo que você tem", mas não avalia o contexto do login. O Entra ID Protection adiciona uma terceira dimensão: **onde, como e quando** você está logando. Mesmo com MFA habilitado, se o Entra ID Protection detecta que o login vem de um IP categorizado como C2 de malware pela Microsoft Threat Intelligence, ele pode bloquear o acesso completamente — mesmo que a pessoa tenha fornecido a senha correta e aprovado o MFA. Isso é fundamental para o Banco Meridian porque os ataques AiTM modernos conseguem interceptar tokens MFA — o Entra ID Protection é um dos poucos controles que ainda detecta o ataque mesmo após o bypass do MFA tradicional.
+
+**O que diferencia o Entra ID Protection do Conditional Access:** O Conditional Access é configurado estaticamente — regras do tipo "se usuário estiver fora da rede e acessar Exchange → exigir MFA". O Entra ID Protection é dinâmico e baseado em machine learning — ele calcula um score de risco para cada login em tempo real baseado em bilhões de sinais coletados do ecossistema Microsoft. As Risk Policies do Entra ID Protection alimentam o Conditional Access com esse score dinâmico, criando um sistema de defesa em profundidade.
+
 ### 1.2 User Risk vs Sign-In Risk
 
 | Dimensão          | User Risk                                           | Sign-In Risk                                         |

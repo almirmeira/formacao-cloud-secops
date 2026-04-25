@@ -41,6 +41,10 @@ O GuardDuty é um serviço de detecção de ameaças gerenciado que analisa cont
 
 ### Como o GuardDuty Funciona
 
+**O que este diagrama representa:** O GuardDuty ingere automaticamente as fontes de log existentes na conta AWS — sem necessidade de configurar pipelines de coleta — e aplica três camadas de análise: modelos de machine learning que estabelecem o comportamento basal da conta, detecção de anomalias estatísticas e correlação com feeds proprietários de threat intelligence da AWS. Os findings resultantes são publicados em três destinos simultaneamente, habilitando tanto a visualização humana quanto a automação de resposta.
+
+**Por que isso importa para o Banco Meridian:** Com 4 contas AWS no AWS Organizations (Management, Audit, Production, Log Archive), o Banco Meridian precisa garantir cobertura de detecção em todas elas sem multiplicar esforço operacional. O pipeline abaixo, centralizado na conta Meridian-Audit (222222222222), consolida findings de todas as contas em um único painel — eliminando pontos cegos onde atacantes poderiam operar sem detecção.
+
 ```
 Fontes de Dados (CloudTrail, VPC FL, DNS, EKS...)
            │
@@ -108,6 +112,10 @@ Fontes de Dados (CloudTrail, VPC FL, DNS, EKS...)
 
 ### Arquitetura Multi-Conta do GuardDuty
 
+**O que este diagrama representa:** A arquitetura org-wide delega a administração central do GuardDuty à conta de auditoria dedicada, que passa a receber e gerenciar todos os findings das contas-membro. Isso significa que analistas do SOC do Banco Meridian trabalham em um único painel, sem precisar alternar entre contas AWS para investigar alertas. A configuração de auto-enable garante que qualquer conta nova incorporada ao Organizations já nascerá monitorada — cobertura por design, não por procedimento manual.
+
+**Por que isso importa para o Banco Meridian:** O delegated administrator configurado na conta Meridian-Audit (222222222222) é o pilar central da estratégia de detecção do banco. Sem ele, cada analista precisaria de acesso às 4 contas separadamente, e achados críticos como `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` na conta Production poderiam passar despercebidos por falta de visibilidade consolidada.
+
 ```
 AWS Organizations — GuardDuty
 ─────────────────────────────────────────────────────
@@ -132,6 +140,10 @@ AWS Organizations — GuardDuty
 ```
 
 ### Configuração do Delegated Administrator
+
+**O que este comando/configuração faz:** A sequência de três passos abaixo implementa o modelo org-wide completo. O Passo 1 transfere a autoridade administrativa do GuardDuty da Management Account (que não deve ser usada operacionalmente) para a conta Audit dedicada. O Passo 2 configura o auto-enable de todas as features de proteção para contas novas e existentes — garantindo que nenhuma conta entre no Organizations sem cobertura. O Passo 3 incorpora explicitamente as contas já existentes como membros gerenciados, completando a visibilidade centralizada.
+
+**Por que isso importa para o Banco Meridian:** Com a conta Meridian-Audit (222222222222) como delegated administrator, a equipe de segurança ganha visibilidade unificada de findings HIGH, MEDIUM e LOW em todas as 4 contas sem precisar de acesso cross-account individual. O auto-enable com `ALL` features ativa S3 Data Events, EKS, Malware Protection, RDS e Lambda — todas as superfícies de ataque relevantes para uma instituição financeira que roda workloads variados em múltiplas contas.
 
 ```bash
 # Passo 1: Na Management Account, designar Audit Account como delegated admin
@@ -169,6 +181,10 @@ aws guardduty create-members \
 Supressão evita que findings legítimos de atividade autorizada sejam exibidos como alertas, reduzindo o ruído operacional.
 
 ### Regras de Supressão do Banco Meridian
+
+**O que este comando/configuração faz:** As regras de supressão instruem o GuardDuty a arquivar automaticamente findings que correspondam a critérios específicos — tipo de finding combinado com origem de IP, range CIDR ou tag de instância. O finding não é excluído permanentemente; ele é arquivado e permanece consultável para fins de auditoria. Isso permite que a equipe foque em alertas genuínos sem precisar desabilitar o mecanismo de detecção global.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian contrata a PentestCorp para testes de intrusão autorizados a partir do range 203.0.113.0/24. Sem as regras de supressão abaixo, cada ciclo de pentest geraria dezenas de findings `Recon:EC2/PortProbeUnprotectedPort` e `UnauthorizedAccess:EC2/SSHBruteForce` — inundando o painel de findings e treinando a equipe a ignorar alertas de severidade MEDIUM, o que é exatamente o comportamento que um atacante real exploraria para passar despercebido. A regra TrustedIPList-Pentest resolve isso de forma cirúrgica, sem suprimir outros tipos de finding para aquele range.
 
 ```json
 [
@@ -209,6 +225,8 @@ Supressão evita que findings legítimos de atividade autorizada sejam exibidos 
 ]
 ```
 
+**Interpretando o resultado:** Cada objeto JSON representa uma regra de supressão distinta. O campo `criterios.finding_type` lista os tipos de finding que serão arquivados automaticamente — a supressão é sempre combinada (finding type AND condição de IP/tag), nunca global para o IP. O campo `filtro_json.criterion` é a representação exata aceita pela API do GuardDuty via `aws guardduty create-filter --action ARCHIVE`. A regra `ScannerAutorizado-Qualys` usa tag de instância ao invés de IP porque o Qualys Cloud Agent opera a partir de múltiplos IPs de origem — o critério baseado em tag é mais robusto para ferramentas SaaS. A regra `NATGateway-PortSweep` evita falsos positivos estruturais: o NAT Gateway por natureza varre portas ao rotear tráfego, gerando findings `Impact:EC2/PortSweep` que são esperados e não indicam comprometimento.
+
 **Atenção:** Supressão arquiva o finding (não exclui) e não o exibe no console. Use com critérios específicos e bem documentados. Audite as regras de supressão mensalmente.
 
 ---
@@ -216,6 +234,10 @@ Supressão evita que findings legítimos de atividade autorizada sejam exibidos 
 ## 5. Malware Protection
 
 ### Como Funciona o Malware Protection para EC2
+
+**O que este diagrama representa:** O fluxo de análise do Malware Protection para EC2 opera inteiramente fora da instância de produção. Quando o GuardDuty detecta comportamento suspeito em uma instância (via VPC Flow Logs ou CloudTrail), ele aciona automaticamente a criação de um snapshot EBS — uma fotografia dos dados do volume naquele momento. Esse snapshot é copiado para a infraestrutura isolada e gerenciada internamente pela AWS, analisado por engines de detecção de malware, e descartado ao final. O resultado chega como finding com hash SHA256 do arquivo malicioso e o caminho completo no sistema de arquivos.
+
+**Por que isso importa para o Banco Meridian:** Instâncias de produção do Banco Meridian processam transações financeiras 24 horas por dia — qualquer interrupção tem custo regulatório e reputacional. A análise via snapshot garante que mesmo uma investigação ativa de malware não impacta a disponibilidade do sistema. Em um cenário real, se a instância `i-0prod123` receber um finding `Malware:EC2/MaliciousFile`, a equipe recebe o hash SHA256 e o caminho do arquivo sem precisar fazer nada — o GuardDuty já coletou a evidência forense inicial automaticamente.
 
 ```
 Instância EC2 com volume EBS
@@ -240,6 +262,10 @@ Snapshot excluído após análise
 
 ### Como Funciona o Malware Protection para S3
 
+**O que esta configuração faz:** O Malware Protection para S3 integra varredura antimalware diretamente no fluxo de upload de objetos. Cada arquivo enviado ao bucket configurado é interceptado e analisado antes de ser considerado "limpo" para uso pela aplicação. O resultado da varredura é gravado como tag no próprio objeto S3, permitindo que pipelines downstream (Lambda, Step Functions) tomem decisões automatizadas sem precisar consultar a API do GuardDuty — basta checar a tag `GuardDutyMalwareScanStatus` do objeto.
+
+**Por que isso importa para o Banco Meridian:** O banco recebe documentos de clientes (comprovantes, contratos, laudos) via upload em buckets S3. Sem varredura, um cliente comprometido poderia enviar um arquivo com malware embutido que seria processado internamente — potencialmente alcançando sistemas de back-office. O tag `THREATS_FOUND` permite que uma Lambda de quarentena mova o arquivo automaticamente para um bucket isolado antes que qualquer sistema interno o acesse, transformando o GuardDuty em uma linha de defesa proativa no pipeline de dados.
+
 1. Objeto é carregado no bucket S3 configurado
 2. GuardDuty analisa o objeto automaticamente (sem agente)
 3. Se malicioso: finding `S3Object/MaliciousFile` + tag `GuardDutyMalwareScanStatus: THREATS_FOUND`
@@ -251,6 +277,10 @@ Snapshot excluído após análise
 ## 6. Integração com Security Hub e EventBridge
 
 ### Fluxo de Integração
+
+**O que este diagrama representa:** O GuardDuty publica cada finding em dois canais simultâneos: o Security Hub (em formato ASFF — Amazon Security Finding Format), que agrega findings de múltiplos serviços AWS em um painel unificado de compliance e postura de segurança; e o EventBridge, que transforma cada finding em um evento capaz de disparar automação em tempo real. O resultado é um pipeline que vai da detecção à resposta sem intervenção humana para os cenários mais críticos.
+
+**Por que isso importa para o Banco Meridian:** Para uma instituição financeira sujeita à Resolução BACEN 4.893, o tempo de resposta a incidentes é um critério regulatório — não apenas operacional. A integração com EventBridge permite que um finding HIGH como `Backdoor:EC2/C&CActivity.B` dispare isolamento automático da instância em segundos, enquanto notifica o CISO via SNS e abre um ticket no sistema de gestão de incidentes. O Security Hub consolida os findings das 4 contas em formato padronizado ASFF, facilitando relatórios de compliance e correlação entre alertas de diferentes origens.
 
 ```
 GuardDuty Finding (HIGH)
@@ -267,6 +297,10 @@ GuardDuty Finding (HIGH)
 ```
 
 ### Regra EventBridge para GuardDuty High Severity
+
+**O que este comando/configuração faz:** Esta regra EventBridge monitora continuamente o barramento de eventos da AWS na conta Meridian-Audit e filtra especificamente os eventos publicados pelo GuardDuty com severidade maior ou igual a 7.0 (limiar da classificação HIGH). Quando um finding HIGH é detectado, a regra dispara dois targets em paralelo: uma função Lambda que executa o playbook de resposta automatizada (isolamento de instância, snapshot EBS, revogação de credenciais) e um tópico SNS que notifica o time de segurança via e-mail, SMS ou integração com ferramentas de alerta como PagerDuty ou Slack.
+
+**Por que isso importa para o Banco Meridian:** O finding type `UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS` — um dos mais críticos para o banco — tem severidade 8.0 (HIGH) e representa credenciais temporárias de um EC2 role sendo usadas fora da infraestrutura AWS. A janela entre a detecção e o bloqueio das credenciais é o período de exposição máxima. Com esta regra, o Lambda `GuardDutyIROrchestrator` pode revogar as credenciais da session IAM comprometida em segundos, muito antes que um analista humano possa agir — reduzindo o raio de impacto de horas para segundos. O campo `222222222222` no ARN do Lambda confirma que a automação reside na conta Meridian-Audit, centralizando a resposta org-wide.
 
 ```json
 {
@@ -293,6 +327,8 @@ GuardDuty Finding (HIGH)
   }
 }
 ```
+
+**Interpretando o resultado:** O campo `EventPattern.source: ["aws.guardduty"]` restringe a regra a eventos do GuardDuty — sem risco de disparos por outros serviços. O campo `detail.severity` usa o operador `>=` com valor numérico `7.0`, que corresponde exatamente ao limiar de severidade HIGH do GuardDuty (7.0–8.9). O array `Targets` tem dois destinos: `LambdaIROrchestrator` executa automação de contenção (isolamento de EC2, revogação de credenciais IAM, snapshot EBS) e `MeridianSecurityAlerts-HIGH` envia notificação imediata à equipe de segurança. A chave `"State": "ENABLED"` confirma que a regra está ativa — regras em estado `DISABLED` não disparam mesmo se o padrão casar. O ARN do Lambda e do SNS incluem `sa-east-1` e a conta `222222222222`, confirmando que a resposta é centralizada na conta Meridian-Audit independentemente de qual conta originou o finding.
 
 ---
 

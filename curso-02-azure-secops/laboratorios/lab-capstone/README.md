@@ -262,14 +262,15 @@ union
 | 5 | OAuth App malicioso registrado | 2025-04-08 14:33 | T1098.001 | Account Manipulation - Additional Cloud Credentials | AppID: `4f3d9e2b-8c1a`, permissões: `Mail.Read`, `Files.ReadWrite.All` |
 | 6 | Refresh token para persistência | 2025-04-08 14:35 | T1528 | Steal Application Access Token | Refresh token com validade de 90 dias, acesso persistente mesmo sem sessão ativa |
 
-**Por que confirma que é correto:** Uma timeline correta deve:
-1. Estar em ordem cronológica com timestamps precisos
-2. Identificar o mecanismo técnico de cada fase (não apenas "acesso indevido")
-3. Mapear para técnicas MITRE específicas (T-number, não apenas táticas)
-4. Listar pelo menos 1 IOC concreto por fase (IP, domínio, AppID, hash)
-5. Mostrar a progressão lógica: cada fase habilita a próxima
+**Por que esta é a resposta correta:** Uma timeline de incidente de segurança serve como documento forense e como narrativa para o CISO. Ela precisa atender a três critérios simultâneos: (1) precisão cronológica — cada fase deve ter seu timestamp extraído das fontes de log, não estimado; (2) rastreabilidade técnica — cada fase deve identificar o mecanismo específico (AiTM bypass, não apenas "login suspeito"), pois isso é o que orienta a remediação técnica; (3) cobertura de IOCs — cada fase deve ter pelo menos um indicador de comprometimento concreto para permitir threat hunting em outros sistemas.
 
-**Variações aceitáveis:** A ordem exata dos timestamps pode variar 5-10 minutos dependendo de qual log foi consultado (SigninLogs vs AuditLogs vs EmailEvents têm latências ligeiramente diferentes). O IOC pode ser referenciado de múltiplas tabelas — qualquer forma de identificação única do evento é válida.
+**Erros comuns:**
+- **Confundir T1539 (Token Theft) com T1557 (AiTM):** T1539 é o resultado (roubo do token), T1557 é o método (o proxy intermediário). O ataque da Operação Guaraná usa T1557 como método para obter T1539 — a timeline precisa de ambos na Fase 2.
+- **Marcar a Fase 6 (refresh token) como o mesmo evento da Fase 5 (OAuth App):** São eventos distintos — o OAuth app (T1098.001) cria o mecanismo de acesso; o refresh token (T1528) é o artefato persistente que permite acesso futuro. Se reportar apenas o OAuth app, o plano de remediação pode revogar o app mas deixar o token ativo.
+- **Usar timestamps aproximados em vez de extraídos dos logs:** O e-mail de phishing chegou às 10:28, não "por volta das 10:30". Para fins regulatórios (BACEN 4.893), timestamps precisos são exigidos no relatório de incidente.
+- **Omitir a Fase 3 por ser a mais volumosa:** Alguns alunos tentam consolidar as 3.247 operações de download em "1 evento de exfiltração". O correto é representar o período completo (10:45–18:00) e o volume total, pois isso determina o escopo de notificação ao BACEN.
+
+**Variações aceitáveis:** Os timestamps podem variar 5-10 minutos entre tabelas (SigninLogs vs AuditLogs têm latências ligeiramente diferentes). O IOC pode ser referenciado de múltiplas tabelas — qualquer forma de identificação única e verificável é válida.
 
 ---
 
@@ -283,12 +284,23 @@ union
 | 4 | Volume Anômalo de Download OneDrive | Scheduled, 1h | T1567.002 | Account + FileCount |
 | 5 | Refresh Token sem MFA Reconfirmação | Scheduled, 4h | T1528 | Account + IP |
 
-**Por que estas 5 rules em específico:** Cada rule cobre um ponto de detecção em que o ataque da Operação Guaraná poderia ter sido interrompido:
-- Rule 1: Teria detectado a Fase 2 (login sem MFA de IP russo) em 1-3 minutos — mais de 30 horas antes do incidente ser descoberto
-- Rule 2: Teria detectado a Fase 5 (OAuth app com Mail.Read) em menos de 5 minutos
-- Rule 3: Teria detectado a Fase 4 (email forwarding) em menos de 5 minutos
-- Rule 4: Teria detectado a Fase 3 (3.247 downloads) dentro de 1 hora do início
-- Rule 5: Teria detectado o refresh token persistente na Fase 6 antes do encerramento do turno
+**Por que estas 5 rules em específico — e por que cada uma é a resposta correta:**
+
+**Rule 1 (AiTM Token Theft — Scheduled 30min):** É esta e não uma NRT porque o AiTM gera uma sequência de eventos ao longo de minutos (autenticação legítima → bypass → login do atacante), e a correlação temporal precisa de uma janela de lookback de pelo menos 30-60 minutos para capturar a sequência completa. Uma NRT com janela de 15 minutos pode perder o evento do lado do atacante se o login legítimo da vítima ocorreu fora do window.
+
+**Rule 2 (OAuth App — NRT):** É NRT porque a concessão de permissões a um OAuth app malicioso é um evento único e imediato — não há sequência temporal a correlacionar. A latência de 1-5 minutos da NRT vs. 30 minutos de uma Scheduled rule pode ser a diferença entre detectar o app antes ou depois de o refresh token já ter sido gerado (Fase 6 ocorreu apenas 2 minutos após a Fase 5).
+
+**Rule 3 (Email Forwarding — NRT):** É NRT pelo mesmo motivo da Rule 2: a criação de uma regra de inbox é um evento atômico. Detectar em 5 minutos vs. 30 minutos significa que menos e-mails são encaminhados antes da contenção. Cada minuto de atraso pode significar mais um e-mail com dados sensíveis chegando ao atacante.
+
+**Rule 4 (Volume de Download — Scheduled 1h):** É Scheduled porque a anomalia de volume requer uma linha de base histórica — a query calcula o percentil 90 dos últimos 30 dias e detecta quando o dia atual excede 5x esse baseline. Este cálculo exige acesso a dados históricos, que só são eficientes em modo Scheduled com lookback de 1h para a detecção e 30d para o baseline.
+
+**Rule 5 (Refresh Token — Scheduled 4h):** É Scheduled com lookback de 4h porque o refresh token pode ser usado de forma discreta e intermitente — não gera volume de eventos, e sim eventos espaçados. Uma Scheduled que verifica a cada 4 horas é suficiente para detectar uso do token dentro de um turno de trabalho, que é o critério de resposta esperado pelo SOC do Banco Meridian.
+
+**Erros comuns:**
+- **Criar todas as 5 rules como Scheduled:** Funciona, mas demonstra não entender a diferença de latência entre tipos. Rules 2 e 3 NRT são justificadas pelo tempo-crítico da detecção.
+- **Omitir entity mapping em qualquer rule:** Sem entity mapping, os incidentes gerados pelas rules não têm entidades mapeadas, o que impede a automation rule de triagem de funcionar (ela filtra por "Incident contains entities Account"). Além disso, sem entity mapping, o Sentinel não consegue correlacionar incidentes relacionados ao mesmo usuário automaticamente.
+- **Criar rule para AiTM usando apenas Location !contains "BR":** Este filtro sem exclusão de frequent travelers ou service accounts gera false positives para funcionários que viajam legitimamente e para IPs de VPN corporativa. A rule precisa excluir a watchlist `frequent-travelers` criada anteriormente.
+- **Nomear as rules sem o prefixo "Banco Meridian -":** Convenção de nomenclatura é avaliada — em um SOC real, rules sem naming convention ficam impossíveis de gerenciar quando há centenas de regras ativas.
 
 ---
 
@@ -297,11 +309,13 @@ union
 **Seção 1 — Resumo Executivo (máximo 1 parágrafo):**
 O Banco Meridian sofreu um ataque de AiTM phishing em [data] que resultou na exfiltração de 3.247 arquivos e no estabelecimento de acesso persistente à conta de [usuário]. O incidente ficou sem detecção por 31 horas. Com implementação das 5 analytics rules propostas, este tipo de ataque seria detectado em menos de 5 minutos.
 
-**O que NÃO deve aparecer no relatório executivo para um CISO:**
-- Código KQL bruto (vai para o apêndice técnico, não na narrativa)
-- Siglas sem explicação (se usar "AiTM", definir "ataque de intermediário que bypassa MFA")
-- Recomendações sem prazo e responsável
-- Impacto estimado em número de arquivos sem contextualizar o que representam para o negócio
+**Por que esta é a resposta correta para o relatório executivo:** O CISO do Banco Meridian precisa de três informações nesta ordem: (1) o que aconteceu em linguagem de impacto de negócio (arquivos exfiltrados = risco regulatório + reputacional), (2) por quanto tempo o banco ficou exposto sem saber (31 horas = gap de detecção documentado), e (3) o que será diferente no futuro (5 analytics rules que reduzem o tempo para 5 minutos). Um relatório que começa com detalhes técnicos — KQL, IPs, AuditLogs — perde o executivo na primeira página.
+
+**Erros comuns:**
+- **Incluir código KQL no corpo do relatório:** Código vai no apêndice técnico, não na narrativa executiva. O CISO precisa entender o impacto, não validar a query.
+- **Usar "AiTM" ou "T1539" sem definição:** Todo acrônimo técnico precisa ser definido na primeira ocorrência. "Ataque AiTM (adversário intermediário que contorna autenticação multifator)" é aceitável; "AiTM attack" sem contexto não é.
+- **Listar recomendações sem prazo e responsável:** "Implementar MFA mais forte" não é uma ação — "Habilitar Conditional Access para bloquear logins de IPs não-BR em 48h (responsável: IAM Team)" é uma ação. Recomendações sem responsável não são executadas.
+- **Não quantificar o impacto regulatório:** "Pode ter violado dados de clientes" é insuficiente. O relatório deve indicar se a notificação ao BACEN (Art. 12 da Resolução 4.893) é necessária e em que prazo — essa é frequentemente a informação mais crítica para o CISO no contexto do setor financeiro brasileiro.
 
 ---
 
@@ -320,7 +334,14 @@ O Banco Meridian sofreu um ataque de AiTM phishing em [data] que resultou na exf
 | 9 | Criar playbook automático de contenção de conta comprometida | 15 dias | SOC + Dev | Mínimo |
 | 10 | Notificar BACEN sobre o incidente (Resolução 4.893, Art. 12) | 24h | CISO + Jurídico | 0 |
 
+**Por que as ações 1-3 são IMEDIATAS e por que esta é a resposta correta:** As três primeiras ações bloqueiam os três vetores de acesso persistente ativos neste momento. Revogar a senha sem remover a regra de encaminhamento (ação 2) deixa o atacante recebendo os e-mails mesmo sem sessão ativa — erro crítico frequente em respostas a incidentes AiTM. Revogar o OAuth App (ação 3) revoga o access token associado; sem esta ação, o app `4f3d9e2b-8c1a` continua com acesso a `Mail.Read` e `Files.ReadWrite.All` indefinidamente.
+
 **Por que a ação #10 é obrigatória e urgente:** A Resolução BACEN 4.893 Art. 12 exige que incidentes relevantes (que impactem dados de clientes ou a continuidade de serviços financeiros) sejam reportados ao BACEN em até 1 dia útil. A exfiltração de 3.247 arquivos pode incluir dados de clientes — assume-se que sim até prova em contrário. Omitir essa notificação tem penalidades regulatórias muito mais graves que o próprio incidente.
+
+**Erros comuns no plano de remediação:**
+- **Listar a notificação ao BACEN (ação 10) como última prioridade:** A ordem recomendada já a coloca como urgente (24h), mas alunos frequentemente a colocam no final "quando o incidente estiver resolvido". O prazo legal de 1 dia útil corre desde o momento em que o banco tem conhecimento do incidente — não desde a conclusão da investigação. Atrasar a notificação aguardando análise completa é uma violação regulatória.
+- **Omitir o reset do refresh token como ação separada:** Alguns planos mencionam apenas "revogar o OAuth App" sem especificar a revogação dos tokens emitidos anteriormente (ação via Microsoft Entra ID → Enterprise Applications → Permissions → Revoke). O app pode ser removido mas tokens emitidos continuam válidos até expirar (90 dias para refresh tokens).
+- **Colocar treinamento de conscientização (ação 6) antes de controles técnicos (ações 4-8):** Treinamento é uma ação de médio prazo eficaz mas lenta — leva semanas para alcançar todos os funcionários. Controles técnicos (Conditional Access, Safe Links, analytics rules) reduzem o risco imediatamente. O plano deve refletir que controles técnicos são a linha de defesa primária, e treinamento é a camada de reforço.
 
 ---
 
@@ -328,11 +349,11 @@ O Banco Meridian sofreu um ataque de AiTM phishing em [data] que resultou na exf
 
 | Critério                               | Peso | Pontos Máximos | O que distingue excelente de satisfatório |
 |:---------------------------------------|:----:|:--------------:|:------------------------------------------|
-| Timeline MITRE ATT&CK (6 fases)        | 20%  | 20 pontos      | Excelente: IOCs específicos em cada fase; Satisfatório: apenas táticas sem IOCs |
-| 5 Analytics rules funcionais           | 30%  | 30 pontos      | Excelente: entity mapping + MITRE tag + custom details em todas; Satisfatório: rules funcionam mas sem mapeamentos |
-| Relatório executivo (clareza + completude) | 20% | 20 pontos   | Excelente: linguagem de negócio, sem código, com impacto quantificado; Satisfatório: tecnicamente correto mas com jargão |
-| Plano de remediação priorizado         | 20%  | 20 pontos      | Excelente: inclui notificação BACEN, prazos realistas, responsáveis e custo; Satisfatório: ações corretas sem priorização |
-| Apresentação oral (live session)       | 10%  | 10 pontos      | Excelente: demo ao vivo funciona, linguagem acessível para CISO; Satisfatório: slides sem demo |
+| Timeline MITRE ATT&CK (6 fases)        | 20%  | 20 pontos      | Excelente: IOCs específicos em cada fase, T-numbers corretos com sub-técnicas; Satisfatório: apenas táticas sem IOCs ou sem sub-técnicas |
+| 5 Analytics rules funcionais           | 30%  | 30 pontos      | Excelente: entity mapping + MITRE tag + custom details em todas, NRT usada onde apropriado; Satisfatório: rules funcionam mas sem mapeamentos ou tipo errado |
+| Relatório executivo (clareza + completude) | 20% | 20 pontos   | Excelente: linguagem de negócio, sem código, com impacto quantificado e menção à obrigação BACEN; Satisfatório: tecnicamente correto mas com jargão ou sem menção regulatória |
+| Plano de remediação priorizado         | 20%  | 20 pontos      | Excelente: ações IMEDIATO/24h/7d/30d distintas, todos os 3 vetores de acesso persistente bloqueados, notificação BACEN presente; Satisfatório: ações corretas mas sem distinção de prazo ou faltando a revogação do refresh token |
+| Apresentação oral (live session)       | 10%  | 10 pontos      | Excelente: demo ao vivo funciona, linguagem acessível para CISO, consegue explicar "por que 31 horas sem detecção" sem jargão; Satisfatório: slides sem demo |
 | **Total**                              | **100%** | **100 pontos** | |
 
 **Mínimo para aprovação**: 70 pontos

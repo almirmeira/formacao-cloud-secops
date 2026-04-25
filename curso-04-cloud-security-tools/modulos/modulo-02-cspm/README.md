@@ -164,6 +164,9 @@ ARQUITETURA PROWLER v4
 ### 3.2 Como Executar Prowler — AWS
 
 **Pré-requisitos:**
+
+**O que este comando/ferramenta faz:** `pip install prowler` instala o pacote Python do Prowler v4 via PyPI. O Prowler requer Python 3.9+ e um conjunto de bibliotecas cloud (boto3 para AWS, azure-sdk para Azure, google-cloud para GCP). As credenciais AWS podem ser fornecidas via `aws configure` (armazenadas em `~/.aws/credentials`) ou via variáveis de ambiente — ambas formas são lidas automaticamente pelo Prowler. A política `SecurityAudit` concede permissões de leitura amplas em todos os serviços AWS necessários para os checks.
+
 ```bash
 # Instalar Prowler v4
 pip install prowler
@@ -184,6 +187,11 @@ export AWS_DEFAULT_REGION="us-east-1"
 ```
 
 **Execução básica:**
+
+**O que este comando/ferramenta faz:** `prowler aws` sem flags adicionais executa todos os 400+ checks disponíveis em todas as regiões habilitadas da conta AWS configurada, podendo levar de 20 a 40 minutos. As flags `--severity critical high` filtram a execução para apenas os checks que geram findings de alta criticidade, reduzindo o tempo de scan e o volume de saída. O flag `--output-formats html json csv` gera relatórios simultâneos em múltiplos formatos: HTML para apresentação visual, JSON para integração com SIEMs e Security Hub, e CSV para análise em planilhas. O flag `--compliance brazil_lgpd` limita a execução apenas aos checks mapeados para regulações brasileiras (LGPD + BACEN 4.893), gerando um relatório focado em conformidade regulatória — especialmente relevante antes de auditorias do BACEN.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian opera em ambiente AWS regulado pelo BACEN 4.893. Executar o Prowler com `--compliance brazil_lgpd` permite gerar evidência documentada de conformidade regulatória, mapeando cada finding diretamente aos artigos da resolução — exatamente o que os auditores do BACEN solicitam. O uso de `--role` com role assumption permite auditar múltiplas contas AWS sem compartilhar credenciais permanentes.
+
 ```bash
 # Scan completo na AWS (pode demorar 20-40 min)
 prowler aws
@@ -217,6 +225,8 @@ prowler aws --organizations-role arn:aws:iam::MANAGEMENT_ACCOUNT:role/ProwlerOrg
 ```
 
 **Exemplos de outputs:**
+
+**O que este comando/ferramenta faz:** O output JSON do Prowler segue o formato OCSF (Open Cybersecurity Schema Framework), contendo para cada finding: o identificador único do evento, metadados de timestamp e versão, o título do finding com o recurso afetado, a severidade técnica, o status (PASS/FAIL), a descrição do risco de negócio, o comando exato para remediação via CLI, e o mapeamento completo para frameworks regulatórios (CIS, BACEN, LGPD). O campo `compliance` é o mais importante para relatórios de auditoria — permite rastrear cada finding diretamente aos artigos regulatórios violados.
 
 ```json
 // Exemplo de finding JSON (prowler-output.json)
@@ -260,6 +270,8 @@ prowler aws --organizations-role arn:aws:iam::MANAGEMENT_ACCOUNT:role/ProwlerOrg
 
 ### 3.3 Como Executar Prowler — Azure
 
+**O que este comando/ferramenta faz:** O Prowler Azure autentica via Azure Active Directory usando Service Principal — uma identidade de aplicação com permissões de leitura na subscription. O flag `--sp-env-auth` instrui o Prowler a ler as credenciais do Service Principal a partir das variáveis de ambiente `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` e `AZURE_CLIENT_SECRET`, seguindo as boas práticas de não hardcodar credenciais. O flag `--subscription-ids` limita o scan a subscriptions específicas, útil em ambientes enterprise com múltiplas subscriptions. O framework `cis_microsoft_azure_foundations_benchmark_v2.0` executa especificamente os checks do benchmark CIS para Azure, cobrindo IAM, storage, redes, bancos de dados e monitoramento.
+
 ```bash
 # Autenticação Azure (usar Service Principal para CI/CD)
 az login
@@ -283,6 +295,8 @@ export AZURE_CLIENT_SECRET="..."
 
 ### 3.4 Como Executar Prowler — GCP
 
+**O que este comando/ferramenta faz:** A autenticação GCP via `gcloud auth application-default login` configura as credenciais de usuário para o SDK do Google Cloud, usadas automaticamente por qualquer biblioteca que utilize Application Default Credentials (ADC) — inclusive o Prowler. Para pipelines de CI/CD, a alternativa é usar uma Service Account Key exportada como JSON e apontada pela variável `GOOGLE_APPLICATION_CREDENTIALS`. O flag `--project-ids` limita o scan a um projeto GCP específico. O framework `cis_gcp_foundations_benchmark_v2.0` verifica controles de segurança específicos do GCP, incluindo Cloud Storage, IAM, Compute Engine, redes VPC e serviços de logging.
+
 ```bash
 # Autenticação GCP
 gcloud auth application-default login
@@ -301,6 +315,8 @@ prowler gcp --compliance cis_gcp_foundations_benchmark_v2.0
 
 ### 3.5 Como Executar Prowler — Kubernetes
 
+**O que este comando/ferramenta faz:** O Prowler também suporta scan de clusters Kubernetes, utilizando o `kubeconfig` configurado localmente (por padrão em `~/.kube/config`). Este modo verifica configurações de segurança do cluster contra o CIS Kubernetes Benchmark v1.8, cobrindo o API server, etcd, componentes do control plane e workers. O flag `--context` especifica qual cluster no kubeconfig deve ser auditado — útil quando você administra múltiplos clusters (dev, staging, prod). O resultado identifica misconfigurations como RBAC excessivo, pods privilegiados e ausência de NetworkPolicies.
+
 ```bash
 # Prowler também suporta scan de clusters K8s
 # Requer kubeconfig configurado
@@ -314,6 +330,10 @@ prowler kubernetes --compliance cis_kubernetes_benchmark_v1.8
 ```
 
 ### 3.6 Integração com AWS Security Hub
+
+**O que este comando/ferramenta faz:** O flag `--security-hub` ativa a integração nativa do Prowler com o AWS Security Hub, enviando cada finding no formato ASFF (Amazon Security Finding Format) — o padrão de importação do Security Hub. Isso centraliza todos os findings do Prowler no mesmo painel onde outros serviços AWS (GuardDuty, Inspector, Macie) já reportam seus alertas, criando uma visão unificada de segurança. Uma vez integrado, os findings ficam visíveis no console do Security Hub em tempo real, podendo ser filtrados por Product: Prowler. O Security Hub também permite criar automações e remediações baseadas nesses findings via EventBridge.
+
+**Por que isso importa para o Banco Meridian:** O BACEN 4.893 Art. 6 exige monitoramento contínuo. Integrar o Prowler ao Security Hub permite que o Banco Meridian demonstre para auditores que todos os findings de conformidade são rastreados em um sistema centralizado com trilha de auditoria imutável.
 
 ```bash
 # Ativar integração Security Hub (uma vez)
@@ -343,6 +363,10 @@ FLUXO SCOUTSUITE
 ```
 
 **Instalação e execução:**
+
+**O que este comando/ferramenta faz:** `scout aws` conecta às APIs da AWS usando as credenciais configuradas, enumera todos os recursos em todas as regiões e serviços (IAM, S3, EC2, RDS, VPC, CloudTrail, etc.), aplica um conjunto de regras de segurança pré-definidas sobre os dados coletados, e gera um relatório HTML estático rico em contexto. O diferencial do ScoutSuite em relação ao Prowler é o foco na visualização: o relatório HTML é altamente navegável por serviço, com dashboards de resumo e contexto rico por recurso, tornando-o ideal para apresentações a stakeholders e reuniões de revisão de postura. O flag `--profile` especifica qual perfil AWS usar (de `~/.aws/credentials`) e `--report-dir` define o diretório de saída do relatório.
+
+**Por que isso importa para o Banco Meridian:** Em reuniões de auditoria interna do Banco Meridian, o ScoutSuite oferece uma interface que stakeholders não técnicos (gerentes de risco, auditores internos, membros do comitê de segurança) conseguem navegar e compreender sem treinamento técnico aprofundado — diferente de um CSV ou JSON do Prowler.
 
 ```bash
 # Instalar ScoutSuite
@@ -380,6 +404,10 @@ scout aws --report-dir /tmp/scoutsuite-report/
 
 CloudSploit é uma engine open-source de checks de segurança cloud desenvolvida pela Aqua Security. Diferencial: você pode escrever checks customizados em JavaScript/Node.js.
 
+**O que este comando/ferramenta faz:** `node index.js --provider aws --console json` executa o CloudSploit contra a AWS usando as credenciais configuradas no `config.js` e imprime os resultados no terminal em formato JSON. O CloudSploit é instalado localmente via `npm install` após clonar o repositório. Seu diferencial em relação ao Prowler e ScoutSuite é a extensibilidade: você pode criar plugins customizados em JavaScript para verificar regras de negócio específicas da sua organização que não existem em nenhuma ferramenta open-source, como a política de classificação de dados do Banco Meridian ilustrada abaixo.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian tem políticas internas específicas (como exigir tag `DataClassification` em buckets S3 com dados de clientes) que não existem em checks padrão do Prowler ou ScoutSuite. O CloudSploit permite codificar essas políticas internas como checks automatizados, executados com a mesma frequência que os checks padrão de segurança.
+
 ```bash
 # Instalar
 git clone https://github.com/aquasecurity/cloudsploit.git
@@ -401,6 +429,8 @@ node index.js --provider aws --csv /tmp/results.csv
 ```
 
 **Exemplo de check customizado CloudSploit:**
+
+**O que este comando/ferramenta faz:** Este plugin JavaScript define um check customizado que verifica se todos os buckets S3 cujos nomes contêm a palavra "dados" possuem a tag `DataClassification` — uma política interna do Banco Meridian. O check usa o padrão de módulo do CloudSploit: declara metadados (title, category, description), lista as APIs AWS necessárias (`S3:listBuckets`, `S3:getBucketTagging`), e implementa a função `run` que itera sobre os buckets, verifica a condição e retorna resultado 0 (PASS) ou 2 (WARN) por recurso. Este padrão permite codificar qualquer política interna de governança como um check automatizável e rastreável.
 
 ```javascript
 // plugins/aws/s3/bancomeridianDataClassification.js
@@ -573,6 +603,9 @@ SIDESCAN PROCESS
 - **Defender for Databases**: proteção de Azure SQL, CosmosDB, PostgreSQL
 
 **Multi-cloud:**
+
+**O que este comando/ferramenta faz:** A conexão de uma conta AWS ao Microsoft Defender for Cloud é feita via um conector AWS que provisiona recursos via CloudFormation ou Terraform — criando roles IAM read-only na conta AWS que permitem ao Defender for Cloud enumerar os recursos e verificar sua configuração. Uma vez conectado, o Defender for Cloud passa a gerar recomendações de segurança para recursos AWS (EC2, S3, RDS) usando os frameworks CIS AWS e NIST, e encaminha alertas para o Microsoft Sentinel automaticamente via conector nativo — sem necessidade de configuração adicional.
+
 ```bash
 # Conectar conta AWS ao Defender for Cloud
 # Via AWS connector (CloudFormation ou Terraform)
@@ -647,6 +680,10 @@ Data: 24/04/2025 | Executado por: [nome] | Ferramenta: Prowler v4.3.0
 ```
 
 ### 7.3 Priorização por Impacto de Negócio (não por quantidade)
+
+**O que este comando/ferramenta faz:** Este script Python carrega o output JSON do Prowler e implementa um sistema de priorização por pontuação combinada: peso de severidade técnica (critical=100, high=70, medium=30, low=10) somado a fatores de impacto de negócio específicos do Banco Meridian (recurso exposto externamente +10, recurso com dados de clientes +8, recurso em produção +7, mapeamento BACEN +9). O resultado é uma lista ordenada onde um finding MEDIUM em um bucket público com dados de clientes e mapeamento BACEN pode ter prioridade maior que um CRITICAL em um ambiente de sandbox — refletindo o risco real ao negócio, não apenas a severidade técnica.
+
+**Por que isso importa para o Banco Meridian:** O CISO do Banco Meridian precisa decidir onde investir esforço de remediação. Um bucket S3 público com dados de clientes bancários representa risco de multa BACEN e vazamento de dados — é mais urgente que uma instância de sandbox sem dados sensíveis com uma configuração CRITICAL técnica. Este script operacionaliza essa lógica de negócio.
 
 ```python
 # Script Python para priorizar findings Prowler por impacto de negócio

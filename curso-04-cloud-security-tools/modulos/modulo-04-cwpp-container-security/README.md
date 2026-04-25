@@ -79,6 +79,11 @@ Trivy é atualmente a ferramenta mais usada no mundo para scan de containers. É
 - **License compliance:** licenças de dependências (GPLv3 em produto proprietário, por exemplo)
 
 **Instalação:**
+
+**O que este comando faz:** Instala o binário Trivy no sistema operacional local. O Trivy é um scanner unificado de segurança que analisa imagens de container camada por camada, inspecionando pacotes de SO, bibliotecas de linguagens de programação, segredos embutidos e arquivos de configuração. É relevante para segurança de containers porque permite detectar vulnerabilidades antes que a imagem chegue ao registry ou à produção.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian executa dezenas de microserviços em containers no ECS e EKS. Sem uma ferramenta como o Trivy integrada ao pipeline, imagens com CVEs críticas — como o Log4Shell (CVSS 10.0) — podem chegar diretamente à produção processando transações financeiras de clientes.
+
 ```bash
 # macOS
 brew install trivy
@@ -94,6 +99,11 @@ trivy --version
 ```
 
 **Execução completa — todos os tipos:**
+
+**O que este comando faz:** Executa o scan de vulnerabilidades e segredos em uma imagem de container, com diferentes níveis de filtragem e formatos de saída. O flag `--exit-code 1` permite que o pipeline de CI/CD falhe automaticamente ao encontrar CVEs críticas, bloqueando o avanço do pipeline. O flag `--ignore-unfixed` reduz ruído ao excluir vulnerabilidades sem correção disponível, focando o time nos riscos acionáveis.
+
+**Por que isso importa para o Banco Meridian:** O pipeline de entrega contínua do Banco Meridian deve ser configurado para falhar automaticamente quando CVEs CRITICAL forem detectadas nas imagens de pagamentos, transferências e autenticação. Isso implementa o princípio de "shift-left security", detectando riscos antes do deploy em ECS/EKS e não depois que estão processando dados de clientes.
+
 ```bash
 # Scan básico de imagem
 trivy image nginx:latest
@@ -146,6 +156,11 @@ trivy rootfs /path/to/app
 ```
 
 **Exemplo de output JSON:**
+
+**O que este comando faz:** O bloco de saída JSON demonstra a estrutura completa do relatório gerado pelo Trivy, incluindo metadados da imagem escaneada, o tipo de artefato analisado, informações do sistema operacional base e a lista estruturada de vulnerabilidades encontradas com campos de identificação, versão afetada, versão corrigida, severidade e pontuação CVSS.
+
+**Por que isso importa para o Banco Meridian:** O formato JSON do Trivy é o mais adequado para integração com o SIEM (Splunk, Microsoft Sentinel) e para geração automática de tickets no sistema de gestão de vulnerabilidades. O campo `FixedVersion` indica exatamente qual versão do pacote corrige o problema, permitindo ao time de plataforma atualizar a imagem de forma direcionada.
+
 ```json
 {
   "SchemaVersion": 2,
@@ -182,9 +197,15 @@ trivy rootfs /path/to/app
 }
 ```
 
+**Interpretando o resultado:** `ArtifactName` identifica a imagem escaneada. `Metadata.OS` indica o sistema operacional base da imagem — debian 12.0 neste caso — determinando qual banco CVE de pacotes será consultado. Em `Vulnerabilities`, o campo `VulnerabilityID` é o identificador único da CVE; `InstalledVersion` é a versão presente na imagem; `FixedVersion` é a versão que corrige o problema (atualizar para ela resolve a vulnerabilidade); `Severity` classifica o risco (CRITICAL, HIGH, MEDIUM, LOW); `CVSS.V3Score` fornece a pontuação numérica de 0 a 10. O CVE-2023-44487 (HTTP/2 Rapid Reset) com score 7.5 é uma vulnerabilidade de negação de serviço explorada ativamente em 2023, afetando qualquer servidor que aceite HTTP/2.
+
 ### 2.2 Grype — Alternativa com Integração Syft
 
 Grype é desenvolvida pela Anchore, funciona de forma complementar ao Syft (gerador de SBOM).
+
+**O que este comando faz:** Instala e executa o Grype para scan de vulnerabilidades em imagens de container, com suporte nativo para consumir SBOMs gerados pelo Syft. O fluxo `syft → grype` separa responsabilidades: Syft cria o inventário completo de componentes (SBOM) e Grype aplica o banco de CVEs contra esse inventário, permitindo reutilizar o mesmo SBOM para múltiplos scans sem re-inspecionar a imagem.
+
+**Por que isso importa para o Banco Meridian:** Ao usar o par Syft+Grype, o time de plataforma do Banco Meridian pode gerar o SBOM uma vez durante o build e reutilizá-lo para diferentes finalidades: scan de vulnerabilidades com Grype, compliance de licenças, auditoria BACEN e busca rápida de componentes afetados por novas CVEs sem re-escanear todas as imagens.
 
 ```bash
 # Instalar Grype
@@ -212,6 +233,10 @@ grype dir:./app --scope squashed
 
 ### 2.3 Snyk Container
 
+**O que este comando faz:** Instala o Snyk CLI, autentica com a plataforma Snyk e executa scan de vulnerabilidades em imagens de container com opção de monitoramento contínuo via dashboard. O comando `snyk container monitor` registra a imagem na plataforma Snyk para rastreamento contínuo — quando uma nova CVE é publicada para um componente da imagem, o Snyk notifica automaticamente o time sem necessidade de re-escanear manualmente.
+
+**Por que isso importa para o Banco Meridian:** O Snyk oferece monitoramento contínuo de imagens já em produção no ECS/EKS. Isso significa que o Banco Meridian é alertado quando novas CVEs críticas surgem para dependências das imagens em execução, não apenas no momento do build — crucial para uma postura de segurança reativa e proativa ao mesmo tempo.
+
 ```bash
 # Instalar Snyk CLI
 npm install -g snyk
@@ -233,6 +258,10 @@ snyk container test nginx:latest --file=Dockerfile
 ### 2.4 Clair
 
 Clair é um scanner de imagens com arquitetura API server, adequado para organizações que querem controlar todos os dados de vulnerabilidades internamente.
+
+**O que este comando faz:** Provisiona o Clair via Docker Compose, criando uma stack com banco de dados PostgreSQL para armazenamento dos dados de vulnerabilidades e o servidor Clair para análise de imagens via API REST. O Clair baixa e mantém localmente as bases de dados CVE de múltiplas fontes (NVD, Alpine SecDB, Debian Security Tracker), permitindo scans sem dependência de serviços externos.
+
+**Por que isso importa para o Banco Meridian:** Regulações do BACEN e requisitos de conformidade bancária podem exigir que dados de vulnerabilidades processados internamente não saiam do ambiente controlado. O Clair resolve isso ao manter toda a base CVE on-premises, sendo a escolha adequada para ambientes com restrições de soberania de dados ou airgap.
 
 ```bash
 # Deploy Clair via Docker Compose
@@ -287,6 +316,10 @@ Com SBOM, a resposta seria instantânea: `grep -r "log4j" sbom.json`. Em segundo
 | Syft native JSON | Anchore | Análise interna, análise pelo Grype | Syft |
 
 ### 3.3 Syft — Geração de SBOM
+
+**O que este comando faz:** Instala o Syft e gera SBOMs em diferentes formatos a partir de imagens de container ou diretórios locais. O Syft inspeciona todas as camadas da imagem e cataloga cada componente de software encontrado — pacotes de SO, bibliotecas de linguagens, binários — com nome, versão, tipo de pacote e metadados de licença. O flag `--scope all-layers` garante que componentes presentes em camadas intermediárias do build sejam incluídos, mesmo que não estejam presentes na imagem final squashed.
+
+**Por que isso importa para o Banco Meridian:** O SBOM gerado pelo Syft é a base para resposta a incidentes de supply chain no Banco Meridian. Quando uma nova CVE crítica é divulgada (como ocorreu com o Log4Shell), o time de segurança consulta os SBOMs armazenados para identificar em segundos quais imagens em execução no ECS/EKS são afetadas, sem precisar re-escanear todas as imagens manualmente.
 
 ```bash
 # Instalar Syft
@@ -351,6 +384,11 @@ FLUXO COSIGN KEYLESS
 ```
 
 **Instalação e uso:**
+
+**O que este comando faz:** Instala o Cosign e demonstra os três modos de operação: assinatura com chave própria (adequada para ambientes air-gapped), assinatura keyless via OIDC (recomendada para CI/CD em nuvem), e geração de attestations para anexar metadados como SBOMs à imagem de forma assinada e verificável. O `cosign verify` confirma criptograficamente que a imagem foi assinada por uma identidade específica — no caso, o pipeline do Banco Meridian no GitHub Actions — antes de permitir o deploy.
+
+**Por que isso importa para o Banco Meridian:** A assinatura de imagens com Cosign garante que apenas imagens que passaram pelo pipeline seguro de CI/CD do Banco Meridian — com scan de CVEs, geração de SBOM e aprovação do time de segurança — possam ser executadas no cluster EKS de produção. Imagens não assinadas ou assinadas por identidade não autorizada são bloqueadas pelo admission controller (Kyverno) antes mesmo de iniciar.
+
 ```bash
 # Instalar Cosign
 brew install cosign
@@ -411,6 +449,10 @@ cosign verify-attestation \
 ```
 
 ### 4.2 Pipeline Completo: Build → Scan → Sign → Push → Verify
+
+**O que este arquivo faz:** Define o pipeline completo de segurança de container no GitHub Actions, implementando todas as fases do ciclo de vida seguro em sequência obrigatória. O pipeline realiza: build da imagem sem publicar, scan de CVEs com falha automática em CRITICAL/HIGH, scan de segredos, geração de SBOM assinado como attestation, push condicionado à aprovação dos scans, assinatura keyless via OIDC do GitHub Actions, e verificação final da assinatura antes do deploy. O job `deploy-verify` requer aprovação manual (`environment: production`) e re-verifica a assinatura imediatamente antes do deploy.
+
+**Por que isso importa para o Banco Meridian:** Este pipeline implementa o princípio de "segurança em profundidade" para a cadeia de entrega de software do Banco Meridian: nenhuma imagem chega ao cluster EKS de produção sem ter passado por todos os controles de segurança. A retenção de 365 dias do SBOM (`retention-days: 365`) atende aos requisitos de auditoria do BACEN, e a verificação dupla da assinatura (no pipeline e no admission controller Kyverno) garante que mesmo um bypass do pipeline seja detectado e bloqueado.
 
 ```yaml
 # .github/workflows/container-security.yml
@@ -624,6 +666,11 @@ USER SPACE
 ```
 
 **Instalação no Kubernetes com Helm:**
+
+**O que este comando faz:** Instala o Falco no cluster Kubernetes via Helm com o driver eBPF habilitado, o Falcosidekick configurado para enviar alertas para Slack e os pods do Falco distribuídos como DaemonSet em todos os nós do cluster. O driver eBPF intercepta as chamadas de sistema (syscalls) do kernel em tempo real sem modificar o kernel, enquanto o Rules Engine avalia cada evento contra as regras YAML definidas e dispara alertas quando comportamentos suspeitos são detectados.
+
+**Por que isso importa para o Banco Meridian:** O Falco é o detector de comportamento anômalo em runtime para os clusters EKS do Banco Meridian. Enquanto o Trivy protege antes do deploy, o Falco detecta ataques que ocorrem depois — como um atacante que explorou uma vulnerabilidade zero-day (sem CVE conhecida) ou que obteve credenciais legítimas e está executando comandos maliciosos de dentro de um container de pagamentos.
+
 ```bash
 # Adicionar repositório Falco
 helm repo add falcosecurity https://falcosecurity.github.io/charts
@@ -649,7 +696,13 @@ kubectl logs -n falco-system -l app.kubernetes.io/name=falco
 kubectl exec -n falco-system deploy/falco -- falco --list
 ```
 
+**Interpretando o resultado:** `kubectl get pods -n falco-system` deve mostrar um pod Falco em estado `Running` para cada nó do cluster (DaemonSet), garantindo cobertura total. Se algum nó não tiver o pod rodando, eventos naquele nó não serão monitorados. `kubectl logs` do Falco mostrará mensagens como `Loading rules from file /etc/falco/falco_rules.yaml` (regras padrão carregadas) e `Starting gRPC server` (pronto para receber conexões do Falcosidekick). O comando `falco --list` exibe todas as regras ativas com suas condições — útil para confirmar que as regras customizadas do Banco Meridian foram carregadas corretamente.
+
 ### 5.2 Linguagem de Regras Falco
+
+**O que este bloco faz:** Demonstra a estrutura da linguagem declarativa de regras do Falco, composta por três elementos: macros (condições reutilizáveis), lists (listas de valores nomeadas) e rules (regras de detecção). Cada rule combina uma condição lógica — avaliada contra metadados de cada syscall interceptada pelo eBPF — com um template de output que inclui variáveis de contexto do container, processo e usuário. O campo `tags` mapeia a detecção para a taxonomia MITRE ATT&CK.
+
+**Por que isso importa para o Banco Meridian:** A linguagem de regras do Falco permite ao time de segurança do Banco Meridian criar detecções altamente específicas para o contexto bancário — como "qualquer shell aberto em container do namespace `production`" ou "acesso à API de metadados AWS de um container de transferências". Esse nível de granularidade é impossível em soluções de monitoramento genéricas e é o que diferencia uma CWPP de um SIEM tradicional.
 
 ```yaml
 # Estrutura básica de uma regra Falco
@@ -701,6 +754,11 @@ kubectl exec -n falco-system deploy/falco -- falco --list
 ### 5.3 Cinco Regras Falco Customizadas
 
 **Regra 1: Detecção de Shell em Container (T1059)**
+
+**O que este comando faz:** Define uma regra Falco que detecta a abertura de um processo de shell interativo (bash, zsh, sh e similares) em qualquer container do namespace `production`. A condição `terminal.isatty` garante que apenas shells com terminal conectado (interativos) sejam detectados, evitando falsos positivos de scripts não-interativos. A prioridade CRITICAL garante que este alerta sempre page o time de resposta a incidentes, independente do filtro de severidade configurado.
+
+**Por que isso importa para o Banco Meridian:** Containers de produção do Banco Meridian — APIs de pagamentos, transferências, autenticação — são concebidos como imutáveis: nenhum operador deveria precisar abrir um shell dentro deles durante a operação normal. A abertura de um shell interativo em produção é um forte indicador de comprometimento por RCE (Remote Code Execution) ou acesso não autorizado por insider, e requer investigação imediata como incidente de segurança.
+
 ```yaml
 # falco-rules-bancomeridian.yaml
 # Regra 1: Shell interativo iniciado em container de produção
@@ -729,6 +787,11 @@ kubectl exec -n falco-system deploy/falco -- falco --list
 ```
 
 **Regra 2: Escrita em Diretório Sensível**
+
+**O que este comando faz:** Define uma regra Falco que detecta operações de escrita (syscalls `write` e `openat`) em diretórios críticos do sistema operacional como `/etc`, `/bin`, `/sbin` e similares dentro de qualquer container. A exclusão de `package_mgmt_binaries` e dos init-containers do Banco Meridian reduz falsos positivos durante fases legítimas de inicialização do container, focando a detecção em operações anômalas durante o tempo de execução.
+
+**Por que isso importa para o Banco Meridian:** Containers são fundamentalmente imutáveis — nenhum processo de aplicação deveria modificar o sistema de arquivos do SO base. Escrita em `/etc` pode indicar backdoor persistente (modificação de `cron`, `sudoers` ou `ssh/authorized_keys`); escrita em `/bin` ou `/usr/bin` pode indicar substituição de binário do sistema (técnica de persistência T1546). Nos containers do Banco Meridian, essa detecção cobre a técnica de persistência mais comum em container escape.
+
 ```yaml
 # Regra 2: Escrita em /etc, /bin, /usr/bin, /sbin dentro de containers
 # Mapeamento MITRE: T1565 — Data Manipulation / T1546 — Persistence
@@ -771,6 +834,11 @@ kubectl exec -n falco-system deploy/falco -- falco --list
 ```
 
 **Regra 3: Processo Inesperado em Container de Banco de Dados**
+
+**O que este comando faz:** Define uma regra Falco baseada em lista de allowlist de processos esperados para containers de banco de dados. A detecção funciona por exclusão: qualquer processo que execute dentro de containers de imagens de banco de dados do Banco Meridian e que não esteja na lista `expected_db_processes` — incluindo ferramentas de diagnóstico legítimas como `ps` e `ls` — é reportado como anomalia. Essa abordagem de "deny by default" é mais segura que tentativas de listar processos maliciosos conhecidos.
+
+**Por que isso importa para o Banco Meridian:** Containers de banco de dados guardam os dados mais sensíveis do banco — dados de clientes, transações, saldos. Um processo inesperado nesses containers pode indicar que um atacante está executando consultas não autorizadas, exfiltrando dados, ou preparando a instalação de um ransomware. A detecção precoce de processos anômalos é a diferença entre um incidente contido e uma violação de dados com obrigação de notificação ao BACEN e à ANPD.
+
 ```yaml
 # Regra 3: Processo inesperado em containers de banco de dados
 # Mapeamento MITRE: T1059 / T1036 — Masquerading
@@ -812,6 +880,11 @@ kubectl exec -n falco-system deploy/falco -- falco --list
 ```
 
 **Regra 4: Acesso à AWS Metadata API (T1552.005)**
+
+**O que este comando faz:** Define uma regra Falco que monitora chamadas de rede (syscalls `connect` e `sendmsg`) com destino ao endereço IP `169.254.169.254` — o endpoint do AWS Instance Metadata Service (IMDS). Esse endereço link-local é acessível apenas de dentro da instância EC2 (ou de containers no mesmo host) e retorna as credenciais IAM temporárias da role associada à instância. A exceção para `bancomeridian/aws-sdk-init` cobre o caso legítimo de containers que inicializam configurações AWS via IMDS no startup.
+
+**Por que isso importa para o Banco Meridian:** O roubo de credenciais IAM via IMDS (T1552.005) é uma das técnicas de escalada de privilégios mais comuns em ambientes AWS comprometidos. As credenciais temporárias obtidas via IMDS têm a mesma permissão da role IAM da instância EC2 e podem ser usadas de qualquer lugar na internet durante o TTL (até 1 hora). Para o Banco Meridian, isso poderia significar acesso não autorizado ao S3 com dados de clientes, DynamoDB com transações, ou a outros serviços AWS críticos.
+
 ```yaml
 # Regra 4: Tentativa de acesso à API de metadados da AWS (IMDS)
 # Mapeamento MITRE: T1552.005 — Cloud Instance Metadata API
@@ -843,6 +916,11 @@ kubectl exec -n falco-system deploy/falco -- falco --list
 ```
 
 **Regra 5: Container Privilegiado Iniciado**
+
+**O que este comando faz:** Define uma regra Falco que detecta a criação de containers com a flag `privileged: true` em namespaces que não sejam `kube-system` ou `falco-system` (onde containers privilegiados são legitimamente necessários para o funcionamento do próprio Falco e componentes do Kubernetes). Containers privilegiados têm acesso quase irrestrito ao kernel do host e a todos os dispositivos — essencialmente o mesmo nível de acesso que o root no nó.
+
+**Por que isso importa para o Banco Meridian:** Um container privilegiado em execução no cluster EKS do Banco Meridian representa o risco mais alto de container escape — a capacidade de um processo dentro do container comprometer o nó Kubernetes inteiro e, a partir daí, potencialmente todo o cluster. A política de segurança do Banco Meridian proíbe explicitamente containers privilegiados em produção; esta regra Falco garante que qualquer violação dessa política — acidental ou maliciosa — seja detectada imediatamente.
+
 ```yaml
 # Regra 5: Container iniciado com --privileged ou capabilities perigosas
 # Mapeamento MITRE: T1611 — Escape to Host
@@ -870,6 +948,11 @@ kubectl exec -n falco-system deploy/falco -- falco --list
 ```
 
 **Instalar regras customizadas no Falco:**
+
+**O que este comando faz:** Demonstra três métodos para carregar regras Falco customizadas no cluster Kubernetes: via ConfigMap referenciado pelo DaemonSet do Falco, via flag `--set-file` do Helm que injeta o arquivo de regras diretamente nos valores do chart, e via ConfigMap com o conteúdo inline. O Helm upgrade com `--set-file` é o método recomendado para ambientes GitOps, pois mantém as regras versionadas junto com a configuração do Helm e permite rollback automático em caso de problemas.
+
+**Por que isso importa para o Banco Meridian:** As regras customizadas do Banco Meridian — específicas para o contexto bancário e para a nomenclatura dos seus namespaces e imagens — são o coração da detecção de ameaças em runtime. Carregá-las como ConfigMap no Kubernetes garante que novas versões das regras sejam aplicadas sem reiniciar o DaemonSet do Falco, mantendo a cobertura de detecção contínua durante atualizações.
+
 ```bash
 # Método 1: ConfigMap no Kubernetes
 kubectl create configmap falco-custom-rules \
@@ -900,6 +983,11 @@ EOF
 ```
 
 **Configurar outputs do Falco:**
+
+**O que este arquivo faz:** Define a configuração de saída do Falco, habilitando múltiplos canais de output simultâneos: stdout (para coleta via `kubectl logs` e integração com ferramentas de log do Kubernetes), arquivo em disco (para coleta por agentes de log como Fluentd ou Filebeat), syslog (para SIEMs que coletam via protocolo syslog), e webhook HTTP para o Falcosidekick. O formato JSON é habilitado globalmente para facilitar a ingestão e parsing nos sistemas de SIEM.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian utiliza o Microsoft Sentinel como SIEM central. A integração do Falco com o Sentinel via syslog ou webhook (Falcosidekick → Azure Event Hub → Sentinel) permite correlacionar alertas de runtime de containers com outros eventos de segurança — como logins suspeitos, alterações em políticas IAM e tráfego de rede anômalo — criando uma visão unificada de ameaças exigida pela Resolução BACEN 4.893.
+
 ```yaml
 # /etc/falco/falco.yaml
 # Configuração de outputs do Falco

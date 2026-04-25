@@ -88,6 +88,9 @@ CLOUD (mesma empresa, após migração)
 - Analisa: unused permissions, unused access keys, unused passwords, unused roles
 - Exemplo de finding: "IAM User `dev-johndoe` tem permissão `ec2:TerminateInstances` que nunca foi usada nos últimos 90 dias"
 
+**O que este comando faz:** Cria dois analisadores distintos do IAM Access Analyzer — um para detectar exposição externa (recursos acessíveis fora da conta) e outro para detectar permissões não utilizadas nos últimos 90 dias.
+**Por que isso importa:** No Banco Meridian, com mais de 1.200 identidades não-humanas acumuladas ao longo de anos de migrações, é impossível auditar manualmente cada role. Os analisadores automatizam a detecção de dois dos maiores vetores de risco: exposição não intencional a terceiros e permissões que nunca deveriam ter sido concedidas.
+
 ```bash
 # Habilitar External Access Analyzer via CLI
 aws accessanalyzer create-analyzer \
@@ -178,6 +181,9 @@ Solução CIEM multi-cloud da Microsoft (adquirida da CloudKnox). Disponível co
 - **Activity triggers:** alerta quando identidades realizam ações perigosas (ex: criar usuário IAM)
 - **On-demand permissions:** JIT access integrado
 
+**O que este comando faz:** Cria um aplicativo no Entra ID para integração com o Entra Permissions Management e consulta o Permissions Creep Index (PCI) de todas as identidades via Microsoft Graph API.
+**Por que isso importa:** Para o Banco Meridian operar em múltiplas nuvens, uma visão unificada de permissões excessivas em AWS, Azure e GCP num único painel elimina os pontos cegos que surgem quando cada equipe gerencia suas permissões em silos separados.
+
 ```bash
 # Configurar Entra Permissions Management via CLI (Azure)
 az ad app create --display-name "EntraPermissionsManagement"
@@ -188,6 +194,9 @@ az rest --method get \
 ```
 
 ### 2.3 GCP Policy Intelligence
+
+**O que este comando faz:** Consulta o serviço de recomendações do GCP para obter sugestões de redução de permissões IAM baseadas em uso histórico real, e aplica automaticamente as recomendações aprovadas.
+**Por que isso importa:** No GCP, o Policy Intelligence analisa o comportamento de cada service account e sugere a remoção de permissões não utilizadas. Para o Banco Meridian, isso significa substituir service accounts com roles amplas como `roles/editor` por roles customizadas com apenas as permissões efetivamente exercidas nos últimos 90 dias.
 
 ```bash
 # Recomendações de IAM baseadas em uso real
@@ -249,6 +258,9 @@ Após 4 horas: permissão revogada automaticamente
 
 ### 3.2 Implementação JIT Básico com AWS SSO + Aprovação
 
+**O que este comando faz:** Cria um Permission Set no AWS IAM Identity Center com duração de sessão de 4 horas (TTL), associa ao usuário sob demanda, e em seguida revoga o acesso quando o TTL expira ou a tarefa é concluída.
+**Por que isso importa:** No Banco Meridian, DBAs e administradores de nuvem nunca deveriam ter acesso permanente a bancos de produção. O JIT via SSO elimina o risco de standing access — se um administrador for comprometido via phishing fora do horário de trabalho, o atacante não encontrará nenhuma permissão ativa para explorar.
+
 ```bash
 # Arquitetura JIT com AWS IAM Identity Center (SSO)
 #
@@ -277,6 +289,9 @@ aws sso-admin delete-account-assignment \
   --principal-type USER \
   --principal-id USER_ID
 ```
+
+**O que este código faz:** Implementa um fluxo completo de JIT access via Lambda — recebe a solicitação de acesso pelo Slack, envia para aprovação do CISO no canal #security-approvals, e após aprovação cria o assignment SSO com TTL, além de agendar automaticamente a revogação via EventBridge.
+**Por que isso importa:** Automatizar o fluxo de aprovação elimina a dependência de processos manuais e lentos que frequentemente resultam em acesso permanente por conveniência. O Banco Meridian consegue demonstrar para o BACEN que cada acesso privilegiado tem aprovação registrada, duração limitada e revogação automática documentada no audit trail.
 
 ```python
 # Lambda function para automação de JIT com aprovação via Slack
@@ -359,6 +374,9 @@ Objetivo: Saber exatamente quem/o-que existe e o que pode fazer
 Comandos:
 ```
 
+**O que este comando faz:** Obtém o relatório completo de autorização da conta AWS, extraindo para cada usuário IAM o nome, data de criação, último uso de senha e presença de dispositivos MFA. Em paralelo, gera o relatório de credenciais nativo do IAM e identifica chaves de acesso com mais de 90 dias sem rotação.
+**Por que isso importa:** O Banco Meridian não pode auditar o que não enxerga. Este inventário inicial revela o gap entre identidades criadas e identidades ativamente gerenciadas — em muitos casos, usuários de ex-colaboradores ou de projetos encerrados permanecem ativos por anos, criando backdoors não intencionais que violam diretamente o BACEN 4.893 Art. 8.
+
 ```bash
 # Listar todos os IAM users com data de criação e último uso
 aws iam get-account-authorization-details \
@@ -399,6 +417,9 @@ ETAPA 2: IDENTIFICAÇÃO DE PERMISSÕES EXCESSIVAS
 Objetivo: Encontrar gaps entre permissões concedidas e permissões usadas
 ```
 
+**O que este comando faz:** Habilita o Unused Access Analyzer com lookback de 90 dias e lista todas as ações IAM que foram concedidas a roles mas nunca efetivamente executadas no período. Em seguida, varre todas as roles em busca de nomes de políticas que sugerem permissões administrativas amplas.
+**Por que isso importa:** No Banco Meridian, a prática comum de conceder `AmazonS3FullAccess` para uma Lambda que só precisa de `s3:GetObject` cria uma superfície de ataque 20 vezes maior que o necessário. Identificar essas permissões excessivas é o primeiro passo para a remediação baseada em dados reais de uso — não em estimativas.
+
 ```bash
 # Habilitar Unused Access Analyzer (se não habilitado ainda)
 aws accessanalyzer create-analyzer \
@@ -437,6 +458,9 @@ Critérios de priorização:
   6. Permissões não usadas em roles de desenvolvimento → BAIXO
 ```
 
+**O que este comando faz:** Varre as políticas inline de todas as roles IAM em busca de statements com `Action: "*"`, `Action: "iam:*"` ou `Action: "sts:*"` — as "combinações tóxicas" que transformam uma role aparentemente inofensiva em um shadow admin com poderes equivalentes ao AdministratorAccess.
+**Por que isso importa:** No Banco Meridian, uma role chamada `lambda-processamento-boletos` com `iam:CreateUser` não levanta suspeitas imediatas — o nome sugere uma função inofensiva. Mas se essa role também tiver `iam:AttachUserPolicy` e `sts:AssumeRole`, um atacante que a comprometer pode criar um novo usuário administrador e manter persistência permanente no ambiente, mesmo após a revogação da role original.
+
 ```bash
 # Script de priorização — identifica shadow admins
 aws iam list-roles --output json | jq -r '.Roles[].RoleName' | while read role; do
@@ -473,6 +497,9 @@ ETAPA 4: REMEDIAÇÃO COM MÍNIMO DE PERMISSÕES
 ──────────────────────────────────────────────────
 Estratégia: usar Policy Generation para criar política mínima baseada em uso real
 ```
+
+**O que este comando faz:** Inicia o processo de Policy Generation do IAM Access Analyzer, que analisa 90 dias de eventos do CloudTrail para a role especificada e gera automaticamente uma política IAM contendo apenas as ações que foram efetivamente executadas no período. Em seguida, cria a nova política mínima e substitui a política excessiva existente.
+**Por que isso importa:** A Policy Generation é a diferença entre remediação baseada em opinião ("acho que essa role precisa só de S3") e remediação baseada em evidência ("o CloudTrail mostra que essa role usou exatamente 3 ações S3 nos últimos 90 dias"). Para o Banco Meridian, isso elimina o argumento de "melhor não mexer por precaução" e permite reduzir permissões com confiança de que nenhuma funcionalidade legítima será quebrada.
 
 ```bash
 # Iniciar geração de política mínima para uma role
@@ -522,6 +549,9 @@ ETAPA 5: MONITORAMENTO CONTÍNUO
 ─────────────────────────────────────
 Configurar alertas para detectar novas permissões excessivas
 ```
+
+**O que este comando faz:** Cria um filtro de métrica no CloudWatch Logs que monitora o CloudTrail em busca de eventos de criação de políticas IAM com wildcards (`Action: "*"`), e configura um alarme que notifica imediatamente o time de segurança via SNS quando esse padrão é detectado.
+**Por que isso importa:** Sem monitoramento contínuo, a auditoria CIEM é um evento pontual — as permissões excessivas removidas hoje serão recriadas no próximo sprint por um desenvolvedor que não conhece as políticas de segurança. Para o Banco Meridian, esse alarme fecha o ciclo: qualquer tentativa de criar uma política com wildcard dispara um alerta em menos de 5 minutos, transformando a segurança de IAM de reativa para preventiva.
 
 ```bash
 # Criar CloudWatch alarm para novas permissões administrativas
@@ -616,7 +646,7 @@ Qual métrica do Entra Permissions Management (Azure) quantifica o nível de per
 **d)** Identity Risk Score (IRS)  
 
 **Gabarito: b)**  
-Justificativa: O Permissions Creep Index (PCI) é a métrica proprietária do Entra Permissions Management que calcula o nível de permissões excessivas em escala de 0 a 100. Um PCI de 0 significa que a identidade usa 100% de suas permissões. Um PCI de 100 significa que as permissões são massivamente excessivas. É uma forma de quantificar o risco de CIEM de cada identidade.
+Justificativa: O Permissions Creep Index (PCI) é a métrica proprietária do Entra Permissions Management que calcula o nível de permissões excessivas em escala de 0 a 100. Um PCI de 0 significa que a identidade usa 100% de suas permissões. Um PCI de 100 significa que as permissões concedidas são massivamente maiores que as utilizadas — o máximo de permissions creep. É uma forma de quantificar o risco de CIEM de cada identidade.
 
 ---
 

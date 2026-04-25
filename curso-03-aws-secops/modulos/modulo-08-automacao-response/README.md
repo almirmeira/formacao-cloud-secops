@@ -98,6 +98,12 @@ Ao concluir este módulo, o aluno será capaz de:
 
 **Cenário:** GuardDuty gera finding `UnauthorizedAccess:IAMUser/TorIPCaller` indicando que credenciais estão sendo usadas de IP Tor.
 
+**Objetivo de segurança desta automação:** Uma access key IAM usada de IP Tor indica comprometimento — o atacante obteve a chave e está a usando de infra anônima. Cada segundo que a chave permanece ativa é uma janela para o atacante escalar privilégios, exfiltrar dados ou criar backdoors. Esta Lambda function executa a contenção em menos de 30 segundos, comparado com 38 minutos de média quando feito manualmente.
+
+**Por que inativar e não excluir:** Excluir a chave destrói a evidência — o `AccessKeyId` que aparece no CloudTrail e nos findings do GuardDuty. Inativar preserva o ID para correlação forense enquanto revoga o acesso imediatamente. Após a investigação completa (Lab 05), o time decide se exclui ou se a chave pertence a um sistema legítimo que foi comprometido.
+
+**Fluxo da automação:** EventBridge captura o finding GuardDuty → invoca esta Lambda com o evento completo → Lambda extrae `accessKeyId` e `userName` dos campos do finding → desabilita a chave via `iam:UpdateAccessKey` → adiciona tags de evidência no usuário → envia relatório detalhado via SNS para o CISO e o time de IR.
+
 ```python
 import boto3
 import json
@@ -268,6 +274,12 @@ def handler(event, context):
 ---
 
 ## 5. Automação 2 — Revogar Sessões de Usuário Suspeito
+
+**Objetivo de segurança desta automação:** Quando um finding de `PrivilegeEscalation:IAMUser/AnomalousBehavior` é gerado, o usuário IAM já pode ter assumido roles, gerado sessões temporárias via STS e executado ações com essas sessões. Simplesmente desabilitar as access keys (Automação 1) não revoga essas sessões temporárias ativas — elas continuam válidas até seu timeout natural (até 12 horas).
+
+Esta automação vai além: além de desabilitar as access keys, ela adiciona uma política inline de `Deny` com a condição `DateLessThan: aws:TokenIssueTime` no momento da execução. Qualquer sessão ativa emitida antes desse timestamp passa a receber `Deny` em todas as ações — efetivamente invalidando todas as sessões simultâneas.
+
+**Impacto operacional:** Esta automação pode causar impacto em serviços legítimos que usam o mesmo usuário IAM. Por isso, é acionada especificamente para findings de escalonamento de privilégios (severidade HIGH), não para findings informativos. A notificação via SNS garante que o time possa fazer triage imediata e desfazer a ação se for falso positivo.
 
 ```python
 import boto3

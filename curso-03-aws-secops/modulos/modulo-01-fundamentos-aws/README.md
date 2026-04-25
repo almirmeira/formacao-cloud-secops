@@ -81,6 +81,8 @@ O Security Pillar do AWS Well-Architected Framework define sete áreas de design
 
 O AWS Organizations permite gerenciar múltiplas contas AWS como uma unidade, aplicar políticas centralizadas e consolidar faturamento.
 
+**Por que isso importa para o Banco Meridian:** O banco opera com 4 contas AWS (Mgmt, Audit, Logs, Prod) que precisam de isolamento de blast radius. Se um atacante comprometer credenciais da conta Prod (444444444444), as SCPs no AWS Organizations impedem que ele acesse dados nas contas Audit (222222222222) ou Logs (333333333333). Este é o controle preventivo exigido pela Resolução BACEN 4.893, Art. 7º — e é exatamente o que o Lab 01 vai implementar.
+
 ### Conceitos Fundamentais
 
 | Conceito | Descrição |
@@ -132,6 +134,10 @@ As SCPs definem a barreira máxima de permissões para contas em uma OU. Mesmo q
 
 ### SCP 1 — DenyRootAccess
 
+**O que este comando/configuração faz:** Esta SCP aplica uma negação incondicional a qualquer ação (`Action: *`) em qualquer recurso (`Resource: *`) quando o principal da requisição for a conta root (identificada pelo padrão `arn:aws:iam::*:root`). O efeito é que nenhuma operação poderá ser executada pela conta root nas member accounts — o acesso é bloqueado antes mesmo de qualquer avaliação de políticas IAM.
+
+**Por que isso importa para o Banco Meridian:** A conta root de cada uma das quatro contas AWS (Mgmt, Audit, Logs, Prod) possui permissões irrevogáveis que não podem ser restritas por IAM. Um vazamento de credenciais root seria catastrófico e praticamente irreparável. O BACEN 4.893 exige controles de acesso privilegiado — bloquear o uso operacional da root é o primeiro controle a implementar numa estrutura multi-conta regulada.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -154,6 +160,10 @@ As SCPs definem a barreira máxima de permissões para contas em uma OU. Mesmo q
 **Propósito:** Impede o uso da conta root em todas as member accounts. A conta root não deve ser usada para operações do dia a dia.
 
 ### SCP 2 — DenyRegionsNotApproved
+
+**O que este comando/configuração faz:** Esta SCP usa o operador `NotAction` para aplicar a restrição a todos os serviços AWS *exceto* os listados (serviços globais como IAM, CloudFront, Route 53). Para qualquer serviço não listado, a ação é negada se a região solicitada (`aws:RequestedRegion`) não estiver no conjunto aprovado. Isso cria uma barreira geográfica que impede o provisionamento de recursos fora das regiões sancionadas, enquanto mantém o funcionamento dos serviços que operam globalmente.
+
+**Por que isso importa para o Banco Meridian:** O BACEN 4.893 estabelece requisitos de soberania de dados para instituições financeiras brasileiras, limitando onde dados podem ser processados e armazenados. Com quatro contas AWS ativas, um desenvolvedor poderia acidentalmente (ou intencionalmente) subir recursos em regiões europeias ou asiáticas, criando risco regulatório e dificultando a auditoria. A restrição às regiões `sa-east-1` (São Paulo), `us-east-1` e `us-east-2` atende à estratégia de nuvem aprovada pelo CISO.
 
 ```json
 {
@@ -193,6 +203,10 @@ As SCPs definem a barreira máxima de permissões para contas em uma OU. Mesmo q
 
 ### SCP 3 — DenyUnencryptedS3
 
+**O que este comando/configuração faz:** Esta SCP opera em dois momentos distintos: primeiro, ao gravar um objeto (`s3:PutObject`), verifica se o cabeçalho de criptografia server-side está presente com valor `aws:kms` ou `AES256`; segundo, ao criar um bucket (`s3:CreateBucket`), verifica se a configuração de criptografia padrão está definida. Qualquer operação que omita esses requisitos é bloqueada no nível da API, antes de qualquer processamento pelo S3.
+
+**Por que isso importa para o Banco Meridian:** Dados bancários — extratos, transações, dados de clientes — não podem jamais ser armazenados em texto claro. A Resolução BCB 4.893 Art. 6 exige criptografia de dados em repouso para todas as informações sensíveis. Esta SCP garante que o controle seja impositivo e não dependente da boa vontade de cada time: mesmo que um desenvolvedor esqueça de configurar a criptografia no código da aplicação, a tentativa de escrita será rejeitada.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -230,6 +244,10 @@ As SCPs definem a barreira máxima de permissões para contas em uma OU. Mesmo q
 
 ### SCP 4 — RequireMFAForSensitiveActions
 
+**O que este comando/configuração faz:** Esta SCP usa a condição `BoolIfExists: aws:MultiFactorAuthPresent: false` para bloquear um conjunto de ações IAM sensíveis quando a sessão não incluir autenticação multifator. O operador `BoolIfExists` garante que a condição só seja avaliada se a chave existir na requisição — evitando que chamadas de serviços AWS (que nunca têm MFA) sejam inadvertidamente bloqueadas. As ações cobertas incluem criação de usuários, roles, policies, access keys e saída da organização.
+
+**Por que isso importa para o Banco Meridian:** Credenciais IAM comprometidas são o vetor de ataque mais frequente em ambientes AWS. Se um atacante obtiver as credenciais de um administrador IAM sem MFA, poderá criar usuários backdoor, escalar privilégios e comprometer toda a organização. Para um banco regulado pelo BACEN, o controle de acesso privilegiado com MFA não é opcional — é exigência explícita de conformidade e boa prática de governança de identidade.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -263,6 +281,10 @@ As SCPs definem a barreira máxima de permissões para contas em uma OU. Mesmo q
 **Propósito:** Exige MFA para modificações críticas de IAM. Protege contra comprometimento de credenciais sem MFA executando mudanças privilegiadas.
 
 ### SCP 5 — DenyDisableCloudTrail
+
+**O que este comando/configuração faz:** Esta SCP bloqueia as quatro operações que um atacante usaria para desabilitar ou esvaziar o CloudTrail: `StopLogging` (parar o trail), `DeleteTrail` (excluir o trail), `UpdateTrail` (modificar destino dos logs) e `PutEventSelectors` (remover categorias de eventos). A condição `StringNotEquals` em `aws:PrincipalArn` permite que apenas a role designada `CloudTrailAdminRole` execute essas operações, criando um controle de separação de funções.
+
+**Por que isso importa para o Banco Meridian:** O CloudTrail é a espinha dorsal de auditoria e forense em AWS — sem ele, não é possível rastrear quem fez o quê em nenhuma das quatro contas. A primeira ação de um atacante sofisticado após comprometer uma conta é desabilitar o logging para cobrir rastros. O BACEN 4.893 Art. 7 exige registro imutável de operações — esta SCP garante que nem mesmo um administrador comprometido consiga apagar esse registro.
 
 ```json
 {
@@ -343,6 +365,10 @@ O Control Tower automatiza a criação de landing zones seguras e aplica guardra
 
 ### Exemplo: Cross-Account Role com External ID
 
+**O que este comando/configuração faz:** Esta trust policy define quem pode assumir a role: especificamente, apenas a `AuditRole` da conta `222222222222` (conta Audit), e somente quando a chamada incluir o `sts:ExternalId` exato configurado. O External ID funciona como um segredo compartilhado que deve estar presente na chamada `sts:AssumeRole`. Sem ele, mesmo que a conta certa faça a requisição, o acesso é negado.
+
+**Por que isso importa para o Banco Meridian:** O time de auditoria interna opera a partir da conta Audit (222222222222) e precisa acessar temporariamente a conta de Produção (444444444444) para revisar configurações. O External ID protege contra o "confused deputy problem" — impede que a empresa de auditoria use as credenciais que o Banco Meridian criou para acessar contas de outros clientes dela. É uma camada extra de segurança exigida em contratos de auditoria regulatória.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -366,6 +392,10 @@ O Control Tower automatiza a criação de landing zones seguras e aplica guardra
 **External ID:** Protege contra o "confused deputy problem". O External ID deve ser um valor único e secreto combinado entre o cliente e o provedor externo.
 
 ### Exemplo: Permissions Boundary
+
+**O que este comando/configuração faz:** Esta Permissions Boundary define o teto máximo de permissões para qualquer identidade IAM à qual ela seja associada. O primeiro statement `AllowSpecificServices` lista os serviços que a identidade pode usar (S3, DynamoDB, Lambda, CloudWatch). O segundo statement `DenyPrivilegeEscalation` nega explicitamente as ações que permitiriam escalada de privilégios — criação de usuários, roles, anexação de políticas e criação de access keys. Mesmo que a identity-based policy do usuário conceda essas permissões, o boundary as remove.
+
+**Por que isso importa para o Banco Meridian:** Times de desenvolvimento precisam de autonomia para criar roles para seus microsserviços, mas não devem poder criar identidades com permissões além do escopo do projeto. Sem boundaries, um desenvolvedor com permissões IAM limitadas poderia criar uma role com `AdministratorAccess`, assumir essa role e comprometer toda a conta. O Banco Meridian adota boundaries como controle obrigatório para toda role criada fora do pipeline centralizado de provisionamento.
 
 ```json
 {
@@ -428,6 +458,10 @@ O IAM Access Analyzer identifica recursos compartilhados com entidades externas 
 
 ### Policy 1 — Analista de Segurança (Read-Only Security)
 
+**O que este comando/configuração faz:** Esta política identity-based concede acesso de leitura (`Get*`, `List*`, `Describe*`) a todos os principais serviços de segurança da AWS: GuardDuty, Security Hub, CloudTrail, Config, IAM, Access Analyzer, Inspector e Macie. O padrão wildcard nos verbos garante cobertura completa de leitura sem precisar listar cada ação individualmente. Nenhuma ação de escrita ou modificação é concedida.
+
+**Por que isso importa para o Banco Meridian:** O time de Security Operations do Banco Meridian opera na conta Audit (222222222222) e precisa de visibilidade completa sobre o postura de segurança das quatro contas. Esta política segue o princípio do menor privilégio: analistas visualizam e investigam, mas não alteram configurações — reduzindo o raio de explosão caso uma credencial de analista seja comprometida. O BACEN exige segregação de funções entre quem opera e quem audita.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -464,6 +498,10 @@ O IAM Access Analyzer identifica recursos compartilhados com entidades externas 
 ```
 
 ### Policy 2 — Resposta a Incidentes (IR Role)
+
+**O que este comando/configuração faz:** Esta política tem dois statements com propósitos distintos. O primeiro (`IRReadAccess`) concede leitura ampla sobre EC2, logs, S3, CloudTrail e Amazon Detective — para investigação. O segundo (`IRResponseActions`) concede ações de resposta ativa: tirar snapshots, modificar Security Groups, revogar credenciais IAM — mas restringe essas ações a apenas duas regiões aprovadas (`sa-east-1` e `us-east-1`) via condição de região. Isso impede que a role IR seja usada para ações destrutivas em outras regiões.
+
+**Por que isso importa para o Banco Meridian:** Durante um incidente ativo, o analista de IR precisa agir rapidamente: isolar uma instância comprometida, revogar credenciais de um usuário suspeito, tirar snapshot forense. Mas essa mesma role não pode ser usada para ações globais não relacionadas ao incidente. A condição de região limita o raio de ação e protege contra uso indevido da role IR fora do contexto de resposta a incidente.
 
 ```json
 {

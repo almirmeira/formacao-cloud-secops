@@ -94,6 +94,10 @@ IAM Identity Center (Management Account)
 
 ### Permission Sets — Exemplos Completos
 
+**O que são Permission Sets e por que substituem roles individuais:** Sem o IAM Identity Center, cada conta AWS precisaria ter roles IAM criadas e mantidas individualmente — o time de segurança precisaria de uma role em cada conta, com a política correta, e com a trust policy certa apontando para o IdP corporativo. Com Permission Sets, você define a política UMA VEZ no Identity Center e ela é propagada automaticamente para todas as contas onde for necessária. Quando a política precisa ser atualizada (ex: adicionar `detective:Search*` ao SecurityAuditReadOnly), a mudança é feita em um único lugar e propagada automaticamente para todas as contas afetadas.
+
+**Modelo de Permission Sets do Banco Meridian:** Cinco Permission Sets cobrem todas as personas do time de segurança e tecnologia. O princípio do menor privilégio é aplicado rigorosamente — o SecurityAuditReadOnly não tem nenhuma ação de escrita, e o SecurityResponder tem ações de contenção mas sem permissões de IAM administrativa (não pode criar usuários ou modificar políticas de forma abrangente).
+
 **Permission Set: SecurityAuditReadOnly**
 
 ```json

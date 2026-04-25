@@ -48,7 +48,9 @@ Contas Membro (444, 333, 555...)
 
 ### Custom Actions no Security Hub
 
-Custom Actions permitem executar ações manuais em findings a partir do console.
+Custom Actions permitem executar ações manuais em findings a partir do console. No contexto do Banco Meridian, o analista de SOC pode selecionar um finding HIGH no Security Hub, clicar em "Ações → Escalar para CISO", e uma Lambda function é invocada automaticamente enviando o e-mail de escalonamento com todos os detalhes do finding para o CISO. Isso elimina o processo manual de copiar informações do console para um e-mail, reduz o tempo de escalonamento de minutos para segundos, e garante que todos os campos relevantes do finding sejam incluídos.
+
+**O que este código faz:** A função Lambda `handler` recebe o evento do Security Hub (que contém os findings selecionados pelo analista), extrai os campos-chave de cada finding, formata um e-mail estruturado com informações de severidade, conta, recurso afetado e ID do finding, e envia via Amazon SES para o e-mail do CISO. A resposta `statusCode: 200` confirma o processamento bem-sucedido.
 
 ```python
 # Lambda acionada por Custom Action "Escalar para CISO"
@@ -130,6 +132,10 @@ Este é um email automático do sistema Security Hub.
 ## 3. Conformance Pack para BACEN 4.893
 
 A Resolução BCB 4.893 exige controles de segurança para o Sistema Financeiro Nacional. Este conformance pack mapeia os principais controles.
+
+**O que é um Conformance Pack:** Um conformance pack é uma coleção de Config rules (e opcionalmente Remediações) agrupadas em um único template YAML. Em vez de criar cada Config rule individualmente no console, você faz o deploy de um conformance pack que cria todas as regras de uma vez. O benefício para o Banco Meridian é duplo: (1) cada regra está documentada com o artigo específico do BACEN que ela atende, facilitando a demonstração de conformidade para auditores; (2) o conformance pack pode ser deployado em múltiplas contas simultaneamente via Organizations.
+
+**Como interpretar o resultado:** Após o deploy, o AWS Config avalia automaticamente cada recurso da conta contra cada regra. O resultado é um score de conformidade (porcentagem de recursos COMPLIANT em relação ao total). O auditor do BACEN pode solicitar evidência desse score como prova de avaliação contínua de controles.
 
 ```yaml
 # conformance-pack-bacen-4893.yaml

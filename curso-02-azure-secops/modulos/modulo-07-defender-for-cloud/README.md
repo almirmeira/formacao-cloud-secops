@@ -75,6 +75,10 @@ Para o Banco Meridian: CSPM garante que nenhuma VM Azure tenha RDP exposto à in
 
 O Secure Score é uma métrica de 0-100 que representa a postura de segurança relativa do ambiente. É calculado com base em:
 
+**Por que o Secure Score é uma ferramenta gerencial, não apenas técnica:** O Secure Score traduz configurações técnicas de segurança em uma linguagem que executivos entendem. Um CISO pode reportar ao conselho do Banco Meridian "nossa postura de segurança no Azure passou de 62% para 78% no trimestre" sem precisar explicar 47 recomendações técnicas individuais. Isso também permite benchmarking: o Defender for Cloud exibe o percentil da organização em relação ao setor (ex.: "Você está acima de 73% das organizações do setor financeiro"), o que pode ser usado para demonstrar maturidade comparativa ao BACEN.
+
+**A armadilha do Secure Score — quando um número alto dá falsa segurança:** Um Secure Score alto NÃO significa que o ambiente está seguro — significa que os recursos existentes têm boa configuração. Um banco pode ter Secure Score de 95% mas ter um bucket de storage S3 na AWS (fora do Defender for Cloud) com dados de clientes publicamente acessível. O Secure Score avalia apenas o que está no escopo do Defender for Cloud. Por isso, a cobertura multi-cloud (Lab 06) é tão importante quanto o score em si.
+
 ```
 Secure Score = (Pontos obtidos / Pontos máximos possíveis) × 100
 
@@ -172,6 +176,20 @@ Após habilitação (até 24h para avaliação completa), o relatório de compli
 ## 4. Defender Plans: CWPP para Cada Workload
 
 ### 4.1 Tabela de Defender Plans
+
+**A distinção crítica entre CSPM (grátis) e CWPP (pago):** O Defender for Cloud tem dois modos de operação:
+- **CSPM gratuito:** Avalia configurações, calcula Secure Score, gera recomendações de postura. Não detecta ameaças ativas em tempo real.
+- **CWPP pago (Defender Plans):** Detecta ataques ativos, gera alertas de segurança, aplica proteções específicas por workload.
+
+Para o Banco Meridian, usar apenas o CSPM gratuito é como ter um checklist de segurança predial mas sem sistema de alarme. O CWPP (Defender Plans) é o sistema de alarme que detecta intrusão em andamento.
+
+**Como selecionar quais plans habilitar sem explodir o orçamento:** Em vez de habilitar tudo, priorize pelos workloads que hospedam dados sensíveis e pelos que têm maior superfície de ataque:
+1. `Defender for Servers P2`: para todos os servidores que hospedam aplicações financeiras e dados de clientes
+2. `Defender for Databases`: para o SQL Server com dados transacionais
+3. `Defender for Key Vault`: para as chaves de assinatura digital
+4. `Defender for Storage`: para o storage com documentos de clientes
+
+Esses 4 plans cobrem os dados mais sensíveis do banco com custo controlado.
 
 | Defender Plan                | O que protege                                    | Preço aproximado          | Detecções principais                                     |
 |:-----------------------------|:-------------------------------------------------|:--------------------------|:---------------------------------------------------------|

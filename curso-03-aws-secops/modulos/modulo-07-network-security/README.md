@@ -25,7 +25,7 @@ Ao concluir este módulo, o aluno será capaz de:
 
 ```
 VPC Banco Meridian — sa-east-1 (10.0.0.0/16)
-═══════════════════════════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════════════
 
   Internet Gateway
        │
@@ -93,6 +93,10 @@ VPC Banco Meridian — sa-east-1 (10.0.0.0/16)
 
 ### Regras SG para Camada de Aplicação (Banco Meridian)
 
+**O que este comando/configuração faz:** Os quatro comandos abaixo configuram o Security Group da camada de aplicação do internet banking seguindo o princípio do mínimo acesso. A aplicação aceita conexões HTTPS apenas do ALB (nunca diretamente da internet), permite acesso SSH apenas da subnet de IR em emergências, e pode iniciar conexões apenas com o banco de dados e os VPC Endpoints — nenhuma saída direta para a internet.
+
+**Por que isso importa para o Banco Meridian:** Uma das falhas de configuração mais comuns em ambientes AWS é o Security Group com regras de ingresso `0.0.0.0/0` na porta 443 aplicado diretamente em instâncias de aplicação — expondo desnecessariamente servidores à internet quando eles deveriam ser acessíveis apenas pelo ALB. No Banco Meridian, qualquer instância comprometida no segmento de app não consegue iniciar conexões de saída para a internet (para exfiltrar dados ou comunicar com C2) porque as regras de egress só permitem tráfego para o banco de dados e endpoints AWS internos.
+
 ```bash
 # Security Group: sg-app-internetbanking
 
@@ -125,6 +129,10 @@ aws ec2 authorize-security-group-egress \
 ```
 
 ### NACL para Subnet de Banco de Dados
+
+**O que este comando/configuração faz:** As quatro regras abaixo criam uma Network ACL dedicada para as subnets que hospedam o RDS Aurora de transações. Por serem stateless (ao contrário dos Security Groups), as NACLs precisam de regras explícitas tanto para ingresso quanto para egresso. A regra 100 de ingresso permite apenas PostgreSQL (porta 5432) das subnets de aplicação. A regra 32767 nega tudo mais. As regras de egresso espelham essa lógica, mas para o retorno TCP nas portas efêmeras (1024-65535), que são as portas de resposta usadas pelos clientes TCP.
+
+**Por que isso importa para o Banco Meridian:** Security Groups são a primeira linha de defesa por instância, mas NACLs adicionam uma camada de proteção no nível de subnet que é independente dos SGs. Se um analista de segurança comete um erro ao configurar um SG do RDS e inadvertidamente abre a porta 5432 para `0.0.0.0/0`, a NACL da subnet de dados ainda bloqueia o tráfego que não vem das subnets de app. Essa defesa em profundidade é especialmente importante para dados de transações financeiras, onde uma exposição acidental pode ter consequências regulatórias severas.
 
 ```bash
 # NACL para subnets de RDS — apenas permitir tráfego das subnets de app
@@ -182,6 +190,10 @@ aws ec2 create-network-acl-entry \
 
 ### Forçar Uso de VPC Endpoint via Resource Policy
 
+**O que este comando/configuração faz:** Esta bucket policy implementa uma negação condicional: qualquer acesso ao bucket `meridian-transacoes-444` que não passe pelo VPC Endpoint específico `vpce-0abc123def456789` é bloqueado, independentemente das permissões IAM do solicitante. A condição `StringNotEquals` sobre `aws:SourceVpce` é o mecanismo que garante que apenas o tráfego originado dentro da VPC (pelo endpoint) seja aceito.
+
+**Por que isso importa para o Banco Meridian:** Credenciais AWS comprometidas (access key + secret) são um vetor de ataque frequente contra instituições financeiras. Sem esta política, um atacante que obtivesse as credenciais de uma role com acesso ao bucket poderia baixar dados de transações diretamente da internet usando o AWS CLI. Com a restrição de endpoint, as credenciais são inúteis fora da VPC — o acesso só funciona de dentro da infraestrutura do banco, eliminando a ameaça de exfiltração remota de dados via credenciais roubadas.
+
 ```json
 {
   "Version": "2012-10-17",
@@ -232,6 +244,10 @@ Rule Groups                           Custom Rules
 
 **Regra 1 — Bloqueio de SQL Injection Customizado:**
 
+**O que este comando/configuração faz:** Esta regra WAF inspeciona tanto a query string quanto o body da requisição HTTP em busca de padrões de SQL Injection. As `TextTransformations` são cruciais: elas decodificam o payload antes de avaliar os padrões — URL_DECODE converte `%27` para `'`, HTML_ENTITY_DECODE converte `&#x27;` para `'`, e LOWERCASE normaliza para minúsculas. O `SensitivityLevel: HIGH` aumenta a taxa de detecção ao custo de um leve aumento de falsos positivos. A `OrStatement` garante que tanto payloads na URL quanto no body sejam verificados.
+
+**Por que isso importa para o Banco Meridian:** SQL Injection é classificado como A03 no OWASP Top 10 e continua sendo um dos vetores de ataque mais efetivos contra sistemas financeiros. O banco de dados de transações do Banco Meridian contém informações de todas as transações dos clientes — um ataque de SQLi bem-sucedido poderia extrair dados de milhões de contas. A detecção com múltiplas transformações é necessária porque atacantes sofisticados codificam seus payloads para evitar detecções simples baseadas em strings literais.
+
 ```json
 {
   "Name": "MeridianSQLiBlock",
@@ -274,6 +290,10 @@ Rule Groups                           Custom Rules
 
 **Regra 2 — Bloqueio de XSS:**
 
+**O que este comando/configuração faz:** Esta regra detecta Cross-Site Scripting (XSS) no body das requisições com quatro camadas de decodificação sequencial. O `JS_DECODE` é especialmente importante: ele decodifica sequências de escape JavaScript como `\x3cscript\x3e` que seriam invisíveis para uma regra simples de detecção de `<script>`. A ordem das transformações importa — URL decode primeiro, depois HTML entities, depois JS escapes, e por fim normalização para minúsculas.
+
+**Por que isso importa para o Banco Meridian:** Ataques XSS no internet banking são utilizados para roubo de sessão, sequestro de formulários de transferência e redirecionamento de transações. Um payload XSS injetado em um campo de pesquisa ou comentário pode ser executado no navegador de outros usuários ou administradores, permitindo ao atacante realizar transações não autorizadas em nome das vítimas. A detecção no WAF bloqueia esses payloads antes que cheguem à aplicação.
+
 ```json
 {
   "Name": "MeridianXSSBlock",
@@ -296,6 +316,10 @@ Rule Groups                           Custom Rules
 ```
 
 **Regra 3 — Rate Limiting por IP:**
+
+**O que este comando/configuração faz:** Esta regra implementa rate limiting focado no endpoint de autenticação. O `RateBasedStatement` conta requisições por IP em uma janela deslizante de 5 minutos. O `ScopeDownStatement` restringe o contador apenas às requisições que começam com `/api/auth/login` — sem ele, o limite se aplicaria a todas as URLs, o que poderia bloquear usuários legítimos que navegam por muitas páginas. Um IP que excede 100 requisições nessa URL em 5 minutos é automaticamente bloqueado por 5 minutos e depois liberado.
+
+**Por que isso importa para o Banco Meridian:** Ataques de força bruta e credential stuffing são ameaças cotidianas para o internet banking. Listas de credenciais vazadas de outros serviços são testadas automaticamente contra endpoints de login bancários. Sem rate limiting, um atacante pode testar dezenas de milhares de combinações por hora. O limite de 100 requisições/5min por IP ainda permite que um usuário legítimo faça múltiplas tentativas, mas torna ataques automatizados economicamente inviáveis — cada IP precisaria de dezenas de minutos para testar apenas algumas dezenas de credenciais.
 
 ```json
 {
@@ -321,6 +345,10 @@ Rule Groups                           Custom Rules
 
 **Regra 4 — Geoblocking para Países de Alto Risco:**
 
+**O que este comando/configuração faz:** Esta regra bloqueia requisições originadas de países listados como de alto risco regulatório ou com histórico elevado de ataques cibernéticos a instituições financeiras. O WAF usa o banco de dados de geolocalização de IP da AWS para determinar o país de origem. A lista inclui países sob sanções internacionais (KP, IR, SY, CU) e países frequentemente associados a grupos de ameaça persistente avançada (APT) que miram o setor financeiro.
+
+**Por que isso importa para o Banco Meridian:** O Banco Meridian opera exclusivamente no mercado brasileiro. Uma transação financeira originada da Coreia do Norte ou da Síria quase certamente é maliciosa — nenhum cliente legítimo do banco estaria acessando o internet banking a partir desses países. O geoblocking reduz significativamente a superfície de ataque ao eliminar tráfego que não tem razão legítima de existir. Em caso de usuário legítimo viajando para um país bloqueado, o banco pode oferecer canais alternativos (atendimento presencial, transferência via gerente).
+
 ```json
 {
   "Name": "MeridianGeoBlock",
@@ -339,6 +367,10 @@ Rule Groups                           Custom Rules
 ```
 
 **Regra 5 — Bloqueio de User-Agents de Scanners:**
+
+**O que este comando/configuração faz:** Esta regra usa uma expressão regular para detectar User-Agents de ferramentas de ataque e reconhecimento conhecidas. Ferramentas como sqlmap (injeção de SQL automatizada), nikto (scanner de vulnerabilidades web), nessus (scanner de vulnerabilidades de rede) e hydra/medusa (força bruta de credenciais) deixam rastros identificáveis no cabeçalho User-Agent. O modificador `(?i)` torna a busca case-insensitive para capturar variações de capitalização.
+
+**Por que isso importa para o Banco Meridian:** Reconhecimento é a fase inicial de qualquer ataque estruturado (MITRE ATT&CK TA0043). Atacantes que realizam varreduras automatizadas no internet banking antes de um ataque mais sofisticado podem ser identificados e bloqueados nesta fase inicial. Bloquear user-agents de ferramentas conhecidas não elimina atacantes determinados (que podem alterar o User-Agent), mas eleva o custo do reconhecimento e elimina a grande maioria dos ataques oportunistas automatizados.
 
 ```json
 {
@@ -409,6 +441,10 @@ Internet
 
 ### Regras Suricata para Banco Meridian
 
+**O que este comando/configuração faz:** O arquivo YAML define quatro regras Suricata para o Network Firewall do Banco Meridian. A primeira bloqueia tráfego de nós de saída da rede Tor, que é frequentemente usada para anonimizar ataques. A segunda alerta sobre DNS tunneling — técnica usada por malware para exfiltrar dados codificados em consultas DNS. A terceira detecta possíveis conexões de reverse shell para portas comumente usadas por ferramentas de ataque (4444 é a porta padrão do Metasploit). A quarta bloqueia download de executáveis de origens externas, reduzindo o risco de malware sendo baixado por instâncias comprometidas.
+
+**Por que isso importa para o Banco Meridian:** O Network Firewall opera em um nível mais profundo que o WAF (que é específico para HTTP) ou os Security Groups (que operam em nível de porta/IP). As regras Suricata permitem inspeção de payload — o conteúdo real do tráfego de rede — o que é essencial para detectar ameaças avançadas como Command & Control (C2), DNS tunneling e exfiltração de dados codificados. Para o setor financeiro, a detecção precoce de uma instância comprometida comunicando-se com C2 pode ser a diferença entre um incidente contido e uma violação de dados em larga escala.
+
 ```yaml
 # network-firewall-rules.yaml
 # Regras Suricata para o Network Firewall do Banco Meridian
@@ -453,6 +489,10 @@ rules:
 ---
 
 ## 7. Route 53 DNS Firewall
+
+**O que este comando/configuração faz:** Os comandos abaixo configuram um firewall DNS para todas as VPCs de produção do Banco Meridian. O processo tem quatro etapas: criação do rule group (contêiner das regras), criação de uma domain list com domínios maliciosos conhecidos, adição dos domínios à lista, e associação do rule group às VPCs. O comando também usa a managed domain list da AWS (`AWSManagedDomainsMalwareDomainList`), que é atualizada automaticamente pelo serviço de Threat Intelligence da AWS com novos domínios de malware e C2 identificados globalmente.
+
+**Por que isso importa para o Banco Meridian:** Malware moderno frequentemente usa DNS para comunicação com servidores de Command & Control (C2) e para exfiltração de dados. Quando uma instância comprometida tenta resolver o domínio do servidor C2, essa consulta DNS é bloqueada pelo firewall antes que qualquer conexão TCP seja estabelecida. O DNS Firewall é a defesa mais eficiente contra essa categoria de ameaça: age na camada mais baixa possível (DNS), antes que o malware consiga estabelecer comunicação, e tem custo operacional muito menor que o Network Firewall para casos de uso baseados em nomes de domínio.
 
 ```bash
 # Criar rule group de DNS Firewall com domínios maliciosos

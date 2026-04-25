@@ -39,10 +39,10 @@ O ambiente de lab está configurado da seguinte forma:
 
 ```
 ESTADO DO AMBIENTE BANCO MERIDIAN — LAB 04
-════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
 
   Google SecOps SOAR:
-  ─────────────────────────────────────────────
+  ─────────────────────────────────────────────────────────────────────────
   Connectors disponíveis:
     ✅ VirusTotal Enterprise     → CONNECTED
     ✅ Azure AD / Entra ID       → CONNECTED
@@ -53,7 +53,7 @@ ESTADO DO AMBIENTE BANCO MERIDIAN — LAB 04
     ✅ Email (SMTP Gmail)        → CONNECTED
 
   Cases existentes:
-  ─────────────────────────────────────────────
+  ─────────────────────────────────────────────────────────────────────────
   CASE-2026-04-001  HIGH  NEW  "Phishing report — Luciana Alves"
     Alert source: Email Gateway Report (helpdesk ticket)
     Principal: luciana.alves@bancomeridian.com.br
@@ -61,7 +61,7 @@ ESTADO DO AMBIENTE BANCO MERIDIAN — LAB 04
     Attachment: Proposta_BC_Abr2026.pdf
     SHA256: 3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d
 
-════════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════════════════════
 ```
 
 ---
@@ -112,7 +112,9 @@ reduza o MTTR de 47 minutos para menos de 2 minutos.
 
 #### Passo 1: Abrir o case de phishing e examinar as evidências
 
-**Ação:** Navegar para o painel de Cases do SOAR e abrir o caso da Luciana Alves.
+**O que este passo faz:** Abre o case CASE-2026-04-001 no painel SOAR e examina as entidades automaticamente extraídas: usuário, host, hash do arquivo malicioso e e-mail do remetente. Esta investigação manual é a base do playbook — você precisa entender o fluxo de investigação humano antes de automatizá-lo. O que você faz manualmente nesta parte A, o playbook fará em segundos na parte B.
+
+**Por que agora:** Criar o playbook sem investigar o caso manualmente primeiro é o erro mais comum neste lab. Sem entender as decisões que o analista precisa tomar (o hash é malicioso? o usuário abriu o arquivo? o host está comprometido?), o playbook será incompleto e perderá cenários críticos. A investigação manual define os requisitos funcionais do playbook.
 
 ```
 Navegação: SOAR → Cases → buscar CASE-2026-04-001
@@ -124,25 +126,22 @@ Campos a verificar na aba Summary:
 - Entities detectadas: luciana.alves, WRK-LUCIANA-003, hash do PDF, e-mail do remetente
 ```
 
-**Resultado esperado:** Tela do case mostrando alertas, entidades e a aba Timeline vazia
-(nenhuma ação executada ainda).
-
-**O que verificar:** Confirme que o conector do VirusTotal está ativo — você vai usá-lo
-no próximo passo.
+**O que você deve ver:** Tela do case mostrando alertas, entidades e a aba Timeline vazia (nenhuma ação executada ainda). Confirme que o conector do VirusTotal está ativo — você vai usá-lo no próximo passo.
 
 ---
 
 #### Passo 2: Verificar o hash do PDF no VirusTotal manualmente
 
-**Ação:** Antes de criar o playbook, faça a verificação manual para entender o que o
-playbook vai automatizar.
+**O que este passo faz:** Envia o SHA256 do arquivo `Proposta_BC_Abr2026.pdf` ao VirusTotal e interpreta o resultado de detecção. Esta verificação manual demonstra o fluxo que o playbook vai automatizar — uma verificação que leva o analista 2-3 minutos para fazer manualmente será feita em 3 segundos pelo SOAR.
+
+**Por que agora:** A verificação do hash no VirusTotal é o ponto de bifurcação principal do playbook — o resultado determina se o incidente é uma ameaça real ou um falso positivo. Entender os campos retornados pelo VT (positives, total, threat_name, sandbox behavior) é essencial para configurar o bloco de VirusTotal no playbook corretamente.
 
 ```
 Navegação: Threat Intelligence → VirusTotal → buscar hash
 3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 File: Proposta_BC_Abr2026.pdf
@@ -157,15 +156,15 @@ Behavior (sandbox):
   - Adiciona chave de registro: HKCU\Software\Microsoft\Windows\Run
 ```
 
-**O que registrar:** O PDF é definitivamente malicioso (38/72). Instala um downloader e
-configura persistência. Isso confirma que se Luciana abriu o PDF, o host WRK-LUCIANA-003
-está comprometido.
+O PDF é definitivamente malicioso (38/72). Instala um downloader e configura persistência. O URL de C2 identificado no sandbox (`45.77.123.89`) deve ser bloqueado imediatamente no NGFW — este será o primeiro bloco de contenção do playbook.
 
 ---
 
 #### Passo 3: Verificar se Luciana clicou/abriu o PDF via logs do EDR
 
-**Ação:** Buscar no UDM Search por eventos de abertura do arquivo no host de Luciana.
+**O que este passo faz:** Busca nos logs do EDR (via UDM Search) por eventos de abertura do arquivo PDF e execução de processos suspeitos no host de Luciana. Esta verificação é o segundo ponto de bifurcação do playbook — a resposta determina se a ação necessária é contenção completa (host comprometido) ou apenas notificação preventiva (PDF recebido mas não aberto).
+
+**Por que agora:** A decisão de isolar o host WRK-LUCIANA-003 da rede depende desta confirmação. Isolar um host sem confirmação de comprometimento causa impacto desnecessário ao negócio — Luciana é gerente de contas e o banco perde acesso aos sistemas core banking. Com confirmação técnica, a decisão de isolamento é justificada e documentada.
 
 ```
 Navegação: Search → UDM Search
@@ -182,7 +181,7 @@ principal.hostname = "WRK-LUCIANA-003" AND
 )
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 Timestamp: 2026-04-24T08:47:33Z
@@ -196,14 +195,15 @@ principal.process.file.full_path: C:\Program Files\Adobe\Acrobat DC\Acrobat\Acro
 target.process.file.full_path: C:\Windows\Temp\bc_cert_helper.exe   ← DROPPER!
 ```
 
-**O que registrar:** Confirmado. Luciana abriu o PDF, o Adobe Reader executou o dropper
-`bc_cert_helper.exe`. O host está comprometido. A resposta deve incluir isolamento.
+Confirmado. Luciana abriu o PDF, o Adobe Reader executou o dropper `bc_cert_helper.exe`. O host está comprometido. A resposta deve incluir isolamento imediato do host.
 
 ---
 
 #### Passo 4: Verificar o e-mail do remetente
 
-**Ação:** Examinar os metadados do e-mail para identificar o remetente real.
+**O que este passo faz:** Examina os metadados completos do e-mail no UDM Search para identificar o remetente real e confirmar que o domínio é falso. Esta informação alimenta o bloco de bloqueio de domínio no gateway de e-mail — uma das ações preventivas mais importantes do playbook para proteger outros funcionários do Banco Meridian.
+
+**Por que agora:** O domínio falso identificado aqui deve ser bloqueado IMEDIATAMENTE no gateway para que nenhum outro funcionário receba e-mail do mesmo domínio fraudulento. Quanto mais cedo o domínio for identificado, menos vítimas adicionais haverá.
 
 ```
 Query:
@@ -212,7 +212,7 @@ metadata.event_type = "EMAIL_TRANSACTION" AND
 metadata.event_timestamp >= "2026-04-24T08:40:00Z"
 ```
 
-**Resultado esperado:**
+**O que você deve ver:**
 
 ```
 metadata.event_type: EMAIL_TRANSACTION
@@ -222,8 +222,7 @@ network.email.subject: "Proposta de Parceria — Banco Central"
 network.email.attachment_sha256: 3c4d5e6f...
 ```
 
-**O que registrar:** O remetente real é `proposta@banco-central-br.com` — domínio falso que
-imita o Banco Central (`bcb.gov.br`). Este domínio deve ser bloqueado no gateway de e-mail.
+O remetente real é `proposta@banco-central-br.com` — domínio falso que imita o Banco Central (`bcb.gov.br`). Anote o domínio — ele será a variável `$sender_domain` no playbook para a ação de bloqueio no gateway.
 
 ---
 
@@ -233,7 +232,9 @@ imita o Banco Central (`bcb.gov.br`). Este domínio deve ser bloqueado no gatewa
 
 #### Passo 5: Criar um novo playbook
 
-**Ação:** Navegar para o Playbook Designer e criar o playbook de phishing.
+**O que este passo faz:** Abre o Playbook Designer do Google SecOps SOAR e cria o esqueleto do playbook com o trigger correto. O trigger determina quando o playbook será executado automaticamente — alertas do tipo "Email Phishing Report" com qualquer severidade acima de MEDIUM ativarão o playbook imediatamente após a criação do case.
+
+**Por que agora:** A configuração correta do trigger é o que garante que o playbook seja executado no momento certo. Um trigger mal configurado (ex: severity threshold muito alto) fará o playbook ignorar alertas de phishing de severidade MEDIUM — que são a maioria dos casos que deveriam ser automatizados.
 
 ```
 Navegação: SOAR → Playbooks → + New Playbook
@@ -246,13 +247,15 @@ Configurações:
   - Active: No (vamos ativar após os testes)
 ```
 
-**Resultado esperado:** Editor de playbook em branco com o bloco Trigger já inserido.
+**O que você deve ver:** Editor de playbook em branco com o bloco Trigger já inserido. Status "Inactive" é intencional.
 
 ---
 
 #### Passo 6: Adicionar o bloco de extração de variáveis do alert
 
-**Ação:** Adicionar o primeiro bloco Action para extrair os dados do alert.
+**O que este passo faz:** Adiciona o primeiro bloco Action que extrai os dados essenciais do alert e os armazena em variáveis reutilizáveis por todos os blocos subsequentes. Sem esta extração, cada bloco precisaria referenciar os campos do alert diretamente com caminhos longos e propensos a erros — as variáveis tornam o playbook mais legível e manutenível.
+
+**Por que agora:** A extração de variáveis deve ser o primeiro bloco após o Trigger porque todos os outros blocos dependem dessas variáveis. Um hash de attachment não extraído neste passo tornará impossível a consulta ao VirusTotal no Passo 7.
 
 ```
 No Designer, arrastar o bloco: Action → Set Variable
@@ -267,14 +270,15 @@ Configuração do bloco:
     $case_id = case.id
 ```
 
-**Resultado esperado:** Bloco de variáveis conectado ao Trigger. As variáveis estarão
-disponíveis para todos os blocos subsequentes.
+**O que você deve ver:** Bloco de variáveis conectado ao Trigger. As variáveis estarão disponíveis para todos os blocos subsequentes.
 
 ---
 
 #### Passo 7: Adicionar o bloco de enriquecimento via VirusTotal
 
-**Ação:** Adicionar a Action de consulta ao VirusTotal.
+**O que este passo faz:** Adiciona o bloco de consulta automática ao VirusTotal que verifica o hash do attachment e retorna as métricas de detecção. Este bloco automatiza o Passo 2 da investigação manual — o que levava 2-3 minutos agora acontece em 3 segundos e o resultado é disponibilizado como variáveis para o bloco de decisão seguinte.
+
+**Por que agora:** O bloco VirusTotal deve ser colocado imediatamente após a extração de variáveis, pois o resultado ($vt_positives) é o input do bloco de decisão do Passo 8.
 
 ```
 Arrastar: Action → VirusTotal — Get File Report
@@ -289,14 +293,15 @@ Configuração:
     $vt_malicious = result.malicious     ← true se positives >= 5
 ```
 
-**Resultado esperado:** Bloco de VirusTotal conectado ao bloco de variáveis. O fluxo
-executa: Trigger → Extrair variáveis → Consultar VirusTotal.
+**O que você deve ver:** Bloco de VirusTotal conectado ao bloco de variáveis. Fluxo executa: Trigger → Extrair variáveis → Consultar VirusTotal.
 
 ---
 
 #### Passo 8: Adicionar o bloco de decisão baseado no resultado do VT
 
-**Ação:** Adicionar o bloco Condition para bifurcar o fluxo baseado no resultado VT.
+**O que este passo faz:** Adiciona o primeiro bloco Condition que bifurca o fluxo com base no número de detecções no VirusTotal. O threshold de 10 detecções é conservador — um arquivo com menos de 10 detecções pode ser novo malware não indexado (day-zero) e deve ser verificado por uma segunda fonte de inteligência (Mandiant) antes de descartar.
+
+**Por que agora:** O bloco Condition é o ponto de decisão mais importante do playbook. Sem ele, o playbook executaria contenção desnecessária para todos os alertas, gerando falsos positivos operacionais.
 
 ```
 Arrastar: Condition
@@ -330,14 +335,15 @@ Condition:
   Branch NÃO → escalar para analista (bloco Notification)
 ```
 
-**Resultado esperado:** Fluxo ramificado com dois caminhos de detecção antes de decidir
-sobre contenção.
+**O que você deve ver:** Fluxo ramificado com dois caminhos de detecção antes de decidir sobre contenção.
 
 ---
 
 #### Passo 9: Adicionar os blocos de contenção (Branch: malicioso confirmado)
 
-**Ação:** No branch de malicioso confirmado, adicionar os blocos de contenção em sequência.
+**O que este passo faz:** Adiciona a sequência de 3 blocos de contenção que executam as ações preventivas imediatas quando o malware é confirmado: bloquear o URL do C2 no firewall, registrar o hash como IOC interno, e verificar se o usuário interagiu com o arquivo. Estas três ações acontecem em rápida sequência, sem intervenção humana.
+
+**Por que agora:** A contenção imediata reduz a janela de exposição. Cada segundo que o URL do C2 permanece acessível é uma oportunidade para que outros hosts comprometidos se comuniquem com o atacante.
 
 ```
 Bloco 1 — Bloquear URL de C2 no firewall:
@@ -363,13 +369,15 @@ Bloco 3 — Verificar se usuário abriu o PDF:
   Nome: "Verificar interação do usuário com o PDF"
 ```
 
-**Resultado esperado:** Três blocos de ação conectados no branch de malicioso confirmado.
+**O que você deve ver:** Três blocos de ação conectados em sequência no branch de malicioso confirmado.
 
 ---
 
 #### Passo 10: Adicionar a decisão de isolamento (interação confirmada)
 
-**Ação:** Adicionar Condition para verificar se o usuário abriu o PDF.
+**O que este passo faz:** Adiciona o segundo bloco Condition que determina se o usuário abriu o PDF e, portanto, se o host está comprometido. O branch SIM executa contenção completa. O branch NÃO executa resposta preventiva — notificar o usuário e bloquear o domínio do remetente.
+
+**Por que agora:** Esta é a decisão mais crítica do playbook em termos de impacto ao negócio. O playbook só deve isolar quando há evidência técnica de comprometimento (o PDF foi aberto e executou o dropper).
 
 ```
 Condition:
@@ -415,14 +423,15 @@ Branch NÃO (PDF não aberto — notificação preventiva):
     Nome: "Abrir ticket P2 no Jira"
 ```
 
-**Resultado esperado:** Fluxo completo de contenção ou notificação dependendo da interação
-do usuário com o PDF.
+**O que você deve ver:** Fluxo completo de contenção ou notificação dependendo da interação do usuário com o PDF.
 
 ---
 
 #### Passo 11: Adicionar o bloco de notificação do SOC (para todos os caminhos)
 
-**Ação:** No final de todos os branches, adicionar notificação ao canal do SOC.
+**O que este passo faz:** Adiciona o bloco final de notificação ao canal #soc-incidents que é executado independentemente do caminho tomado pelo playbook. Este bloco garante visibilidade para o time de SOC — mesmo que o incidente seja resolvido automaticamente (P2), o analista é notificado com um resumo para verificação.
+
+**Por que agora:** A notificação ao SOC fecha o loop de automação — o analista sabe que o playbook foi executado e pode verificar se todas as ações foram bem-sucedidas.
 
 ```
 Bloco: Slack — Send Message (ou Email para o canal de SOC)
@@ -439,14 +448,16 @@ Bloco: Slack — Send Message (ou Email para o canal de SOC)
 
 #### Passo 12: Verificar o playbook completo e salvar
 
-**Ação:** Revisar o fluxo completo no Designer antes de salvar.
+**O que este passo faz:** Revisa o fluxo completo do playbook usando o checklist de verificação antes de salvar. Esta revisão garante que nenhum bloco foi esquecido e que todos os branches estão conectados corretamente.
+
+**Por que agora:** A revisão final antes do save é crítica porque o designer não valida automaticamente todos os requisitos funcionais. Um bloco de contenção desconectado é tecnicamente válido mas funcionalmente inútil.
 
 **Checklist de verificação:**
 
 - [ ] Trigger configurado para alertas de phishing
 - [ ] Bloco de extração de variáveis com os 5 campos necessários
 - [ ] Bloco VirusTotal com output de `$vt_positives` e `$vt_malicious`
-- [ ] Condition "Hash malicioso?" com branches SIM e NÃO
+- [ ] Condition "Hash é malicioso?" com branches SIM e NÃO
 - [ ] Branch NÃO inclui consulta à Mandiant com seu próprio Condition
 - [ ] Branch malicioso: bloquear URL, criar IOC, verificar interação
 - [ ] Condition "Usuário abriu o PDF?" com branches SIM e NÃO
@@ -456,7 +467,7 @@ Bloco: Slack — Send Message (ou Email para o canal de SOC)
 
 **Ação:** Clicar em "Save" no topo do Designer.
 
-**Resultado esperado:** Mensagem "Playbook saved successfully". Status: "Inactive" (intencional).
+**O que você deve ver:** Mensagem "Playbook saved successfully". Status: "Inactive" (intencional).
 
 ---
 
@@ -466,7 +477,9 @@ Bloco: Slack — Send Message (ou Email para o canal de SOC)
 
 #### Passo 13: Executar o playbook manualmente no case de teste
 
-**Ação:** Executar o playbook manualmente no case CASE-2026-04-001 para testar.
+**O que este passo faz:** Executa o playbook recém-criado manualmente no case CASE-2026-04-001 para validar que todos os blocos funcionam corretamente com dados reais. A execução manual permite testar sem o risco de executar ações de contenção em produção inadvertidamente.
+
+**Por que agora:** Testar com o case real da Luciana Alves garante que o playbook funciona com dados do ambiente do Banco Meridian especificamente. Problemas de conexão entre o SOAR e os serviços externos (CrowdStrike, Jira, PagerDuty) são descobertos aqui, com tempo para correção.
 
 ```
 Navegação: Cases → CASE-2026-04-001 → Actions → Run Playbook
@@ -474,8 +487,7 @@ Selecionar: phishing_response_automatizado
 Modo: Manual (single run)
 ```
 
-**Resultado esperado:** O playbook começa a executar. No painel de execução, você vê cada
-bloco sendo executado em tempo real com o status (verde = sucesso, vermelho = erro).
+**O que você deve ver:** O playbook começa a executar. No painel de execução, você vê cada bloco sendo executado em tempo real com o status (verde = sucesso, vermelho = erro).
 
 **Tempo esperado de execução:** 15–45 segundos (dependendo da latência das APIs externas).
 
@@ -483,31 +495,29 @@ bloco sendo executado em tempo real com o status (verde = sucesso, vermelho = er
 
 #### Passo 14: Verificar o resultado de cada step do playbook
 
-**Ação:** Após a execução, verificar o log de cada step na aba "Timeline" do case.
+**O que este passo faz:** Valida a execução de cada um dos 12 steps do playbook na aba Timeline do case. Esta verificação confirma que todas as ações de contenção foram executadas com sucesso: host isolado no EDR, sessões revogadas no Azure AD, alertas disparados no PagerDuty e tickets criados no Jira.
+
+**Por que agora:** A verificação step-by-step é necessária porque um playbook pode retornar "Succeeded" globalmente mesmo com alguns steps falhando. Verificar cada step individualmente garante que o playbook está funcionando como esperado.
 
 ```
 Navegação: Cases → CASE-2026-04-001 → aba Timeline
 
 Verificar:
-1. "Extrair dados do alerta" → SUCCESS
-2. "Verificar hash no VirusTotal" → SUCCESS | $vt_positives = 38
-3. "Hash é malicioso?" → SIM (38 >= 10)
-4. "Bloquear URL de C2 no firewall" → SUCCESS
-5. "Registrar hash como IOC interno" → SUCCESS
-6. "Verificar interação do usuário com o PDF" → SUCCESS | $user_opened_pdf = true
-7. "Usuário abriu o PDF?" → SIM
-8. "Isolar host no EDR" → SUCCESS | WRK-LUCIANA-003 CONTAINED
-9. "Revogar sessões Azure AD" → SUCCESS | luciana.alves REVOKED
-10. "Disparar alerta P1 no PagerDuty" → SUCCESS | Incident #PD-1847 criado
-11. "Abrir ticket P1 no Jira" → SUCCESS | SEC-4891 criado
-12. "Notificar time SOC via Slack" → SUCCESS
+1. "Extrair dados do alerta"                      → SUCCESS
+2. "Verificar hash no VirusTotal"                 → SUCCESS | $vt_positives = 38
+3. "Hash é malicioso?"                            → SIM (38 >= 10)
+4. "Bloquear URL de C2 no firewall"               → SUCCESS
+5. "Registrar hash como IOC interno"              → SUCCESS
+6. "Verificar interação do usuário com o PDF"     → SUCCESS | $user_opened_pdf = true
+7. "Usuário abriu o PDF?"                         → SIM
+8. "Isolar host no EDR"                           → SUCCESS | WRK-LUCIANA-003 CONTAINED
+9. "Revogar sessões Azure AD"                     → SUCCESS | luciana.alves REVOKED
+10. "Disparar alerta P1 no PagerDuty"             → SUCCESS | Incident #PD-1847 criado
+11. "Abrir ticket P1 no Jira"                     → SUCCESS | SEC-4891 criado
+12. "Notificar time SOC via Slack"                → SUCCESS
 ```
 
-**O que verificar:**
-- Todos os 12 steps devem ser SUCCESS
-- O host WRK-LUCIANA-003 deve aparecer como "Contained" no painel do CrowdStrike
-- O ticket P1 deve aparecer criado no Jira
-- O canal #soc-incidents do Slack deve ter recebido a notificação
+**O que você deve ver:** Todos os 12 steps com status SUCCESS. O host WRK-LUCIANA-003 deve aparecer como "Contained" no painel do CrowdStrike; o ticket P1 deve aparecer criado no Jira; o canal #soc-incidents do Slack deve ter recebido a notificação.
 
 **O que fazer se algum step falhar:**
 - Step VT falha: verificar credenciais do conector VT em Settings → Connectors
@@ -522,7 +532,9 @@ Verificar:
 
 #### Passo 15: Calcular o MTTR do caso manual vs. automatizado
 
-**Ação:** Comparar o tempo de resposta manual (histórico) com o tempo do playbook.
+**O que este passo faz:** Calcula e documenta a redução do MTTR (Mean Time to Respond) com o SOAR. Este número é o KPI principal que o CISO apresentará ao board para justificar o investimento no SOAR — a redução de 82 para 28 minutos representa uma melhoria de 66% no MTTR total e de 99.2% no tempo de execução da resposta.
+
+**Por que agora:** A documentação do MTTR deve ser feita imediatamente após o teste bem-sucedido, enquanto os timestamps estão frescos no log de execução do playbook.
 
 ```
 MTTR calculado:
@@ -532,7 +544,7 @@ Helpdesk abre ticket:   09:15 (28 min depois)
 SOC recebe e triagem:   09:22 (7 min depois)
 Análise manual completa: 10:04 (42 min de análise)
 Contenção manual:       10:09 (5 min para executar as ações)
-─────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────
 MTTR manual total:      82 minutos (do incidente à contenção)
 
 Com o playbook SOAR:
@@ -540,15 +552,14 @@ Helpdesk abre ticket e       09:15
 playbook é ativado:
 Playbook executa:            09:15:38
                              (38 segundos de execução)
-─────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────
 MTTR com SOAR:               28 minutos (limitado pelo tempo do helpdesk)
 MTTR do SOAR em si:          38 segundos (da criação do case à contenção)
 
 Melhoria:  82 min → 38 seg (redução de 99.2% no tempo de resposta do SOAR)
 ```
 
-**O que verificar:** O timestamp de cada step está no log de execução do playbook.
-Calcule o delta entre o primeiro step e o último step de contenção.
+**O que você deve ver:** O timestamp de cada step está no log de execução do playbook. Calcule o delta entre o primeiro step e o último step de contenção — o resultado deve ser < 60 segundos para um playbook bem configurado.
 
 ---
 
@@ -558,7 +569,9 @@ Calcule o delta entre o primeiro step e o último step de contenção.
 
 #### Passo 16: Ativar o playbook para operação em produção
 
-**Ação:** Após os testes bem-sucedidos, ativar o playbook.
+**O que este passo faz:** Muda o status do playbook de "Inactive" para "Active" e configura o trigger automático. A partir deste momento, todo novo alerta de phishing com severidade MEDIUM ou superior criará automaticamente um case e executará o playbook — sem intervenção humana.
+
+**Por que agora:** O playbook só deve ser ativado após os testes bem-sucedidos do Passo 14. Ativar sem testes adequados pode executar ações de contenção (isolamento de host, revogação de sessões) em incidentes que ainda precisam de investigação humana.
 
 ```
 Navegação: SOAR → Playbooks → phishing_response_automatizado
@@ -570,14 +583,15 @@ Configuração de trigger automático:
   Priority threshold: MEDIUM and above
 ```
 
-**Resultado esperado:** Status do playbook muda para "Active". O playbook agora será
-executado automaticamente para cada novo alerta de phishing.
+**O que você deve ver:** Status do playbook muda para "Active". O playbook agora será executado automaticamente para cada novo alerta de phishing.
 
 ---
 
 #### Passo 17: Criar documentação do playbook
 
-**Ação:** Criar o arquivo de documentação do playbook.
+**O que este passo faz:** Cria o arquivo de documentação operacional do playbook que ficará disponível para todos os analistas do SOC. Esta documentação serve como referência para debugging (quando steps falham), auditoria (BACEN pode exigir documentação dos processos automatizados) e onboarding de novos analistas.
+
+**Por que agora:** A documentação deve ser criada imediatamente após a ativação, enquanto os detalhes de configuração estão frescos.
 
 ```bash
 cat > ~/lab-04-playbook-doc.md << 'EOF'
@@ -622,7 +636,7 @@ v1.0 — 2026-04-24: criação inicial (Lab 04)
 EOF
 ```
 
-**Resultado esperado:** Documentação criada e salva.
+**O que você deve ver:** Documentação criada e salva com todas as informações operacionais necessárias para o time do SOC.
 
 ---
 
@@ -652,20 +666,11 @@ EOF
 | IP de C2 (sandbox VT)    | `45.77.123.89:443`                                             |
 | Ação necessária          | Isolamento do host WRK-LUCIANA-003 + revogação de sessões      |
 
-**Por que esse resultado confirma que deu certo:**
-- 38/72 detecções no VT é uma confirmação inequívoca de arquivo malicioso. O threshold do
-  playbook (>= 10 detecções) garante que não haverá falsos positivos por arquivos com 1 ou
-  2 detecções duvidosas — que frequentemente são FPs de engines pouco confiáveis.
-- O dropper em `%TEMP%` é o comportamento mais característico de phishing com exploit:
-  o payload é sempre depositado em diretório temporário para evitar necessidade de
-  privilégios administrativos. Essa localização é um IoC por si só.
-- O AcroRd32.exe lançando um executável em %TEMP% é a assinatura do exploit Adobe Reader
-  — processo legítimo gerando processo filho em localização anômala.
+**Por que esta é a resposta correta:** A cadeia de evidências — PDF malicioso (38/72 VT) → usuário abriu (AcroRd32.exe no EDR) → dropper executado (bc_cert_helper.exe em %TEMP%) — é a prova técnica necessária para justificar o isolamento do host sem necessidade de aprovação adicional. Cada evidência individualmente poderia ter explicação alternativa; as três juntas formam prova conclusiva.
 
-**Variações aceitáveis:**
-- O número de detecções VT pode variar (30–45) dependendo de quando o hash foi submetido ao VT
-- O dropper pode ter nome diferente em variantes da campanha (`cert_helper.exe`, `bcb_attach.exe`)
-- O IP de C2 pode ter mudado — o hash do dropper é o IOC mais estável para IOC customizado
+**Erro mais comum neste passo:** Concluir que o host está comprometido apenas com o resultado do VirusTotal, sem verificar os logs do EDR. O VT mostra que o PDF É malicioso, mas não prova que o USUÁRIO o abriu — o arquivo pode ter sido recebido e excluído sem ser aberto. A confirmação via EDR (AcroRd32.exe + dropper) é o que justifica o isolamento com base técnica sólida.
+
+---
 
 ### Gabarito — Playbook Completo (Pseudocódigo)
 
@@ -675,6 +680,12 @@ O playbook completo está descrito nos passos 5–12 deste lab. A estrutura fina
 - 3 blocos de Condition (hash malicioso? / Mandiant conhece? / usuário abriu?)
 - 2 branches paralelos (P1 comprometido / P2 preventivo)
 - 1 bloco de notificação final ao SOC
+
+**Por que esta é a resposta correta:** A estrutura com 3 Conditions é o mínimo necessário para cobrir os 6 cenários de decisão do framework de resposta a phishing do NIST. Playbooks com menos Conditions são simplistas e não lidam com casos intermediários (ex: hash não detectado pelo VT mas conhecido pela Mandiant).
+
+**Erro mais comum neste passo:** Criar apenas 1 Condition (o do hash malicioso) e ir diretamente para contenção. Este erro ignora o caso em que o VT não conhece o hash (arquivo novo) mas a Mandiant tem informações — e ignora a verificação de interação do usuário, que é crítica para evitar isolamento desnecessário de hosts cujos funcionários não abriram o arquivo.
+
+---
 
 ### Gabarito — MTTR Esperado
 
@@ -687,15 +698,21 @@ O playbook completo está descrito nos passos 5–12 deste lab. A estrutura fina
 *28 min = tempo de helpdesk abrir ticket (não eliminável sem integração direta)
 †P1 requer apenas aprovação do analista — não execução manual
 
+**Por que estes são os valores corretos:** O MTTR de 28 minutos com SOAR ainda inclui o tempo do helpdesk (não eliminável neste modelo). O MTTR do SOAR em si (38 segundos) mede a eficiência da automação. Para eliminar os 28 minutos do helpdesk, seria necessário integrar o gateway de e-mail diretamente ao SOAR — o que é o próximo passo evolutivo.
+
+**Erro mais comum neste passo:** Reportar ao CISO que o MTTR caiu para 38 segundos sem explicar que o tempo do helpdesk não está incluído. O relatório correto declara AMBOS os números: MTTR do processo = 28 min; MTTR da execução automatizada = 38 seg.
+
+---
+
 ### Gabarito — Erros Comuns e Soluções
 
-| Erro                                              | Causa                                     | Solução                                                |
+| Erro                                              | Causa                                     | Diagnóstico e Solução                                  |
 |:--------------------------------------------------|:------------------------------------------|:-------------------------------------------------------|
-| Step VT retorna `$vt_positives = null`            | Hash não encontrado no VT (arquivo novo)  | Adicionar tratamento de null: `if $vt_positives == null → $vt_malicious = false` |
-| Step EDR contain falha com "Host not found"       | Hostname com capitalização diferente       | Normalizar hostname com `.lower()` antes do contain    |
-| Step Jira falha com "Permission denied"           | API key sem permissão para criar Issues    | Verificar permissões do projeto SEC no Jira            |
-| Playbook não dispara automaticamente              | Trigger type incorreto                    | Verificar se o alert type é exatamente "Email Phishing Report" |
-| Host isolado mas sessões ainda ativas             | Azure AD revoke tem delay de até 5 min    | Normal — adicionar wait de 5 min antes de verificar    |
+| Step VT retorna `$vt_positives = null`            | Hash não encontrado no VT (arquivo novo)  | **Diagnóstico:** Arquivo criado nos últimos 24h, ainda não indexado. Adicionar tratamento de null no bloco: `if $vt_positives == null → $vt_malicious = false` e redirecionar para o branch da Mandiant |
+| Step EDR contain falha com "Host not found"       | Hostname com capitalização diferente       | **Diagnóstico:** CrowdStrike é case-sensitive no hostname. Verificar o hostname exato no portal do CrowdStrike. Normalizar com `.lower()` antes do contain |
+| Step Jira falha com "Permission denied"           | API key sem permissão para criar Issues    | **Diagnóstico:** Verificar em Jira → Project Settings → People → adicionar a conta do SOAR como "Member" no projeto SEC |
+| Playbook não dispara automaticamente              | Trigger type incorreto                    | **Diagnóstico:** O alert type deve ser exatamente "Email Phishing Report" — verificar a ortografia exata no portal de connectors do gateway de e-mail |
+| Host isolado mas sessões ainda ativas             | Azure AD revoke tem delay de até 5 min    | **Diagnóstico:** Comportamento normal da API do Azure AD. Adicionar wait de 5 min antes de verificar; documentar no relatório ao usuário que a sessão pode levar até 5 min para expirar |
 
 ---
 

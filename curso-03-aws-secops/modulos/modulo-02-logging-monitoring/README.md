@@ -175,7 +175,13 @@ O CloudTrail Lake é um data lake gerenciado para consulta de eventos via SQL. E
 
 ### 5 Queries SQL para Segurança
 
+**Por que usamos SQL em vez de CloudWatch Insights:** O CloudTrail Lake armazena eventos em formato colunar otimizado para queries analíticas. Com SQL padrão (ANSI SQL), um analista pode fazer joins entre eventos de múltiplas contas, calcular métricas de baseline, e identificar anomalias que seriam impossíveis com queries regex do CloudWatch Insights. Para o Banco Meridian, isso significa que uma query única pode identificar se a mesma credencial comprometida foi usada em todas as 4 contas simultaneamente.
+
+**Como usar:** Substitua `$EDS_ID` pelo ID do Event Data Store criado no CloudTrail Lake (formato `a1b2c3d4-5678-...`). Você encontra o ID em CloudTrail → Lake → Event data stores.
+
 **Query 1 — Detecção de criação de usuário IAM fora do pipeline aprovado:**
+
+**O que esta query faz:** Detecta criação de usuários IAM por qualquer identidade que não seja o pipeline de provisionamento aprovado do Banco Meridian. Criação de usuário IAM manual (fora do pipeline) pode indicar persistência — o atacante criando um backdoor — ou um funcionário desobedecem o processo aprovado (shadow IT). Ambos são riscos críticos para um banco regulado.
 
 ```sql
 -- Detecta criação de usuários IAM por qualquer entidade que não seja

@@ -106,6 +106,10 @@ ARQUITETURA VAULT — BANCO MERIDIAN
 ### 2.2 Secret Engines
 
 **KV v2 (Key-Value versioned):**
+
+**O que este comando faz:** Instala o Vault, inicia em modo de desenvolvimento (armazenamento em memória, sem TLS, sem autenticação real), habilita o secret engine KV v2 em um path nomeado e demonstra as operações básicas de escrita, leitura, versionamento e rollback de segredos.
+**Por que isso importa:** O KV v2 é o ponto de entrada do Vault — substitui diretamente as variáveis de ambiente e arquivos `.env` hardcoded dos microserviços do Banco Meridian. Com versionamento automático, a equipe pode rastrear quem alterou qual segredo e quando, e reverter para uma versão anterior em caso de configuração incorreta — algo impossível com senhas hardcoded em repositórios.
+
 ```bash
 # Instalar Vault
 # macOS
@@ -158,6 +162,10 @@ vault kv metadata delete bancomeridian/api-pagamentos/config
 ```
 
 **Database Secret Engine (Dynamic Secrets com PostgreSQL):**
+
+**O que este comando faz:** Habilita o secret engine de banco de dados, configura a conexão do Vault com o PostgreSQL usando um usuário administrador dedicado (`vault_manager`), e cria roles que definem quais permissões SQL serão concedidas dinamicamente e por quanto tempo — 1 hora para a API de leitura e 8 horas para o serviço de transações.
+**Por que isso importa:** Este é o coração da solução para o Banco Meridian. Ao invés de ter uma senha estática `BancoMeridian@2024!` sem rotação há 18 meses, cada instância da API agora recebe um usuário PostgreSQL único com expiração de 1 hora. Se um container for comprometido às 14h, o atacante tem credenciais válidas apenas até as 15h — e o Vault já terá gerado novas credenciais para o próximo container. A superfície de ataque de "permanente" passa para "máximo 1 hora".
+
 ```bash
 # --- DATABASE SECRET ENGINE ---
 # Este é o diferencial principal do Vault em relação a KV simples:
@@ -226,6 +234,10 @@ vault lease revoke database/creds/readonly-pagamentos/abc123xyz
 ```
 
 **PKI Secret Engine (CA e Certificados):**
+
+**O que este comando faz:** Configura o Vault como uma Autoridade Certificadora (CA) interna completa — cria a CA raiz, emite e assina uma CA intermediária, define roles de emissão restritas ao domínio `bancomeridian.internal`, e emite certificados TLS com TTL de 24 horas para microsserviços específicos.
+**Por que isso importa:** Para o Banco Meridian implementar mTLS entre microsserviços (exigência crescente para conformidade com BACEN e padrões Zero Trust), cada serviço precisa de um certificado. Com o PKI engine, o ciclo de vida desses certificados é totalmente automatizado — o `api-pagamentos` solicita seu próprio certificado com validade de 24 horas, e o Vault o emite e revoga sem intervenção humana. Isso elimina a gestão manual de certificados que frequentemente resulta em certificados expirados que derrubam serviços em produção.
+
 ```bash
 # --- PKI SECRET ENGINE ---
 # Vault como CA interna: emite certificados TLS/mTLS com TTL configurado
@@ -270,6 +282,10 @@ vault write pki_int/issue/bancomeridian-services \
 ```
 
 **AWS Secret Engine (Dynamic AWS Credentials):**
+
+**O que este comando faz:** Configura o Vault para gerar credenciais AWS temporárias dinamicamente — ao invés de criar um IAM User com chave de acesso permanente, o Vault cria um IAM User temporário com a política especificada, retorna as credenciais, e após o TTL configura o usuário temporário é deletado automaticamente.
+**Por que isso importa:** No Banco Meridian, pipelines de CI/CD e scripts de automação frequentemente usam chaves AWS estáticas (`AKIA...`) que ficam em variáveis de ambiente por anos. Com o AWS Secret Engine, cada execução do pipeline recebe credenciais únicas que expiram em minutos — se uma credencial vazar em logs de CI/CD (acontece com frequência), ela já terá expirado antes que qualquer atacante possa utilizá-la.
+
 ```bash
 # --- AWS SECRET ENGINE ---
 # Vault gera credenciais AWS temporárias com TTL configurado
@@ -304,6 +320,10 @@ vault read aws/creds/s3-readonly
 ```
 
 **SSH Secret Engine:**
+
+**O que este comando faz:** Configura o Vault como emissor de OTPs (One-Time Passwords) para SSH — ao invés de distribuir chaves SSH estáticas para todos os servidores, cada sessão SSH usa uma senha de 16 caracteres válida por 30 minutos para um único acesso a um host específico.
+**Por que isso importa:** Chaves SSH estáticas distribuídas pelos servidores do Banco Meridian são outro vetor de standing access. Se um desenvolvedor deixa a empresa, há 50 servidores onde sua chave pública precisa ser removida manualmente — e frequentemente não é. Com SSH OTP, cada acesso requer uma nova solicitação ao Vault, criando um audit trail completo: quem acessou qual servidor, quando, e com qual justificativa.
+
 ```bash
 # --- SSH SECRET ENGINE (OTP mode) ---
 # Vault como OTP (One-Time Password) para SSH
@@ -326,6 +346,10 @@ vault write ssh/creds/otp-key-role \
 ### 2.3 Auth Methods
 
 **Token Auth (built-in, não recomendado para produção):**
+
+**O que este comando faz:** Cria tokens Vault com política específica e TTL configurado. A variante `orphan` cria tokens que sobrevivem à expiração do token pai, útil para aplicações de longa duração.
+**Por que isso importa:** Token auth é o mecanismo mais simples e o menos seguro para aplicações em produção — um token roubado concede acesso diretamente. No Banco Meridian, tokens só devem ser usados para acesso administrativo humano com MFA, nunca para autenticação de aplicações que devem usar AppRole ou Kubernetes auth.
+
 ```bash
 # Criar token com política específica
 vault token create -policy="api-pagamentos-policy" -ttl="1h"
@@ -335,6 +359,10 @@ vault token create -policy="api-pagamentos-policy" -ttl="24h" -period="24h" -orp
 ```
 
 **AppRole Auth (para aplicações em produção):**
+
+**O que este comando faz:** Habilita o AppRole auth method e cria uma role para a aplicação `api-pagamentos`. O Role ID é público e identifica a aplicação; o Secret ID é efêmero (10 minutos) e é injetado pelo CI/CD no momento do deploy. A combinação dos dois gera um token Vault com as permissões necessárias.
+**Por que isso importa:** O AppRole resolve o "bootstrap problem" de autenticação: como uma aplicação prova sua identidade ao Vault sem já ter uma credencial? A solução é dois fatores — o Role ID (o que a aplicação é, análogo ao username) + o Secret ID efêmero (prova de que está no ambiente correto, injetado pelo CI/CD com TTL de minutos). No Banco Meridian, isso garante que nem mesmo um desenvolvedor com acesso ao código da aplicação consegue autenticar no Vault sem o Secret ID que o CI/CD injeta em tempo de deploy.
+
 ```bash
 # 1. Habilitar AppRole auth method
 vault auth enable approle
@@ -370,6 +398,10 @@ vault kv get bancomeridian/api-pagamentos/config
 ```
 
 **Kubernetes Auth Method:**
+
+**O que este comando faz:** Configura o Vault para aceitar a ServiceAccount token do Kubernetes como prova de identidade. Quando um pod com `serviceAccountName: api-pagamentos-sa` se autentica, o Vault verifica o token com a API do Kubernetes e — se o pod realmente está no namespace `production` — concede as permissões da policy `api-pagamentos-policy`.
+**Por que isso importa:** No Kubernetes do Banco Meridian, cada pod já tem uma identidade nativa (ServiceAccount). O Kubernetes auth elimina a necessidade de gerenciar Role IDs e Secret IDs para pods — o Vault valida a identidade diretamente com a API do cluster. Isso significa zero configuração de credenciais nos containers: o pod "nasce" com acesso aos secrets que precisa, sem hardcoding e sem injeção manual de segredos pelo CI/CD.
+
 ```bash
 # 1. Habilitar Kubernetes auth
 vault auth enable kubernetes
@@ -389,6 +421,10 @@ vault write auth/kubernetes/role/api-pagamentos \
 ```
 
 **AWS IAM Auth:**
+
+**O que este comando faz:** Configura o Vault para aceitar a identidade AWS IAM como prova de autenticação. Uma instância EC2 ou Lambda com a role `api-pagamentos-role` pode se autenticar no Vault usando a mesma identidade IAM que já possui — sem credenciais adicionais.
+**Por que isso importa:** Para workloads rodando em EC2 ou Lambda no Banco Meridian, o AWS IAM auth elimina completamente a necessidade de gerenciar AppRole credentials. A instância "nasce" com uma IAM role que o Vault reconhece e aceita como identidade válida. O resultado é um ambiente onde nenhum secret precisa existir na configuração do workload para que ele acesse outros secrets — o círculo virtuoso do secrets management.
+
 ```bash
 # 1. Habilitar AWS auth
 vault auth enable aws
@@ -407,6 +443,9 @@ vault write auth/aws/role/api-pagamentos-ec2 \
 ```
 
 ### 2.4 Policies — HCL com Path-Based ACLs
+
+**O que este código faz:** Define políticas Vault em HCL (HashiCorp Configuration Language) que especificam quais paths de secrets cada aplicação ou papel pode acessar, com quais capabilities. A política do `api-pagamentos` limita o acesso apenas aos seus próprios secrets; a política do DBA limita ao acesso de banco de dados.
+**Por que isso importa:** As policies são o mecanismo de least privilege do Vault — cada aplicação vê apenas o que precisa. No Banco Meridian, a `api-pagamentos` não consegue ler secrets da `api-compliance` mesmo que ambas estejam autenticadas no mesmo Vault. Essa segmentação garante que um compromisso de uma aplicação não vaza os secrets de outras, e cada acesso a qualquer path é registrado no audit log para evidência de conformidade BACEN.
 
 ```hcl
 # policies/api-pagamentos-policy.hcl
@@ -466,6 +505,9 @@ path "bancomeridian/data/database/*" {
 # Audit obrigatório: qualquer acesso fica registrado no audit log
 ```
 
+**O que este comando faz:** Aplica as políticas HCL no Vault, tornando-as efetivas para qualquer token ou AppRole que as referencie. `vault policy list` e `vault policy read` permitem auditar quais políticas existem e o que cada uma permite.
+**Por que isso importa:** Policies como código — armazenadas em arquivos HCL no repositório Git — permitem ao Banco Meridian submeter mudanças de permissões ao mesmo processo de code review que o código da aplicação. Qualquer alteração de permissão passa por aprovação, gerando um audit trail de quem aprovou cada mudança de acesso.
+
 ```bash
 # Aplicar políticas
 vault policy write api-pagamentos-policy policies/api-pagamentos-policy.hcl
@@ -479,6 +521,9 @@ vault policy read api-pagamentos-policy
 ```
 
 ### 2.5 Lease, Renewal e Revogação
+
+**O que este comando faz:** Gerencia o ciclo de vida dos leases — identificadores de credenciais dinâmicas geradas pelo Vault. Permite listar leases ativos, verificar detalhes, renovar antes da expiração, revogar credenciais individuais e, em casos de incidente, revogar em massa todas as credenciais de uma role com o flag `-prefix`.
+**Por que isso importa:** O `-prefix revoke` é a resposta do Banco Meridian a um incidente de segurança. Se o time de SecOps detectar que a role `readonly-pagamentos` foi comprometida, um único comando revoga instantaneamente todas as credenciais de banco ativas — seja 1 instância ou 500 pods rodando em paralelo. Isso transforma o MTTR (Mean Time to Respond) de "horas de rotação manual coordenada" para "segundos".
 
 ```bash
 # Conceito: toda credencial dinâmica gerada pelo Vault tem um lease_id
@@ -504,6 +549,9 @@ vault write -f database/rotate-root/bancomeridian-postgres
 ```
 
 ### 2.6 High Availability com Raft Integrated Storage
+
+**O que este comando faz:** Define a configuração do cluster Vault com 3 nós usando Raft como backend de storage integrado. Os nós se descobrem automaticamente via `retry_join` e elegem um líder — os outros dois ficam em standby ativo prontos para assumir em menos de 30 segundos.
+**Por que isso importa:** O Vault é infraestrutura crítica do Banco Meridian — se ele cair, nenhuma aplicação consegue obter credenciais e os serviços ficam indisponíveis. Com 3 nós Raft, o cluster tolera a falha de 1 nó sem interrupção (quórum de 2/3). Para conformidade com BACEN 4.893 que exige resiliência de sistemas críticos, o Vault HA é mandatório para ambientes de produção.
 
 ```yaml
 # vault-ha.yaml — Deploy Vault HA no Kubernetes com Raft
@@ -550,6 +598,9 @@ data:
     }
 ```
 
+**O que este comando faz:** Faz o deploy do cluster Vault HA no Kubernetes usando o Helm chart oficial, inicializa o cluster (gerando as unseal keys e o root token), e faz o unseal dos 3 nós usando o esquema Shamir de 5 chaves com threshold de 3.
+**Por que isso importa:** O processo de inicialização gera as unseal keys — o equivalente às chaves do cofre principal do Banco Meridian. Com o esquema 5-of-3, nenhum indivíduo sozinho pode abrir o Vault (previne insider threat) e o cluster ainda funciona se 2 key holders estiverem indisponíveis. As unseal keys devem ser armazenadas em HSM ou cofre físico com acesso controlado e auditado.
+
 ```bash
 # Deploy Vault HA com Helm
 helm repo add hashicorp https://helm.releases.hashicorp.com
@@ -582,6 +633,9 @@ done
 ### 3.1 Vault Agent Injector
 
 O Vault Agent Injector intercepta chamadas de criação de Pods no K8s e injeta automaticamente um sidecar Vault Agent que renderiza templates com os secrets.
+
+**O que este manifesto faz:** Configura um Deployment Kubernetes com annotations do Vault Agent Injector que instruem o mutating webhook a injetar automaticamente um container sidecar `vault-agent` no pod. O sidecar se autentica no Vault via Kubernetes auth, busca as credenciais dinâmicas do banco e as configurações do KV, e as renderiza como arquivos de texto em um volume compartilhado que a aplicação principal lê como variáveis de ambiente.
+**Por que isso importa:** A grande vantagem do Vault Agent Injector é que a aplicação principal `api-pagamentos` não precisa de nenhuma biblioteca do Vault no seu código — ela simplesmente lê variáveis de ambiente normais. Para o Banco Meridian, isso significa que aplicações legadas podem se beneficiar do Vault sem refatoração: basta adicionar as annotations ao Deployment e o sidecar cuida de tudo, incluindo a renovação automática das credenciais antes da expiração do TTL.
 
 ```yaml
 # deployment-com-vault-agent.yaml
@@ -636,6 +690,9 @@ spec:
 
 ESO é a abordagem mais moderna — cria recursos `ExternalSecret` no Kubernetes que o operador converte em Kubernetes `Secret` nativos, sincronizando com o Vault.
 
+**O que este comando faz:** Instala o External Secrets Operator no cluster via Helm. O ESO é um operador Kubernetes que fica em execução contínua, observando recursos `ExternalSecret` e `SecretStore`, e sincronizando automaticamente os secrets do Vault para `Secret` nativos do Kubernetes.
+**Por que isso importa:** O ESO representa a evolução do modelo de integração Vault+K8s — ao invés de um sidecar por pod, existe um único operador central para todo o cluster. Para o Banco Meridian com dezenas de microserviços no Kubernetes, isso significa menos overhead de infraestrutura (sem containers sidecar em cada pod) e uma gestão centralizada de quais aplicações acessam quais secrets.
+
 ```bash
 # Instalar External Secrets Operator
 helm repo add external-secrets https://charts.external-secrets.io
@@ -644,6 +701,9 @@ helm install external-secrets external-secrets/external-secrets \
   --create-namespace \
   --set installCRDs=true
 ```
+
+**O que este manifesto faz:** Define um `SecretStore` que descreve como o ESO se conecta ao Vault (URL, path do KV engine, versão e método de autenticação via ServiceAccount Kubernetes), e um `ExternalSecret` que mapeia secrets específicos do Vault para um `Secret` nativo do Kubernetes, com renovação automática a cada 55 minutos (antes do TTL de 1 hora).
+**Por que isso importa:** Com o ESO configurado, os desenvolvedores do Banco Meridian trabalham com recursos Kubernetes nativos (`Secret`) sem precisar conhecer a API do Vault. A separação de responsabilidades é clara: a equipe de segurança gerencia o Vault e as policies; a equipe de desenvolvimento usa `ExternalSecret` CRDs como qualquer outro recurso K8s. O ESO faz a ponte entre os dois mundos, garantindo que os pods sempre tenham credenciais frescas e válidas.
 
 ```yaml
 # vault-secretstore.yaml — Define a conexão com o Vault
@@ -719,6 +779,9 @@ spec:
 
 ### 4.1 AWS Secrets Manager
 
+**O que este comando faz:** Cria, lê e gerencia secrets no AWS Secrets Manager. O comando de rotação configura uma Lambda function que o Secrets Manager chama automaticamente a cada 30 dias para trocar a senha — incluindo a atualização do banco de dados e todos os sistemas que usam a credencial.
+**Por que isso importa:** Para o Banco Meridian operar exclusivamente na AWS, o Secrets Manager elimina a complexidade operacional do Vault com rotação automática nativa para RDS, Redshift e outros serviços AWS. A integração com CloudTrail fornece auditoria completa de cada acesso — quem leu qual secret, quando, de qual serviço — sem configuração adicional.
+
 ```bash
 # Criar um secret
 aws secretsmanager create-secret \
@@ -767,6 +830,9 @@ aws cloudtrail lookup-events \
 
 ### 4.2 Azure Key Vault
 
+**O que este comando faz:** Cria um Azure Key Vault com proteção por RBAC (em vez do modelo legado de Access Policies), atribui roles granulares a Managed Identities, e gerencia secrets, certificados e chaves criptográficas (CMEK) — incluindo chaves para Customer-Managed Encryption.
+**Por que isso importa:** Para o Banco Meridian com workloads no Azure, o Key Vault com `--enable-rbac-authorization` integra diretamente com o Entra ID, permitindo que Managed Identities (sem nenhuma credencial configurada) acessem secrets de forma transparente. A flag `--enable-purge-protection` é especialmente importante para conformidade: uma vez habilitada, ninguém — nem o CISO — pode deletar permanentemente um secret sem o período de retenção de 90 dias, protegendo evidências em investigações forenses.
+
 ```bash
 # Criar Key Vault
 az keyvault create \
@@ -814,6 +880,9 @@ az keyvault key create \
 ```
 
 ### 4.3 GCP Secret Manager
+
+**O que este comando faz:** Cria, versiona e gerencia secrets no GCP Secret Manager, configura notificações automáticas de rotação via Pub/Sub, e controla o acesso de service accounts via IAM granular.
+**Por que isso importa:** Para workloads do Banco Meridian no GCP, o Secret Manager integra nativamente com Workload Identity Federation — eliminando chaves de conta de serviço em favor de identidades efêmeras. A integração com Cloud Audit Logs fornece rastreabilidade completa de cada acesso a cada versão de cada secret, essencial para demonstrar conformidade com LGPD e BACEN em auditorias.
 
 ```bash
 # Criar secret
@@ -870,6 +939,9 @@ gcloud logging read \
 ---
 
 ## 5. Exemplo Completo: AppRole + Database Engine + K8s Integration
+
+**O que este script faz:** Demonstra o fluxo completo end-to-end — configura o Vault com política, AppRole e database engine; depois simula o comportamento da aplicação autenticando via AppRole, obtendo credenciais dinâmicas do PostgreSQL e conectando ao banco; e ao encerrar, revoga o lease imediatamente sem aguardar o TTL.
+**Por que isso importa:** Este é o cenário real do Banco Meridian: ao invés de `DB_PASSWORD=BancoMeridian@2024!` hardcoded que está em 847 commits do git, a aplicação agora chega no ambiente sem conhecer nenhuma senha — ela aprende o Role ID no código (público), recebe o Secret ID do CI/CD (efêmero, 10 minutos), e troca esses dois tokens por credenciais de banco únicas que expiram em 1 hora. Cada acesso ao banco é auditado no Vault audit log com a identidade da aplicação, o timestamp e o IP de origem.
 
 ```bash
 # ============================================================

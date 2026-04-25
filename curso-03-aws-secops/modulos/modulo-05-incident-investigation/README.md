@@ -337,6 +337,16 @@ def preservar_evidencias_ec2(instance_id: str, incident_id: str, region: str = '
 
 ## 5. Script Python — Isolamento Automático de EC2
 
+**O que este script faz e por que é necessário:** O script `isolar_instancia_ec2` implementa a fase de Contenção do NIST SP 800-61 em código Python reutilizável. Quando uma instância EC2 é comprometida, a ação mais crítica e urgente é impedir que o atacante continue operando — mas sem destruir as evidências forenses. Este script executa as seguintes ações em sequência:
+
+1. **Coleta de informações** — captura o estado atual da instância (VPC, Security Groups, volumes) antes de qualquer modificação
+2. **Preservação de evidências** — cria snapshots de todos os volumes EBS antes de isolar, garantindo que o estado do sistema de arquivos no momento do comprometimento seja preservado para análise posterior
+3. **Isolamento via Security Group** — cria um SG de quarentena sem regras de entrada ou saída, move a instância para esse SG (não para a instância)
+4. **Documentação automática** — adiciona tags de quarentena com o ID do incidente, tornando a instância rastreável no inventário
+5. **Notificação** — envia alerta via SNS com o relatório completo do isolamento
+
+**Por que isolamento via SG em vez de stop/terminate:** Parar a instância destrói o estado de memória (processos em execução, conexões de rede ativas, variáveis de ambiente), que pode conter evidências forenses críticas. Isolar via Security Group mantém a instância rodando — preservando o estado completo — mas bloqueia toda comunicação, impedindo o atacante de continuar operando.
+
 ```python
 import boto3
 import json
