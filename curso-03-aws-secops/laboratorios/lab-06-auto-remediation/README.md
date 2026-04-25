@@ -7,7 +7,60 @@
 
 ---
 
-## Contexto
+## Seção 0 — Contexto Situacional e Situação Inicial
+
+### Contexto Situacional
+
+Após o incidente investigado no Lab 05 — onde a instância comprometida ficou ativa por 2 horas antes de qualquer contenção — o CISO emitiu uma diretriz: o Banco Meridian não pode mais depender de intervenção humana para contenção inicial de incidentes. O MTTR (Mean Time to Respond) atual é de 2h09m. A meta estabelecida é de menos de 5 minutos para contenção de findings HIGH do GuardDuty.
+
+A solução é automação de resposta: EventBridge captura o finding, aciona uma Lambda function que executa a contenção (revogação de credenciais, isolamento de instância, bloqueio de IP), e envia notificação ao time de segurança — tudo em segundos, sem intervenção humana.
+
+### Situação Inicial
+
+É segunda-feira, 21 de abril de 2026, 10h00. Mariana abre a reunião de planejamento com os números do incidente de abril:
+
+```
+MÉTRICAS DE RESPOSTA A INCIDENTE — ANTES DA AUTOMAÇÃO
+─────────────────────────────────────────────────────────────
+ MTTR atual:             2h09m  (meta: < 5 minutos)
+ Findings HIGH não atendidos em < 30min:  67%
+ Tentativas de credential exfiltration:   3 (último mês)
+ Instâncias isoladas manualmente:         1 (Lab 05)
+ Tempo médio para isolamento manual:      38 minutos
+─────────────────────────────────────────────────────────────
+ Estado das automações de IR:   NENHUMA IMPLEMENTADA
+ EventBridge rules ativas:      0
+ Lambda functions de IR:        0
+─────────────────────────────────────────────────────────────
+```
+
+> "Após o incidente do Lab 05, ficou claro que confiar apenas em intervenção humana para contenção inicial não é aceitável. Um atacante com credenciais de instância tem menos de 5 minutos para causar dano irreversível. Nossa resposta de 2 horas é completamente inadequada para ameaças modernas."
+
+Carlos complementa:
+
+> "O GuardDuty está gerando findings mas não há nenhuma ação automática. Cada finding HIGH fica esperando alguém ver no console. Precisamos de automação que contenha o dano enquanto a equipe faz a investigação completa."
+
+Você recebe três tickets simultâneos:
+- **SECOPS-2061:** Automação para desabilitar credencial IAM comprometida (SLA: 5 min)
+- **SECOPS-2062:** Automação para isolar instância EC2 com C2 detectado (SLA: 5 min)
+- **SECOPS-2063:** Automação para bloquear IP malicioso no WAF automaticamente (SLA: 2 min)
+
+---
+
+### Problema Identificado
+
+As três automações resolvem três vetores diferentes de ataque identificados no histórico de incidentes do Banco Meridian:
+
+| Automação | Vetor de Ataque | Finding Trigger | Tempo Atual de Resposta | Meta |
+|---|---|---|---|---|
+| 1 — Desabilitar Chave IAM | Credencial longa duração comprometida | `UnauthorizedAccess:IAMUser/MaliciousIPCaller` | 38 min | < 2 min |
+| 2 — Isolar EC2 | Instância com backdoor/C2 | `Backdoor:EC2/C&CActivity.B` (HIGH) | 38 min | < 3 min |
+| 3 — Bloquear IP no WAF | IP malicioso atacando aplicações web | `Recon:EC2/PortProbeUnprotectedPort` + IP em feed ameaças | Manual (indefinido) | < 1 min |
+
+**Mapeamento MITRE ATT&CK:**
+- **T1078.004** (Valid Accounts: Cloud Accounts) → Automação 1 bloqueia a credencial comprometida
+- **T1071** (Application Layer Protocol: Web Shell) → Automação 2 isola a instância com backdoor
+- **T1190** (Exploit Public-Facing Application) → Automação 3 bloqueia o IP atacante no WAF
 
 Você vai implementar 3 automações de resposta a incidentes completas para o Banco Meridian:
 
@@ -717,13 +770,104 @@ echo "Cleanup concluído"
 
 ---
 
-## Gabarito — Verificação Final
+## Seção 9 — Gabarito Completo com Raciocínio
 
-| Automação | Teste | Resultado Esperado |
-|---|---|---|
-| 1 — Disable IAM Key | Invocar Lambda com access_key_id e user_name | Chave com status Inactive + SNS enviado |
-| 2 — Isolate EC2 | GuardDuty sample finding HIGH de EC2 | Instância com tag Quarantine=true + SG quarentena criado |
-| 3 — Block WAF IP | Invocar Lambda com remote_ip | IP adicionado ao WAF IP Set + SNS enviado |
-| Alarms | CloudWatch alarms | 3 alarms configurados para erros das Lambdas |
-| DLQ | SQS DLQ | 1 DLQ configurada para todas as Lambdas |
-| EventBridge Rules | 3 rules | Rules em estado ENABLED na região sa-east-1 |
+### Automação 1 — Gabarito: Desabilitar Chave IAM Comprometida
+
+**Por que esta é a resposta correta:** A função Lambda `MeridianIR-DisableIAMKey` implementa o princípio de "contenção antes de investigação". Ao receber o finding, ela:
+1. Extrai o `access_key_id` do campo `service.action.awsApiCallAction.remoteAccountDetails.affectedResources`
+2. Chama `iam:UpdateAccessKey` com `Status=Inactive` — não exclui (preserva evidências)
+3. Adiciona tag `Quarantine=true` no usuário — sinaliza para o time de IR
+4. Envia notificação SNS com todos os detalhes para investigação humana
+
+**Por que inativar em vez de excluir:** Excluir a chave destrói a evidência do `AccessKeyId` usado pelo atacante. Ao inativar, preservamos o `access_key_id` no CloudTrail, que pode ser usado para correlacionar todas as ações feitas com essa chave durante o comprometimento.
+
+**Verificação correta:**
+```bash
+aws iam get-access-key-last-used --access-key-id <KEY_ID>
+# Deve mostrar: "AccessKeyLastUsed": {"ServiceName": "Disabled"}
+
+aws iam list-access-keys --user-name <USERNAME>
+# Deve mostrar: "Status": "Inactive"
+```
+
+**Erros comuns neste passo:**
+- Lambda timeout: a ação `UpdateAccessKey` pode demorar alguns segundos para propagar — configurar timeout de no mínimo 30 segundos
+- Role sem permissão `iam:UpdateAccessKey`: o mais comum erro em produção — verificar a role da Lambda antes de qualquer teste
+- Event pattern errado no EventBridge: usar `aws.guardduty` como source e `GuardDuty Finding` como detail-type — não `aws.iam`
+
+---
+
+### Automação 2 — Gabarito: Isolar EC2 Comprometida
+
+**Por que esta é a resposta correta:** O isolamento via Security Group (em vez de stop/terminate) preserva o estado da instância para análise forense. Após o isolamento:
+- A instância continua rodando — logs em memória e processos em execução são preservados
+- Toda comunicação é bloqueada (sem ingress, sem egress) — o atacante perde acesso
+- O estado do sistema de arquivos não muda — evidências forenses intactas
+
+**Sequência correta na Lambda:**
+```python
+# 1. CRIAR Security Group de quarentena com zero regras (vazio = deny-all implícito)
+sg_id = ec2.create_security_group(GroupName=f'QUARANTINE-{instance_id}-{timestamp}')
+
+# 2. CRIAR snapshot ANTES de modificar o SG (preservar estado pre-isolamento)
+ec2.create_snapshot(VolumeId=volume_id, Description=f'IR-pre-isolation-{timestamp}')
+
+# 3. APLICAR o SG de quarentena
+ec2.modify_instance_attribute(InstanceId=instance_id, Groups=[sg_id])
+
+# 4. ADICIONAR tag de quarentena (visibilidade para outros engenheiros)
+ec2.create_tags(Resources=[instance_id], Tags=[{'Key': 'Quarantine', 'Value': 'true'}])
+
+# 5. NOTIFICAR time via SNS
+```
+
+**Por que a ordem importa:** O snapshot (passo 2) deve ser criado ANTES do isolamento (passo 3). Se criado depois, o snapshot reflete o estado pós-isolamento — não o estado durante o comprometimento, que é o mais valioso para forense.
+
+**Verificação correta:**
+```bash
+aws ec2 describe-instances \
+  --instance-ids $INSTANCE_ID \
+  --query 'Reservations[0].Instances[0].{SG:SecurityGroups,Tags:Tags}'
+# Deve mostrar SG de quarentena e Tag Quarantine=true
+```
+
+**Erros comuns:**
+- Usar `stop-instances` em vez de isolar via SG: para a instância, destruindo estado em memória e logs de processos — evidências perdidas
+- Esquecer de verificar se a instância já está quarentenada (idempotência): se a Lambda for invocada duas vezes para o mesmo finding, criará dois SGs de quarentena — verificar tags antes de agir
+
+---
+
+### Automação 3 — Gabarito: Bloquear IP no WAF
+
+**Por que esta é a resposta correta:** O bloqueio no WAF IP Set (em vez de NACL) é preferível porque:
+1. WAF IP Sets são atualizáveis dinamicamente sem impacto nas conexões existentes
+2. WAF opera na camada de aplicação (L7) — pode bloquear por IP E por outras características (User-Agent, headers)
+3. WAF tem capacidade de 10.000 IPs por IP Set — escalável para feeds de Threat Intelligence
+4. NACLs têm limite de 20 regras por subnet — rapidamente esgotado em bloqueios dinâmicos
+
+**Verificação correta:**
+```bash
+aws wafv2 get-ip-set \
+  --name MeridianBlockedIPs \
+  --scope REGIONAL \
+  --id $IPSET_ID \
+  --region sa-east-1 \
+  --query 'IPSet.Addresses'
+# O IP bloqueado deve estar na lista
+```
+
+---
+
+### Verificação Final — Checklist de Aprovação
+
+| Automação | Teste | Resultado Correto | Evidência |
+|---|---|---|---|
+| 1 — Disable IAM Key | Invocar Lambda com access_key_id e user_name | Status `Inactive` + tag `Quarantine=true` + SNS enviado | `iam:GetAccessKey` mostrando Inactive |
+| 2 — Isolate EC2 | GuardDuty sample finding HIGH de EC2 | SG quarentena sem regras + tag `Quarantine=true` + snapshot criado | `ec2:DescribeInstances` mostrando novo SG |
+| 3 — Block WAF IP | Invocar Lambda com remote_ip | IP na lista do WAF IP Set + SNS enviado | `wafv2:GetIPSet` mostrando o IP na lista |
+| Alarms | CloudWatch alarms | 3 alarms configurados para erros das Lambdas | `cloudwatch:DescribeAlarms` |
+| DLQ | SQS DLQ | 1 DLQ vinculada às 3 Lambdas | `lambda:GetFunctionConfiguration` |
+| EventBridge Rules | 3 rules | Rules em estado ENABLED na região sa-east-1 | `events:ListRules` |
+
+**Meta de MTTR:** Após a implementação das 3 automações, o MTTR de contenção deve cair de 2h09m para menos de 3 minutos. Medir executando os testes com cronômetro — tempo desde a invocação do Lambda até a verificação do resultado da contenção.

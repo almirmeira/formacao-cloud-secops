@@ -23,12 +23,34 @@ Você foi designado para: (1) conectar a conta AWS ao Defender for Cloud para vi
 
 ## Seção 2 — Situação Inicial
 
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  PORTAL DEFENDER FOR CLOUD — BANCO MERIDIAN — SEGUNDA, 09:00            │
+│                                                                          │
+│  SECURE SCORE AZURE:    65%   ████████████░░░░░░░ (linha de base)       │
+│  RECURSOS AVALIADOS:    142   (VMs, Storage, SQL, Key Vaults)           │
+│  RECOMMENDATIONS:       89    (21 críticas, 35 altas, 33 médias)        │
+│  DEFENDER PLANS ATIVOS: 0/8  ████████████████████ (todos desabilitados) │
+│  STANDARDS COMPLIANCE:  1/3  (apenas Cloud Security Benchmark ativo)    │
+│  AWS CONECTADA:         NÃO  ████████████████████ (zero visibilidade)   │
+│                                                                          │
+│  ALERTA DA AUDITORIA: 30 dias para apresentar relatório BACEN           │
+└──────────────────────────────────────────────────────────────────────────┘
+
+"Recebi do board a aprovação do projeto de compliance BACEN 4.893 e PCI DSS.
+ Temos 30 dias para apresentar evidências. O auditor vai perguntar especificamente
+ sobre a conta AWS — precisamos ter visibilidade multi-cloud. Além disso, alguém
+ precisa remediar os 21 findings críticos antes que virem manchete."
+ — Felipe Andrade, CISO Interino do Banco Meridian (turno de crise)
+```
+
 **Estado do ambiente**:
 - Subscription Azure: Banco-Meridian-Sandbox (com Defender for Cloud habilitado)
 - Conta AWS de simulação: fornecida pelo ambiente de lab (ID: `123456789012`)
 - Secure Score Azure atual: ~65% (com vários findings abertos do ambiente de lab)
 - Standards habilitados: apenas Microsoft Cloud Security Benchmark (padrão)
-- Defender Plans: todos desabilitados
+- Defender Plans: **TODOS desabilitados** — o Defender for Cloud pode ver recursos mas não os protege ativamente
+- Visibilidade AWS: **ZERO** — 6 meses de operação AWS sem auditoria de segurança
 
 ---
 
@@ -100,8 +122,12 @@ Get-AzSecurityPricing | Select-Object Name, PricingTier |
 
 **Resultado esperado**: 4 plans com PricingTier = "Standard".
 
+**Por que confirma que funcionou:** O PowerShell retornando 4 linhas com `PricingTier = "Standard"` confirma que os plans foram habilitados com sucesso. Mas a confirmação definitiva vem 30 minutos depois, quando o Defender for Cloud começa a gerar os primeiros alertas de segurança para os recursos cobertos. Execute `Get-AzSecurityAlert | Sort-Object StartTimeUtc -Descending | Select-Object -First 5` para verificar os primeiros alertas gerados pelos Defender Plans recém-habilitados.
+
 **Troubleshooting**:
 - Se aparecer erro de "registration required": executar `Register-AzResourceProvider -ProviderNamespace Microsoft.Security`
+- Se os planos não aparecerem após 5 minutos: verificar se a conta tem papel de **Security Admin** na subscription (não apenas Contributor)
+- Se o custo estimado parecer alto: o custo real depende do número de recursos — para o ambiente de lab com poucos recursos, será mínimo
 
 ---
 
@@ -437,6 +463,32 @@ SecurityRecommendation
 | project Total, Healthy, Unhealthy, ComplianceRate
 // Esperado: ComplianceRate >= 65%
 ```
+
+### Como Interpretar os Resultados de Cada Passo — Por que Confirma que Funcionou
+
+**Passo 1 (Defender Plans):** O PowerShell retornando `PricingTier = "Standard"` para os 4 planos confirma a habilitação. A confirmação operacional vem em 30-60 minutos, quando o Defender for Cloud começa a gerar alertas para atividades suspeitas nos recursos cobertos. Um alerta de "Suspicious Activity" ou "Brute Force Attack" indica que o sensor está funcionando.
+
+**Passo 3 (AWS Connector):** O conector está corretamente configurado quando o painel do Defender for Cloud exibe uma segunda linha em "Environment settings" com o nome "bancomeridian-aws" e status "Connected". A contagem de recursos AWS (ex.: "47 resources") confirma que o agentless scanning está funcionando. Se aparecer "0 resources", o IAM role da AWS provavelmente não tem as permissões corretas — verifique o CloudFormation stack implantado.
+
+**Passos 4-5 (Standards BACEN e PCI):** Os standards aparecem em "Regulatory compliance" com status inicial (geralmente 40-60% — isso é normal para um ambiente novo). O importante é que aparecem na lista, não que estejam 100% compliant — compliance 100% seria suspeito, pois indica que algumas avaliações não estão rodando.
+
+**Passo 7 (JIT):** O teste de JIT é a verificação mais importante: tente conectar via RDP diretamente no IP da VM sem solicitar acesso JIT. A conexão deve falhar (timeout). Depois, solicite acesso JIT, aguarde a aprovação automática e tente novamente — deve funcionar. Isso confirma que o controle está realmente ativo, não apenas configurado no papel.
+
+**Passo 8 (Storage):** Execute no Cloud Shell após a remediação:
+```powershell
+Get-AzStorageAccount -ResourceGroupName "rg-meridian-secops" | Select-Object StorageAccountName, AllowBlobPublicAccess
+```
+Cada storage deve retornar `AllowBlobPublicAccess = False`. Se algum retornar `True` ou vazio, a remediação não foi aplicada a essa storage account específica.
+
+### Erros Comuns e Como Identificar
+
+| Problema | Sintoma | Solução |
+|:---------|:--------|:--------|
+| AWS Connector sem recursos | "0 resources" em Environment settings | Verificar se o IAM Role tem a permissão `SecurityAudit` managed policy; re-rodar o CloudFormation template |
+| Secure Score não atualiza após remediação | Score permanece em 65% após 2h | O Secure Score tem latência de até 8h para atualizar — confirmar via PowerShell `Get-AzSecurityCompliance` em vez de confiar no portal |
+| Standard BACEN não aparece | Marketplace mostra "preview" ou "not available" | Procurar por "Brazil" nos standards do portal ou usar o alias `azure-security-benchmark-bacen` |
+| JIT não bloqueia acesso | VM ainda acessível sem JIT request | NSG da VM tem uma regra separada Allow para RDP/SSH que substitui o JIT — remover a regra de Allow permanente |
+| Audit SQL falha | Erro 403 ao habilitar auditoria | A conta precisa de papel de `SQL Security Manager` no servidor SQL além de Contributor |
 
 ### Relatório de Compliance — Estrutura do PDF para Auditor BACEN
 
